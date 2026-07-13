@@ -1,9 +1,10 @@
 __pycache__/
 *.py[cod]
 .venv/
+wan_models
 wan_models/
+checkpoints
 checkpoints/
 videos/
 out/
 assets/
-
