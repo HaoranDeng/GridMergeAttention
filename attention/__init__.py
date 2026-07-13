@@ -1,8 +1,8 @@
 from .core import attention, flash_attention
-from .monarch import monarch_attn
+from .token_merging import token_merging_attn
 
 __all__ = [
     "attention",
     "flash_attention",
-    "monarch_attn",
+    "token_merging_attn",
 ]

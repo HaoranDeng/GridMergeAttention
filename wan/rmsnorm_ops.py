@@ -13,7 +13,7 @@ import torch
 
 from ._rocm_runtime import is_rocm
 
-_USE_TORCH = os.environ.get("MONARCH_FORCE_TORCH_RMSNORM", "") == "1"
+_USE_TORCH = os.environ.get("TOKEN_MERGING_FORCE_TORCH_RMSNORM", "") == "1"
 
 
 def _rmsnorm_torch(

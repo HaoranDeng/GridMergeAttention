@@ -13,6 +13,5 @@ warp_denoising_step: true
 model_kwargs:
   model_name: Wan2.1-T2V-1.3B
   timestep_shift: 5.0
-monarch_args:
+token_merging_args:
   enable: false
-

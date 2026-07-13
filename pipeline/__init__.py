@@ -1,4 +1,3 @@
-from .monarch_wan import MonarchWanPipeline
+from .token_merging_wan import TokenMergingWanPipeline
 
-__all__ = ["MonarchWanPipeline"]
-
+__all__ = ["TokenMergingWanPipeline"]

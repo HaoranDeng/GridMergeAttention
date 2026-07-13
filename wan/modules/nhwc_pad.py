@@ -105,7 +105,7 @@ def _cat_pad_ndhwc_kernel(
     ptr_y = y_ptr + b * yB + d_out * yD + h_out * yH + w_out * yW + c_out * yC
     tl.store(ptr_y, out.to(y_ptr.dtype.element_ty), mask=inb)
 
-@torch.library.custom_op("monarch_rt::cat_pad_ndhwc", mutates_args=("y",))
+@torch.library.custom_op("token_merging::cat_pad_ndhwc", mutates_args=("y",))
 def cat_pad_ndhwc_kernel(
     x_: torch.Tensor, cache_: torch.Tensor, y: torch.Tensor,
     B: int, Dx: int, Dc: int, H: int, W: int, C: int,

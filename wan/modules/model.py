@@ -12,7 +12,7 @@ from einops import repeat
 from ..rmsnorm_ops import rmsnorm
 from .._rocm_runtime import is_rocm
 
-from attention import flash_attention, monarch_attn
+from attention import flash_attention, token_merging_attn
 
 __all__ = ['WanModel']
 
@@ -21,7 +21,7 @@ _FIRST_QKV_SAVED = False
 
 def maybe_save_first_attention_qkv(q, k, v, tag):
     global _FIRST_QKV_SAVED
-    path = os.environ.get("MONARCHRT_SAVE_FIRST_QKV_PATH")
+    path = os.environ.get("TOKEN_MERGING_SAVE_FIRST_QKV_PATH")
     if _FIRST_QKV_SAVED or not path:
         return
     if dist.is_initialized() and dist.get_rank() != 0:
@@ -39,7 +39,7 @@ def maybe_save_first_attention_qkv(q, k, v, tag):
     import numpy as np
     np.savez(path, **payload)
     print(f"[qkv_capture] saved first attention q/k/v to {path} tag={tag} shape={tuple(q.shape)}")
-    if os.environ.get("MONARCHRT_EXIT_AFTER_QKV_SAVE", "").lower() in {"1", "true", "yes"}:
+    if os.environ.get("TOKEN_MERGING_EXIT_AFTER_QKV_SAVE", "").lower() in {"1", "true", "yes"}:
         raise SystemExit(0)
 
 
@@ -233,12 +233,12 @@ class WanSelfAttention(nn.Module):
         self.qk_norm = qk_norm
         self.eps = eps
 
-        self.enable_monarch = False
-        self.monarch_h_reduce = 1
-        self.monarch_w_reduce = 1
-        self.monarch_f_tied = 1
-        self.monarch_q_init = None
-        self.monarch_query_outer_chunk = None
+        self.enable_token_merging = False
+        self.token_merging_h_reduce = 1
+        self.token_merging_w_reduce = 1
+        self.token_merging_f_tied = 1
+        self.token_merging_q_init = None
+        self.token_merging_query_outer_chunk = None
 
         # layers
         self.q = nn.Linear(dim, dim)
@@ -274,21 +274,21 @@ class WanSelfAttention(nn.Module):
         # roped_query/roped_key keep [batch, sequence, head, head_dim].
         maybe_save_first_attention_qkv(roped_query, roped_key, v, "wan_self_attn")
 
-        if self.enable_monarch:
+        if self.enable_token_merging:
             f, h, w = grid_size
             b, s, _, d = q.shape
-            assert f % self.monarch_f_tied == 0 and h % self.monarch_h_reduce == 0 and w % self.monarch_w_reduce == 0
-            x = monarch_attn(
+            assert f % self.token_merging_f_tied == 0 and h % self.token_merging_h_reduce == 0 and w % self.token_merging_w_reduce == 0
+            x = token_merging_attn(
                 roped_query,
                 roped_key,
                 v,
-                self.monarch_f_tied,
-                self.monarch_h_reduce,
-                self.monarch_w_reduce,
+                self.token_merging_f_tied,
+                self.token_merging_h_reduce,
+                self.token_merging_w_reduce,
                 h,
                 w,
-                q_init=self.monarch_q_init,
-                query_outer_chunk=self.monarch_query_outer_chunk,
+                q_init=self.token_merging_q_init,
+                query_outer_chunk=self.token_merging_query_outer_chunk,
             )
         else:
             x = flash_attention(
@@ -720,7 +720,7 @@ class WanModel(ModelMixin, ConfigMixin):
         self.cross_attn_norm = cross_attn_norm
         self.eps = eps
         self.local_attn_size = 21
-        self._monarch_args = {}
+        self._token_merging_args = {}
 
         # embeddings
         self.patch_embedding = nn.Conv3d(
@@ -761,12 +761,12 @@ class WanModel(ModelMixin, ConfigMixin):
         self.gradient_checkpointing = False
     
     @property
-    def monarch_args(self):
-        return self._monarch_args
-    
-    @monarch_args.setter
-    def monarch_args(self, args: dict):
-        self._monarch_args = args
+    def token_merging_args(self):
+        return self._token_merging_args
+
+    @token_merging_args.setter
+    def token_merging_args(self, args: dict):
+        self._token_merging_args = args
         enable = args.get("enable", False)
         f_tied = args.get("f_tied", 1)
         h_reduce = args.get("h_reduce", 1)
@@ -775,12 +775,12 @@ class WanModel(ModelMixin, ConfigMixin):
         query_outer_chunk = args.get("query_outer_chunk", None)
 
         for block in self.blocks:
-            block.self_attn.enable_monarch = enable
-            block.self_attn.monarch_f_tied = f_tied
-            block.self_attn.monarch_h_reduce = h_reduce
-            block.self_attn.monarch_w_reduce = w_reduce
-            block.self_attn.monarch_q_init = q_init
-            block.self_attn.monarch_query_outer_chunk = query_outer_chunk
+            block.self_attn.enable_token_merging = enable
+            block.self_attn.token_merging_f_tied = f_tied
+            block.self_attn.token_merging_h_reduce = h_reduce
+            block.self_attn.token_merging_w_reduce = w_reduce
+            block.self_attn.token_merging_q_init = q_init
+            block.self_attn.token_merging_query_outer_chunk = query_outer_chunk
 
     def _set_gradient_checkpointing(self, module, value=False):
         self.gradient_checkpointing = value

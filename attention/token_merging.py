@@ -21,7 +21,7 @@ def _select_merge_queries(q, key_rows, q_init):
     raise ValueError(f"unsupported q_init={q_init!r}; expected mean, 1st, or ith.")
 
 
-def _to_monarch_blocks(x, f_tied, h_reduce, w_reduce, height, width):
+def _to_token_merging_blocks(x, f_tied, h_reduce, w_reduce, height, width):
     """[B, F*H*W, heads, dim] -> [B, outer, row, col, heads, dim]."""
     batch, seq_len, heads, dim = x.shape
     if height % h_reduce or width % w_reduce:
@@ -51,7 +51,7 @@ def _to_monarch_blocks(x, f_tied, h_reduce, w_reduce, height, width):
     ).contiguous()
 
 
-def _from_monarch_blocks(x, f_tied, h_reduce, w_reduce):
+def _from_token_merging_blocks(x, f_tied, h_reduce, w_reduce):
     """[B, outer, row, col, heads, dim] -> [B, F*H*W, heads, dim]."""
     return rearrange(
         x,
@@ -75,7 +75,7 @@ def _merge_key_column_tokens(merge_query, k, v):
     merged_values = torch.einsum("bhafkjl,bfklhe->bafjkhe", merge_weights, v)
 
     # Correction term from the merge softmax normalizer. It keeps this rewrite
-    # exactly equivalent to the previous one-step Monarch implementation.
+    # exactly equivalent to the pre-rename one-step implementation.
     merge_log_z = torch.logsumexp(merge_logits, dim=-1, keepdim=True)
     routing_bias = (
         merge_weights * (merge_logits - merge_log_z)
@@ -100,7 +100,7 @@ def _route_queries_to_merged_tokens(q, merged_keys, routing_bias, key_outer, key
 def _one_step_token_merging_chunk(q, k, v, scale, q_init):
     # q:   [B, A, I, J, H, D] = [batch, query_outer, query_row, query_column, head, dim]
     # k/v: [B, F, K, L, H, D] = [batch, key_outer, key_row, key_column, head, dim]
-    # Default 480p/81-frame Wan after Monarch rearrange:
+    # Default 480p/81-frame Wan after token-merging rearrange:
     #   q:   [B, 21, 30, 52, H, D]
     #   k/v: [B, 21, 30, 52, H, D]
     #
@@ -128,7 +128,7 @@ def _one_step_token_merging_chunk(q, k, v, scale, q_init):
 
 
 def _token_merging_attention(q, k, v, scale, query_outer_chunk, q_init):
-    # q/k/v are already Monarch blocks:
+    # q/k/v are already token-merging blocks:
     #   q:   [B, query_outer, query_row, query_column, head, dim]
     #   k/v: [B, key_outer, key_row, key_column, head, dim]
     out = torch.empty(
@@ -154,7 +154,7 @@ def _token_merging_attention(q, k, v, scale, query_outer_chunk, q_init):
     return out
 
 
-def monarch_attn(
+def token_merging_attn(
     q,
     k,
     v,
@@ -167,23 +167,23 @@ def monarch_attn(
     q_init=None,
     query_outer_chunk=None,
 ):
-    """One-step Monarch self-attention written as token merging plus routing."""
+    """One-step token-merging attention for Wan video tokens."""
     # Incoming q/k/v from Wan self-attention:
     #   q/k/v: [batch, sequence, head, dim]
     # Default 480p/81-frame Wan:
     #   sequence = frame * height * width = 21 * 30 * 52 = 32760.
-    # After _to_monarch_blocks:
+    # After _to_token_merging_blocks:
     #   q/k/v: [batch, 21, 30, 52, head, dim]
     if q.size(1) != k.size(1) or k.size(1) != v.size(1):
-        raise ValueError("Monarch attention expects self-attention q/k/v lengths to match.")
+        raise ValueError("token-merging attention expects self-attention q/k/v lengths to match.")
 
     if sm_scale is None:
         sm_scale = q.size(-1) ** -0.5
     query_outer_chunk = max(1, int(query_outer_chunk or 1))
 
-    q_blocks = _to_monarch_blocks(q, f_tied, h_reduce, w_reduce, h, w)
-    k_blocks = _to_monarch_blocks(k, f_tied, h_reduce, w_reduce, h, w)
-    v_blocks = _to_monarch_blocks(v, f_tied, h_reduce, w_reduce, h, w)
+    q_blocks = _to_token_merging_blocks(q, f_tied, h_reduce, w_reduce, h, w)
+    k_blocks = _to_token_merging_blocks(k, f_tied, h_reduce, w_reduce, h, w)
+    v_blocks = _to_token_merging_blocks(v, f_tied, h_reduce, w_reduce, h, w)
 
     out = _token_merging_attention(
         q_blocks,
@@ -193,7 +193,7 @@ def monarch_attn(
         query_outer_chunk=query_outer_chunk,
         q_init=q_init,
     )
-    return _from_monarch_blocks(out, f_tied, h_reduce, w_reduce)
+    return _from_token_merging_blocks(out, f_tied, h_reduce, w_reduce)
 
 
-__all__ = ["monarch_attn"]
+__all__ = ["token_merging_attn"]

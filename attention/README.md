@@ -8,8 +8,8 @@ q, k, v: [batch, sequence, head, dim]
 out:     [batch, sequence, head, dim]
 ```
 
-`monarch.py` is the one-step MonarchAttention path, written in a token-merging
-style. For default 480p/81-frame Wan generation, the sequence is rearranged into:
+`token_merging.py` is the one-step token-merging attention path. For default
+480p/81-frame Wan generation, the sequence is rearranged into:
 
 ```text
 q: [batch, query_outer=21, query_row=30, query_column=52, head, dim]

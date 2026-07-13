@@ -5,8 +5,8 @@ import torch
 from utils.wan_wrapper import WanDiffusionWrapper, WanTextEncoder, WanVAEWrapper
 
 
-class MonarchWanPipeline(torch.nn.Module):
-    """Few-step Wan2.1 text-to-video pipeline with optional Monarch self-attention."""
+class TokenMergingWanPipeline(torch.nn.Module):
+    """Few-step Wan2.1 text-to-video pipeline with optional token-merging attention."""
 
     def __init__(self, args, device):
         super().__init__()
@@ -17,7 +17,7 @@ class MonarchWanPipeline(torch.nn.Module):
             **model_kwargs,
             image_or_video_shape=image_or_video_shape,
         )
-        self.generator.model.monarch_args = dict(getattr(args, "monarch_args", {}))
+        self.generator.model.token_merging_args = dict(getattr(args, "token_merging_args", {}))
         self.text_encoder = WanTextEncoder(
             model_name=model_kwargs.get("model_name", "Wan2.1-T2V-1.3B"),
             model_root=model_kwargs.get("model_root", None),
@@ -70,4 +70,3 @@ class MonarchWanPipeline(torch.nn.Module):
         if return_latents:
             return video, pred_image_or_video
         return video
-

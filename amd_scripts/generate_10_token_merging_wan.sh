@@ -21,12 +21,13 @@ elif [ -f "${HOME}/miniconda3/etc/profile.d/conda.sh" ]; then
   source "${HOME}/miniconda3/etc/profile.d/conda.sh"
 fi
 
-conda activate monarch_rt
+CONDA_ENV="${CONDA_ENV:?Set CONDA_ENV to the environment with torch/Wan dependencies.}"
+conda activate "${CONDA_ENV}"
 
 REPO_DIR="${REPO_DIR:-/home1/denghaoran/workspace/training-free-videogen}"
-export WAN_MODEL_ROOT="${WAN_MODEL_ROOT:-/home1/denghaoran/workspace/MonarchRT/wan_models}"
-CHECKPOINT="${CHECKPOINT:-/work1/jasoncong/denghaoran/MonarchRT/checkpoints/self_forcing_dmd.pt}"
-OUTPUT_DIR="${OUTPUT_DIR:-videos/monarch_wan}"
+export WAN_MODEL_ROOT="${WAN_MODEL_ROOT:-${REPO_DIR}/wan_models}"
+CHECKPOINT="${CHECKPOINT:-${REPO_DIR}/checkpoints/self_forcing_dmd.pt}"
+OUTPUT_DIR="${OUTPUT_DIR:-videos/token_merging_wan}"
 
 cd "${REPO_DIR}"
 mkdir -p out "${OUTPUT_DIR}"
@@ -40,7 +41,7 @@ mkdir -p "${MIOPEN_USER_DB_PATH}" "${MIOPEN_CUSTOM_CACHE_DIR}"
 export PYTHONPATH="${PWD}:${PYTHONPATH:-}"
 
 python generate.py \
-  --config configs/monarch_wan_fewstep.yaml \
+  --config configs/token_merging_wan_fewstep.yaml \
   --checkpoint "${CHECKPOINT}" \
   --prompt_path prompts/MovieGenVideoBench_extended.txt \
   --output_dir "${OUTPUT_DIR}" \

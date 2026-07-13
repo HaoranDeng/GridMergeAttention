@@ -6,16 +6,16 @@ import torch
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
-from pipeline import MonarchWanPipeline
+from pipeline import TokenMergingWanPipeline
 from utils.misc import save_video, set_seed
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Generate videos with Wan2.1 + MonarchAttention.")
-    parser.add_argument("--config", default="configs/monarch_wan_fewstep.yaml")
+    parser = argparse.ArgumentParser(description="Generate videos with Wan2.1 + token-merging attention.")
+    parser.add_argument("--config", default="configs/token_merging_wan_fewstep.yaml")
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--prompt_path", default="prompts/MovieGenVideoBench_extended.txt")
-    parser.add_argument("--output_dir", default="videos/monarch_wan")
+    parser.add_argument("--output_dir", default="videos/token_merging_wan")
     parser.add_argument("--num_videos", type=int, default=10)
     parser.add_argument("--num_samples", type=int, default=1)
     parser.add_argument("--seed", type=int, default=0)
@@ -33,7 +33,7 @@ def load_prompts(path: str, limit: int):
     return prompts
 
 
-def load_generator_checkpoint(pipeline: MonarchWanPipeline, checkpoint_path: str, use_ema: bool):
+def load_generator_checkpoint(pipeline: TokenMergingWanPipeline, checkpoint_path: str, use_ema: bool):
     state = torch.load(checkpoint_path, map_location="cpu")
     if isinstance(state, dict) and ("generator" in state or "generator_ema" in state):
         key = "generator_ema" if use_ema and "generator_ema" in state else "generator"
@@ -58,10 +58,10 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    monarch_enabled = bool(config.get("monarch_args", {}).get("enable", False))
-    attention_mode = "MonarchAttention" if monarch_enabled else "dense SDPA attention"
+    token_merging_enabled = bool(config.get("token_merging_args", {}).get("enable", False))
+    attention_mode = "token-merging attention" if token_merging_enabled else "dense SDPA attention"
     print(f"Loading Wan2.1 + {attention_mode} on {device} with dtype={dtype}.")
-    pipeline = MonarchWanPipeline(config, device=device)
+    pipeline = TokenMergingWanPipeline(config, device=device)
     load_generator_checkpoint(pipeline, args.checkpoint, args.use_ema)
     pipeline = pipeline.to(dtype=dtype)
     pipeline.text_encoder.to(device=device)
@@ -89,5 +89,5 @@ def main():
 
 
 if __name__ == "__main__":
-    os.environ.setdefault("MONARCH_FORCE_TORCH_RMSNORM", "1")
+    os.environ.setdefault("TOKEN_MERGING_FORCE_TORCH_RMSNORM", "1")
     main()
