@@ -27,6 +27,7 @@ conda activate "${CONDA_ENV}"
 REPO_DIR="${REPO_DIR:-/home1/denghaoran/workspace/training-free-videogen}"
 export WAN_MODEL_ROOT="${WAN_MODEL_ROOT:-${REPO_DIR}/wan_models}"
 CHECKPOINT="${CHECKPOINT:-${REPO_DIR}/checkpoints/self_forcing_dmd.pt}"
+CONFIG="${CONFIG:-configs/token_merging_wan_fewstep.yaml}"
 OUTPUT_DIR="${OUTPUT_DIR:-videos/token_merging_wan}"
 
 cd "${REPO_DIR}"
@@ -41,7 +42,7 @@ mkdir -p "${MIOPEN_USER_DB_PATH}" "${MIOPEN_CUSTOM_CACHE_DIR}"
 export PYTHONPATH="${PWD}:${PYTHONPATH:-}"
 
 python generate.py \
-  --config configs/token_merging_wan_fewstep.yaml \
+  --config "${CONFIG}" \
   --checkpoint "${CHECKPOINT}" \
   --prompt_path prompts/MovieGenVideoBench_extended.txt \
   --output_dir "${OUTPUT_DIR}" \
