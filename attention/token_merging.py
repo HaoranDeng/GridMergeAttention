@@ -2,26 +2,36 @@ import torch
 from einops import rearrange
 
 
-def _select_merge_queries(q, key_rows, q_init):
-    # q is [batch, query_outer, query_row, query_column, head, dim].
-    # For default Wan 480p/81-frame generation: [B, 21, 30, 52, H, D].
-    q_init = (q_init or "ith").lower()
+_Q_INIT_ALIASES = {
+    "identity": "ith",
+    "i": "ith",
+    "uniform": "mean",
+    "avg": "mean",
+    "average": "mean",
+    "first": "1st",
+}
 
-    if q_init in {"identity", "ith", "i"}:
+
+def _merge_query(q, key_rows, q_init):
+    """Choose the query vectors used to merge each key-column group."""
+    q_init = (q_init or "ith").lower()
+    q_init = _Q_INIT_ALIASES.get(q_init, q_init)
+
+    if q_init == "ith":
         if q.size(2) != key_rows:
             raise ValueError("q_init=ith needs query_row and key_row to have the same size.")
         return q
 
-    if q_init in {"uniform", "mean", "avg", "average"}:
+    if q_init == "mean":
         return q.mean(dim=2, keepdim=True).expand(-1, -1, key_rows, -1, -1, -1)
 
-    if q_init in {"first", "1st"}:
+    if q_init == "1st":
         return q[:, :, :1].expand(-1, -1, key_rows, -1, -1, -1)
 
     raise ValueError(f"unsupported q_init={q_init!r}; expected mean, 1st, or ith.")
 
 
-def _to_token_merging_blocks(x, f_tied, h_reduce, w_reduce, height, width):
+def _video_to_blocks(x, f_tied, h_reduce, w_reduce, height, width):
     """[B, F*H*W, heads, dim] -> [B, outer, row, col, heads, dim]."""
     batch, seq_len, heads, dim = x.shape
     if height % h_reduce or width % w_reduce:
@@ -33,40 +43,43 @@ def _to_token_merging_blocks(x, f_tied, h_reduce, w_reduce, height, width):
     if frames % f_tied:
         raise ValueError("number of frames must be divisible by f_tied.")
 
-    x = x.view(
-        batch,
-        frames // f_tied,
-        f_tied,
-        h_reduce,
-        height // h_reduce,
-        w_reduce,
-        width // w_reduce,
-        heads,
-        dim,
-    )
     return rearrange(
         x,
-        "b outer frame h_group row w_group col head dim -> "
-        "b (outer h_group w_group) (frame row) col head dim",
+        "b (outer ft hr row wr col) head dim -> b (outer hr wr) (ft row) col head dim",
+        ft=f_tied,
+        hr=h_reduce,
+        row=height // h_reduce,
+        wr=w_reduce,
+        col=width // w_reduce,
     ).contiguous()
 
 
-def _from_token_merging_blocks(x, f_tied, h_reduce, w_reduce):
+def _blocks_to_video(x, f_tied, h_reduce, w_reduce):
     """[B, outer, row, col, heads, dim] -> [B, F*H*W, heads, dim]."""
     return rearrange(
         x,
-        "b (outer h_group w_group) (frame row) col head dim -> "
-        "b (outer frame h_group row w_group col) head dim",
-        frame=f_tied,
-        h_group=h_reduce,
-        w_group=w_reduce,
+        "b (outer hr wr) (ft row) col head dim -> b (outer ft hr row wr col) head dim",
+        ft=f_tied,
+        hr=h_reduce,
+        wr=w_reduce,
     ).contiguous()
 
 
-def _merge_key_column_tokens(merge_query, k, v):
-    # For each fixed (query_outer, key_outer, query_column, key_row), merge
-    # the key_column tokens into one merged key token and one merged value token.
-    merge_logits = torch.einsum("bakjhd,bfklhd->bhafkjl", merge_query, k)
+def _one_step_chunk(q, k, v, scale, q_init):
+    # Dimension letters used below:
+    #   b batch, a query_outer, f key_outer, i query_row, j query_column,
+    #   k key_row, l key_column, h head, d/e head_dim.
+    #
+    # q:   [B, A, I, J, H, D]
+    # k/v: [B, F, K, L, H, D]
+    # A single fixed (a, f, j, k) tile is 30 queries x 52 keys by default.
+    scale_sqrt = scale**0.5
+    q = q * scale_sqrt
+    k = k * scale_sqrt
+
+    # 1. For each key row k, use the selected query row to merge key columns l.
+    selected_q = _merge_query(q, k.size(2), q_init)
+    merge_logits = torch.einsum("bakjhd,bfklhd->bhafkjl", selected_q, k)
     merge_logits = merge_logits.float()
     merge_logits = merge_logits - merge_logits.amax(dim=-1, keepdim=True)
     merge_weights = torch.softmax(merge_logits, dim=-1).to(k.dtype)
@@ -74,84 +87,25 @@ def _merge_key_column_tokens(merge_query, k, v):
     merged_keys = torch.einsum("bhafkjl,bfklhd->bafjkhd", merge_weights, k)
     merged_values = torch.einsum("bhafkjl,bfklhe->bafjkhe", merge_weights, v)
 
-    # Correction term from the merge softmax normalizer. It keeps this rewrite
-    # exactly equivalent to the pre-rename one-step implementation.
-    merge_log_z = torch.logsumexp(merge_logits, dim=-1, keepdim=True)
-    routing_bias = (
-        merge_weights * (merge_logits - merge_log_z)
-    ).sum(dim=-1, keepdim=True).transpose(-2, -3)
-    return merged_keys, merged_values, routing_bias
-
-
-def _route_queries_to_merged_tokens(q, merged_keys, routing_bias, key_outer, key_rows):
-    # Each query row attends to all merged tokens indexed by key_outer x key_row.
+    # 2. Route each query row i to merged tokens indexed by (f, k).
+    # The merge-logprob correction keeps this exactly equivalent to the old
+    # one-step implementation while writing it as token merging.
+    merge_logprob = merge_logits - torch.logsumexp(merge_logits, dim=-1, keepdim=True)
+    routing_bias = (merge_weights * merge_logprob).sum(dim=-1, keepdim=True)
+    routing_bias = routing_bias.transpose(-2, -3)
     routing_logits = torch.einsum("bafjkhd,baijhd->bhafjki", merged_keys, q)
     routing_logits = routing_logits - routing_bias
+
     routing_weights = rearrange(routing_logits, "b h a f j k i -> b h a j i (f k)")
     routing_weights = torch.softmax(routing_weights.float(), dim=-1).to(q.dtype)
-    return rearrange(
+    routing_weights = rearrange(
         routing_weights,
         "b h a j i (f k) -> b h a f j k i",
-        f=key_outer,
-        k=key_rows,
+        f=k.size(1),
+        k=k.size(2),
     )
 
-
-def _one_step_token_merging_chunk(q, k, v, scale, q_init):
-    # q:   [B, A, I, J, H, D] = [batch, query_outer, query_row, query_column, head, dim]
-    # k/v: [B, F, K, L, H, D] = [batch, key_outer, key_row, key_column, head, dim]
-    # Default 480p/81-frame Wan after token-merging rearrange:
-    #   q:   [B, 21, 30, 52, H, D]
-    #   k/v: [B, 21, 30, 52, H, D]
-    #
-    # For each fixed (A, F, J, K), key-column tokens L are merged into one
-    # token. Query rows I are then routed to those merged tokens.
-    scale_sqrt = scale**0.5
-    q_scaled = q * scale_sqrt
-    k_scaled = k * scale_sqrt
-    key_outer, key_rows = k.size(1), k.size(2)
-
-    merge_query = _select_merge_queries(q_scaled, key_rows, q_init)
-    merged_keys, merged_values, routing_bias = _merge_key_column_tokens(
-        merge_query,
-        k_scaled,
-        v,
-    )
-    routing_weights = _route_queries_to_merged_tokens(
-        q_scaled,
-        merged_keys,
-        routing_bias,
-        key_outer,
-        key_rows,
-    )
     return torch.einsum("bhafjki,bafjkhe->baijhe", routing_weights, merged_values)
-
-
-def _token_merging_attention(q, k, v, scale, query_outer_chunk, q_init):
-    # q/k/v are already token-merging blocks:
-    #   q:   [B, query_outer, query_row, query_column, head, dim]
-    #   k/v: [B, key_outer, key_row, key_column, head, dim]
-    out = torch.empty(
-        q.size(0),
-        q.size(1),
-        q.size(2),
-        q.size(3),
-        v.size(-2),
-        v.size(-1),
-        device=v.device,
-        dtype=v.dtype,
-    )
-
-    for start in range(0, q.size(1), query_outer_chunk):
-        end = min(start + query_outer_chunk, q.size(1))
-        out[:, start:end] = _one_step_token_merging_chunk(
-            q[:, start:end],
-            k,
-            v,
-            scale,
-            q_init,
-        )
-    return out
 
 
 def token_merging_attn(
@@ -181,19 +135,22 @@ def token_merging_attn(
         sm_scale = q.size(-1) ** -0.5
     query_outer_chunk = max(1, int(query_outer_chunk or 1))
 
-    q_blocks = _to_token_merging_blocks(q, f_tied, h_reduce, w_reduce, h, w)
-    k_blocks = _to_token_merging_blocks(k, f_tied, h_reduce, w_reduce, h, w)
-    v_blocks = _to_token_merging_blocks(v, f_tied, h_reduce, w_reduce, h, w)
+    q_blocks = _video_to_blocks(q, f_tied, h_reduce, w_reduce, h, w)
+    k_blocks = _video_to_blocks(k, f_tied, h_reduce, w_reduce, h, w)
+    v_blocks = _video_to_blocks(v, f_tied, h_reduce, w_reduce, h, w)
 
-    out = _token_merging_attention(
-        q_blocks,
-        k_blocks,
-        v_blocks,
-        scale=sm_scale,
-        query_outer_chunk=query_outer_chunk,
-        q_init=q_init,
-    )
-    return _from_token_merging_blocks(out, f_tied, h_reduce, w_reduce)
+    out = torch.empty_like(v_blocks)
+    for start in range(0, q_blocks.size(1), query_outer_chunk):
+        end = min(start + query_outer_chunk, q_blocks.size(1))
+        out[:, start:end] = _one_step_chunk(
+            q_blocks[:, start:end],
+            k_blocks,
+            v_blocks,
+            sm_scale,
+            q_init,
+        )
+
+    return _blocks_to_video(out, f_tied, h_reduce, w_reduce)
 
 
 __all__ = ["token_merging_attn"]

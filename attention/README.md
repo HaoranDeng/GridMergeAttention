@@ -34,7 +34,7 @@ The only approximation step is:
 select merge query -> merge key/value tokens -> route queries -> aggregate values
 ```
 
-The easiest experimental hook is `q_init` in `_select_merge_queries`:
+The easiest experimental hook is `q_init` in `_merge_query`:
 
 - `ith`: key row `i` initializes with query row `i`
 - `mean`: every key row initializes with the mean query
