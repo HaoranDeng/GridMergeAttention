@@ -22,6 +22,8 @@ def parse_args():
     parser.add_argument("--use_ema", action="store_true")
     parser.add_argument("--fps", type=int, default=16)
     parser.add_argument("--dtype", choices=["bf16", "fp16"], default="bf16")
+    parser.add_argument("--token_merging_w_reduce", type=int, default=None)
+    parser.add_argument("--token_merging_query_outer_chunk", type=int, default=None)
     return parser.parse_args()
 
 
@@ -51,6 +53,11 @@ def main():
     dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float16
 
     config = OmegaConf.load(args.config)
+    if args.token_merging_w_reduce is not None:
+        config.token_merging_args.w_reduce = args.token_merging_w_reduce
+    if args.token_merging_query_outer_chunk is not None:
+        config.token_merging_args.query_outer_chunk = args.token_merging_query_outer_chunk
+
     prompts = load_prompts(args.prompt_path, args.num_videos)
     if not prompts:
         raise ValueError(f"No prompts found in {args.prompt_path}")

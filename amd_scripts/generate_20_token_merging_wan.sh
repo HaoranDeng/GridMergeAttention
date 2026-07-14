@@ -41,10 +41,19 @@ mkdir -p "${MIOPEN_USER_DB_PATH}" "${MIOPEN_CUSTOM_CACHE_DIR}"
 
 export PYTHONPATH="${PWD}:${PYTHONPATH:-}"
 
+EXTRA_ARGS=()
+if [ -n "${W_REDUCE:-}" ]; then
+  EXTRA_ARGS+=(--token_merging_w_reduce "${W_REDUCE}")
+fi
+if [ -n "${QUERY_OUTER_CHUNK:-}" ]; then
+  EXTRA_ARGS+=(--token_merging_query_outer_chunk "${QUERY_OUTER_CHUNK}")
+fi
+
 python generate.py \
   --config "${CONFIG}" \
   --checkpoint "${CHECKPOINT}" \
   --prompt_path prompts/MovieGenVideoBench_extended.txt \
   --output_dir "${OUTPUT_DIR}" \
   --num_videos 20 \
-  --use_ema
+  --use_ema \
+  "${EXTRA_ARGS[@]}"

@@ -33,3 +33,9 @@ repo-local `wan_models/` and `checkpoints/` links or directories:
 ```bash
 CONDA_ENV=<your-env> sbatch amd_scripts/generate_20_token_merging_wan.sh
 ```
+
+Override token-merging size without editing YAML:
+
+```bash
+CONDA_ENV=<your-env> W_REDUCE=4 sbatch amd_scripts/generate_20_token_merging_wan.sh
+```
