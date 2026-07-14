@@ -45,5 +45,5 @@ python generate.py \
   --checkpoint "${CHECKPOINT}" \
   --prompt_path prompts/MovieGenVideoBench_extended.txt \
   --output_dir "${OUTPUT_DIR}" \
-  --num_videos 10 \
+  --num_videos 20 \
   --use_ema

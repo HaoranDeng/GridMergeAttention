@@ -23,7 +23,7 @@ python generate.py \
   --checkpoint /path/to/self_forcing_dmd.pt \
   --prompt_path prompts/MovieGenVideoBench_extended.txt \
   --output_dir videos/token_merging_wan \
-  --num_videos 10 \
+  --num_videos 20 \
   --use_ema
 ```
 
@@ -31,5 +31,5 @@ On `amdhpc`, the helper script uses the configured conda environment and expects
 repo-local `wan_models/` and `checkpoints/` links or directories:
 
 ```bash
-CONDA_ENV=<your-env> sbatch amd_scripts/generate_10_token_merging_wan.sh
+CONDA_ENV=<your-env> sbatch amd_scripts/generate_20_token_merging_wan.sh
 ```
