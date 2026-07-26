@@ -31,6 +31,10 @@ DATA_DIR="${DATA_DIR:-${SCRATCH_ROOT}/data/wan_syn_smoke}"
 CHECKPOINT="${CHECKPOINT:-${REPO_DIR}/checkpoints/self_forcing_dmd.pt}"
 OUTPUT_DIR="${OUTPUT_DIR:-${SCRATCH_ROOT}/checkpoints/dense_wan_syn_smoke}"
 MAX_STEPS="${MAX_STEPS:-5}"
+LEARNING_RATE="${LEARNING_RATE:-5e-5}"
+WEIGHT_DECAY="${WEIGHT_DECAY:-1e-4}"
+SAVE_STEPS="${SAVE_STEPS:-0}"
+BATCH_SIZE="${BATCH_SIZE:-1}"
 
 cd "${REPO_DIR}"
 mkdir -p out "${DATA_DIR}" "${OUTPUT_DIR}"
@@ -59,7 +63,8 @@ python finetune.py \
   --checkpoint "${CHECKPOINT}" \
   --use_ema \
   --max_steps "${MAX_STEPS}" \
-  --batch_size 1 \
-  --learning_rate 5e-5 \
-  --weight_decay 1e-4 \
+  --batch_size "${BATCH_SIZE}" \
+  --learning_rate "${LEARNING_RATE}" \
+  --weight_decay "${WEIGHT_DECAY}" \
+  --save_steps "${SAVE_STEPS}" \
   --gradient_checkpointing
