@@ -13,4 +13,4 @@ regex
 sentencepiece
 triton
 numpy
-
+pyarrow
