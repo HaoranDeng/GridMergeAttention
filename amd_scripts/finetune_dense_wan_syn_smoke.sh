@@ -25,10 +25,11 @@ CONDA_ENV="${CONDA_ENV:?Set CONDA_ENV to the environment with torch/Wan dependen
 conda activate "${CONDA_ENV}"
 
 REPO_DIR="${REPO_DIR:-/home1/denghaoran/workspace/training-free-videogen}"
+SCRATCH_ROOT="${SCRATCH_ROOT:-/work1/jasoncong/denghaoran/training-free-videogen}"
 export WAN_MODEL_ROOT="${WAN_MODEL_ROOT:-${REPO_DIR}/wan_models}"
-DATA_DIR="${DATA_DIR:-${REPO_DIR}/data/wan_syn_smoke}"
+DATA_DIR="${DATA_DIR:-${SCRATCH_ROOT}/data/wan_syn_smoke}"
 CHECKPOINT="${CHECKPOINT:-${REPO_DIR}/checkpoints/self_forcing_dmd.pt}"
-OUTPUT_DIR="${OUTPUT_DIR:-${REPO_DIR}/checkpoints/dense_wan_syn_smoke}"
+OUTPUT_DIR="${OUTPUT_DIR:-${SCRATCH_ROOT}/checkpoints/dense_wan_syn_smoke}"
 MAX_STEPS="${MAX_STEPS:-5}"
 
 cd "${REPO_DIR}"
