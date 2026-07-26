@@ -1,0 +1,16 @@
+image_or_video_shape:
+  - 1
+  - 20
+  - 16
+  - 56
+  - 104
+model_kwargs:
+  model_name: Wan2.1-T2V-1.3B
+  timestep_shift: 5.0
+token_merging_args:
+  enable: true
+  f_tied: 1
+  h_reduce: 1
+  w_reduce: 1
+  q_init: ith
+  query_outer_chunk: 1
