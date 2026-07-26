@@ -189,8 +189,9 @@ def main():
         weight_decay=args.weight_decay,
     )
 
+    attention_mode = "token-merging" if config.get("token_merging_args", {}).get("enable", False) else "dense"
     print(
-        f"Training dense Wan on {len(dataset)} rows from {len(dataset.files)} parquet files, "
+        f"Training {attention_mode} Wan on {len(dataset)} rows from {len(dataset.files)} parquet files, "
         f"dtype={dtype}, batch_size={args.batch_size}, max_steps={args.max_steps}."
     )
 
