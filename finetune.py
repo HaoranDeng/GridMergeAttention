@@ -14,6 +14,19 @@ from tqdm import tqdm
 from utils.misc import set_seed
 from utils.wan_wrapper import WanDiffusionWrapper
 
+# Per-channel statistics of the Wan2.1 VAE latent space, mirroring
+# utils/wan_wrapper.py:WanVAECore. The FastVideo Wan-Syn parquets store raw VAE latents,
+# while this repo's models operate on (raw - mean) / std. Shaped to broadcast over a
+# [channel, frame, height, width] row latent.
+_LATENT_MEAN = torch.tensor([
+    -0.7571, -0.7089, -0.9113, 0.1075, -0.1745, 0.9653, -0.1517, 1.5508,
+    0.4134, -0.0715, 0.5517, -0.3632, -0.1922, -0.9497, 0.2503, -0.2921,
+]).view(-1, 1, 1, 1)
+_LATENT_STD = torch.tensor([
+    2.8184, 1.4541, 2.3275, 2.6558, 1.2196, 1.7708, 2.6052, 2.0743,
+    3.2687, 2.1526, 2.8652, 1.5579, 1.6382, 1.1253, 2.8251, 1.9160,
+]).view(-1, 1, 1, 1)
+
 
 class FastVideoLatentDataset(Dataset):
     """Reads FastVideo Wan-Syn parquet rows containing precomputed Wan latents."""
@@ -59,6 +72,7 @@ class FastVideoLatentDataset(Dataset):
         row = self._read_file_rows(self.files[file_index])[row_index]
 
         latent = torch.from_numpy(self._array_from_bytes(row, "vae_latent"))
+        latent = (latent - _LATENT_MEAN) / _LATENT_STD
         text_embedding = torch.from_numpy(self._array_from_bytes(row, "text_embedding"))
         return {
             "latent": latent,
