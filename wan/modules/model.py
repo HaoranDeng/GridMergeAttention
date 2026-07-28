@@ -239,6 +239,7 @@ class WanSelfAttention(nn.Module):
         self.token_merging_f_tied = 1
         self.token_merging_q_init = None
         self.token_merging_query_outer_chunk = None
+        self.token_merging_layout = "query_column_key_row"
 
         # layers
         self.q = nn.Linear(dim, dim)
@@ -289,6 +290,7 @@ class WanSelfAttention(nn.Module):
                 w,
                 q_init=self.token_merging_q_init,
                 query_outer_chunk=self.token_merging_query_outer_chunk,
+                layout=self.token_merging_layout,
             )
         else:
             x = flash_attention(
@@ -773,6 +775,7 @@ class WanModel(ModelMixin, ConfigMixin):
         w_reduce = args.get("w_reduce", 1)
         q_init = args.get("q_init", None)
         query_outer_chunk = args.get("query_outer_chunk", None)
+        layout = args.get("layout", "query_column_key_row")
 
         for block in self.blocks:
             block.self_attn.enable_token_merging = enable
@@ -781,6 +784,7 @@ class WanModel(ModelMixin, ConfigMixin):
             block.self_attn.token_merging_w_reduce = w_reduce
             block.self_attn.token_merging_q_init = q_init
             block.self_attn.token_merging_query_outer_chunk = query_outer_chunk
+            block.self_attn.token_merging_layout = layout
 
     def _set_gradient_checkpointing(self, module, value=False):
         self.gradient_checkpointing = value
