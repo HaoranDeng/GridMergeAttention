@@ -14,3 +14,4 @@ sentencepiece
 triton
 numpy
 pyarrow
+wandb>=0.17.0
