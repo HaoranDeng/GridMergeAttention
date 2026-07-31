@@ -100,7 +100,6 @@ def _random_seed_rows(
     device = query_outer.device
     key_row = torch.arange(key_rows, device=device).view(1, 1, key_rows, 1)
     query_col = torch.arange(query_columns, device=device).view(1, 1, 1, query_columns)
-    query_row = torch.arange(query_rows, device=device).view(1, 1, 1, 1, query_rows)
     base = (
         query_outer.view(-1, 1, 1, 1) * 73856093
         + key_outer.view(1, -1, 1, 1) * 19349663
@@ -108,7 +107,20 @@ def _random_seed_rows(
         + query_col * 2654435761
         + int(seed)
     )
-    scores = (base.unsqueeze(-1) + query_row * 97531).remainder(2147483647)
+
+    if num_seeds == 2:
+        row0 = base.remainder(query_rows)
+        step = (base.div(query_rows, rounding_mode="floor").remainder(query_rows - 1)) + 1
+        row1 = (row0 + step).remainder(query_rows)
+        return torch.stack((row0, row1), dim=-1).long()
+
+    query_row = torch.arange(query_rows, device=device).view(1, 1, 1, 1, query_rows)
+    scores = (
+        base.unsqueeze(-1).remainder(2147483647)
+        + query_row * 374761393
+    ).remainder(2147483647)
+    scores = (scores * (scores + 1274126177)).remainder(2147483647)
+    scores = (scores * (scores + 60493)).remainder(2147483647)
     scores = scores * query_rows + query_row
     return scores.topk(num_seeds, dim=-1).indices.long()
 
@@ -123,6 +135,19 @@ def _gather_seed_queries(q, seed_rows):
 def _assign_keys_to_seeds(seed_logits):
     # seed_logits: [B, H, A, F, K, J, C, L].
     assignments = seed_logits.argmax(dim=-2)
+    key_col = torch.arange(seed_logits.size(-1), device=seed_logits.device)
+
+    for seed_idx in range(seed_logits.size(-2)):
+        has_seed = (assignments == seed_idx).any(dim=-1)
+        best_key = seed_logits[..., seed_idx, :].argmax(dim=-1)
+        force_seed_shape = (1,) * (assignments.ndim - 1) + (-1,)
+        force_seed = key_col.view(*force_seed_shape) == best_key.unsqueeze(-1)
+        assignments = torch.where(
+            has_seed.unsqueeze(-1),
+            assignments,
+            torch.where(force_seed, seed_idx, assignments),
+        )
+
     return torch.nn.functional.one_hot(assignments, num_classes=seed_logits.size(-2)).movedim(-1, -2).bool()
 
 
