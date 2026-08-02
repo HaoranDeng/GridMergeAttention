@@ -360,6 +360,10 @@ def main():
     prompts = load_prompts(args.prompt_path)
     prompt = prompts[args.prompt_index]
     conditional_dict = text_encoder([prompt])
+    conditional_dict["prompt_embeds"] = [
+        embed.to(device=device, dtype=dtype)
+        for embed in conditional_dict["prompt_embeds"]
+    ]
 
     latent_shape = list(shape)
     noise = torch.randn(latent_shape, device=device, dtype=dtype)
