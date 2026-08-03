@@ -134,6 +134,49 @@ def one_token_w_reduce_distribution(q_grid, k_grid, v_grid, frame, col, head, w_
     return approx_probs, approx_outputs
 
 
+def one_token_h_reduce_distribution(q_grid, k_grid, v_grid, frame, col, head, h_reduce, scale):
+    frames, rows, width, _, _ = q_grid.shape
+    if rows % h_reduce:
+        raise ValueError(f"height token count {rows} is not divisible by h_reduce={h_reduce}.")
+
+    group_rows = rows // h_reduce
+    sqrt_scale = scale**0.5
+    key_blocks = (
+        k_grid[:, :, :, head]
+        .reshape(frames, h_reduce, group_rows, width, -1)
+        .float()
+        * sqrt_scale
+    )
+    value_blocks = v_grid[:, :, :, head].reshape(frames, h_reduce, group_rows, width, -1).float()
+
+    approx_probs = torch.empty(rows, frames * rows * width, device=q_grid.device, dtype=torch.float32)
+    approx_outputs = torch.empty(rows, v_grid.size(-1), device=q_grid.device, dtype=torch.float32)
+
+    for query_group in range(h_reduce):
+        row_start = query_group * group_rows
+        row_end = row_start + group_rows
+        query_rows = q_grid[frame, row_start:row_end, col, head].float() * sqrt_scale
+
+        merge_logits = torch.einsum("kd,fgkld->fgkl", query_rows, key_blocks)
+        merge_logprob = torch.log_softmax(merge_logits, dim=-1)
+        merge_weights = merge_logprob.exp()
+        merged_keys = torch.einsum("fgkl,fgkld->fgkd", merge_weights, key_blocks)
+        merged_values = torch.einsum("fgkl,fgkld->fgkd", merge_weights, value_blocks)
+
+        routing_bias = (merge_weights * merge_logprob).sum(dim=-1)
+        routing_logits = torch.einsum("fgkd,id->ifgk", merged_keys, query_rows)
+        routing_logits = routing_logits - routing_bias.unsqueeze(0)
+        routing_weights = torch.softmax(routing_logits.flatten(1), dim=-1).view(
+            group_rows, frames, h_reduce, group_rows
+        )
+
+        expanded = routing_weights[:, :, :, :, None] * merge_weights[None]
+        approx_probs[row_start:row_end] = expanded.reshape(group_rows, frames * rows * width)
+        approx_outputs[row_start:row_end] = torch.einsum("ifgk,fgkd->id", routing_weights, merged_values)
+
+    return approx_probs, approx_outputs
+
+
 def multi_seed_distribution(
     q_grid,
     k_grid,
@@ -439,6 +482,8 @@ class AttentionMetricCollector:
 
         column_variants = [
             ("MonarchRT", "w", 1),
+            ("MonarchRT_h_reduce2", "h", 2),
+            ("MonarchRT_h_reduce4", "h", 4),
             ("C2_w1", "c", 2),
             ("C4_w1", "c", 4),
             ("C6_w1", "c", 6),
@@ -479,6 +524,12 @@ class AttentionMetricCollector:
                         "current token_merging_attn requires exact divisibility."
                     )
                     continue
+                if kind == "h" and rows % value:
+                    self.invalid[name] = (
+                        f"height token count {rows} is not divisible by h_reduce={value}; "
+                        "current token_merging_attn requires exact divisibility."
+                    )
+                    continue
                 if kind == "c":
                     approx_probs, approx_outputs = multi_seed_distribution(
                         q_grid, k_grid, v_grid, frame, col, head, value, scale
@@ -494,6 +545,10 @@ class AttentionMetricCollector:
                 elif kind == "select_ith":
                     approx_probs, approx_outputs = select_seed_distribution(
                         q_grid, k_grid, v_grid, frame, col, head, value, scale, include_ith=True
+                    )
+                elif kind == "h":
+                    approx_probs, approx_outputs = one_token_h_reduce_distribution(
+                        q_grid, k_grid, v_grid, frame, col, head, value, scale
                     )
                 else:
                     approx_probs, approx_outputs = one_token_w_reduce_distribution(
