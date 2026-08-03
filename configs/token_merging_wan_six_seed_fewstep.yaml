@@ -20,5 +20,5 @@ token_merging_args:
   w_reduce: 1
   q_init: ith
   num_merge_tokens: 6
-  seed_mode: random
+  seed_mode: random_with_ith
   seed: 0

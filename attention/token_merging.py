@@ -92,6 +92,7 @@ def _random_seed_rows(
     query_rows,
     num_seeds,
     seed,
+    include_ith=False,
 ):
     """Deterministic pseudo-random query-row seeds for each block."""
     if num_seeds > query_rows:
@@ -107,6 +108,23 @@ def _random_seed_rows(
         + query_col * 2654435761
         + int(seed)
     )
+
+    if include_ith:
+        ith_seed = key_row.expand(query_outer.numel(), key_outer.numel(), key_rows, query_columns)
+        if num_seeds == 1:
+            return ith_seed.unsqueeze(-1).long()
+
+        query_row = torch.arange(query_rows, device=device).view(1, 1, 1, 1, query_rows)
+        scores = (
+            base.unsqueeze(-1).remainder(2147483647)
+            + query_row * 374761393
+        ).remainder(2147483647)
+        scores = (scores * (scores + 1274126177)).remainder(2147483647)
+        scores = (scores * (scores + 60493)).remainder(2147483647)
+        scores = scores * query_rows + query_row
+        scores = scores.masked_fill(query_row == ith_seed.unsqueeze(-1), -1)
+        random_seeds = scores.topk(num_seeds - 1, dim=-1).indices.long()
+        return torch.cat((ith_seed.unsqueeze(-1).long(), random_seeds), dim=-1)
 
     if num_seeds == 2:
         row0 = base.remainder(query_rows)
@@ -317,8 +335,12 @@ def _multi_seed_query_column_key_row(
     # k/v: [B, F, K, L, H, D]
     # A fixed (a, f, j, k) block has I queries x L keys. This path merges
     # the L keys into several hard-assigned merged tokens instead of one.
-    if seed_mode != "random":
-        raise ValueError("multi-token merging currently supports seed_mode='random' only.")
+    include_ith = seed_mode == "random_with_ith"
+    if seed_mode not in {"random", "random_with_ith"}:
+        raise ValueError(
+            "multi-token merging currently supports seed_mode='random' or "
+            "'random_with_ith'."
+        )
     if num_merge_tokens > k.size(3):
         raise ValueError("num_merge_tokens cannot exceed key columns per block.")
 
@@ -340,6 +362,7 @@ def _multi_seed_query_column_key_row(
         q.size(2),
         num_merge_tokens,
         seed,
+        include_ith=include_ith,
     )
     seed_queries = _gather_seed_queries(q, seed_rows)
 
@@ -397,8 +420,12 @@ def _select_seed_query_column_key_row(
     # Each seed compresses all L keys in a fixed (a, f, j, k) block. Each
     # query then selects the seed whose compressed distribution maximizes
     # q_i dot K_c + H(alpha_c), the softmax variational objective.
-    if seed_mode != "random":
-        raise ValueError("selective token merging currently supports seed_mode='random' only.")
+    include_ith = seed_mode == "random_with_ith"
+    if seed_mode not in {"random", "random_with_ith"}:
+        raise ValueError(
+            "selective token merging currently supports seed_mode='random' or "
+            "'random_with_ith'."
+        )
 
     scale_sqrt = scale**0.5
     q = q * scale_sqrt
@@ -418,6 +445,7 @@ def _select_seed_query_column_key_row(
         q.size(2),
         num_merge_tokens,
         seed,
+        include_ith=include_ith,
     )
     seed_queries = _gather_seed_queries(q, seed_rows)
 
