@@ -174,6 +174,53 @@ def multi_seed_distribution(q_grid, k_grid, v_grid, frame, col, head, num_merge_
     return approx_probs, approx_outputs
 
 
+def select_seed_distribution(q_grid, k_grid, v_grid, frame, col, head, num_merge_tokens, scale):
+    frames, rows, width, _, _ = q_grid.shape
+    sqrt_scale = scale**0.5
+
+    query_outer = torch.tensor([frame], device=q_grid.device)
+    key_outer = torch.arange(frames, device=q_grid.device)
+    seed_rows = _random_seed_rows(
+        query_outer,
+        key_outer,
+        rows,
+        width,
+        rows,
+        num_merge_tokens,
+        seed=0,
+    )[0, :, :, col]
+
+    seed_queries = q_grid[frame, seed_rows, col, head].float() * sqrt_scale
+    key_blocks = k_grid[:, :, :, head].float() * sqrt_scale
+    value_blocks = v_grid[:, :, :, head].float()
+    query_rows = q_grid[frame, :, col, head].float() * sqrt_scale
+
+    merge_logits = torch.einsum("frcd,frld->frcl", seed_queries, key_blocks)
+    merge_logits = merge_logits - merge_logits.amax(dim=-1, keepdim=True)
+    merge_logprob = torch.log_softmax(merge_logits, dim=-1)
+    merge_weights = merge_logprob.exp()
+
+    merged_keys = torch.einsum("frcl,frld->frcd", merge_weights, key_blocks)
+    merged_values = torch.einsum("frcl,frld->frcd", merge_weights, value_blocks)
+    entropy = -(merge_weights * merge_logprob).sum(dim=-1)
+
+    candidate_scores = torch.einsum("frcd,id->ifrc", merged_keys, query_rows)
+    candidate_scores = candidate_scores + entropy.unsqueeze(0)
+    selected_scores, selected_seed = candidate_scores.max(dim=-1)
+
+    routing_weights = torch.softmax(selected_scores.flatten(1), dim=-1).view(
+        rows, frames, rows
+    )
+    selected_mask = F.one_hot(selected_seed, num_classes=num_merge_tokens).float()
+    selected_merge_weights = torch.einsum("ifrc,frcl->ifrl", selected_mask, merge_weights)
+    selected_values = torch.einsum("ifrc,frcd->ifrd", selected_mask, merged_values)
+
+    expanded = routing_weights[:, :, :, None] * selected_merge_weights
+    approx_probs = expanded.reshape(rows, frames * rows * width)
+    approx_outputs = torch.einsum("ifr,ifrd->id", routing_weights, selected_values)
+    return approx_probs, approx_outputs
+
+
 class AttentionMetricCollector:
     def __init__(self, sample_groups_per_call):
         self.sample_groups_per_call = sample_groups_per_call
@@ -239,6 +286,9 @@ class AttentionMetricCollector:
             ("C2_w1", "c", 2),
             ("C4_w1", "c", 4),
             ("C6_w1", "c", 6),
+            ("select_C2_w1", "select", 2),
+            ("select_C4_w1", "select", 4),
+            ("select_C6_w1", "select", 6),
             ("w_reduce2", "w", 2),
             ("w_reduce4", "w", 4),
             ("w_reduce6", "w", 6),
@@ -257,6 +307,10 @@ class AttentionMetricCollector:
                     continue
                 if kind == "c":
                     approx_probs, approx_outputs = multi_seed_distribution(
+                        q_grid, k_grid, v_grid, frame, col, head, value, scale
+                    )
+                elif kind == "select":
+                    approx_probs, approx_outputs = select_seed_distribution(
                         q_grid, k_grid, v_grid, frame, col, head, value, scale
                     )
                 else:
