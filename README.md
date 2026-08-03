@@ -1,6 +1,6 @@
-# training-free-videogen
+# GridMergeAttention
 
-Minimal Wan2.1 text-to-video generation with token-merging attention.
+Minimal Wan2.1 text-to-video generation with grid-based token-merging attention.
 
 This repository keeps only the inference path needed to run Wan2.1 with the
 token-merging attention module. Large model weights and checkpoints are not
