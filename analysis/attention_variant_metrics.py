@@ -286,12 +286,15 @@ class AttentionMetricCollector:
             ("C2_w1", "c", 2),
             ("C4_w1", "c", 4),
             ("C6_w1", "c", 6),
+            ("C13_w1", "c", 13),
             ("select_C2_w1", "select", 2),
             ("select_C4_w1", "select", 4),
             ("select_C6_w1", "select", 6),
+            ("select_C13_w1", "select", 13),
             ("w_reduce2", "w", 2),
             ("w_reduce4", "w", 4),
             ("w_reduce6", "w", 6),
+            ("w_reduce13", "w", 13),
         ]
 
         for frame, col, head in self.sample_groups(frames, width, heads):
