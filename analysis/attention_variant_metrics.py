@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from omegaconf import OmegaConf
 
 import wan.modules.model as wan_model
-from attention.token_merging import _assign_keys_to_seeds, _random_seed_rows
+from attention.token_merging import _assign_keys_to_seeds, _random_seed_columns, _random_seed_rows
 from utils.misc import set_seed
 from utils.wan_wrapper import WanDiffusionWrapper, WanTextEncoder
 
@@ -70,6 +70,16 @@ def flatten_video(x):
 
 def dense_attention_for_column(q_grid, k_grid, v_grid, frame, col, head, scale):
     queries = q_grid[frame, :, col, head].float()
+    keys = flatten_video(k_grid[:, :, :, head].float())
+    values = flatten_video(v_grid[:, :, :, head].float())
+    logits = torch.matmul(queries, keys.transpose(0, 1)) * scale
+    probs = torch.softmax(logits, dim=-1)
+    outputs = torch.matmul(probs, values)
+    return probs, outputs, values
+
+
+def dense_attention_for_row(q_grid, k_grid, v_grid, frame, row, head, scale):
+    queries = q_grid[frame, row, :, head].float()
     keys = flatten_video(k_grid[:, :, :, head].float())
     values = flatten_video(v_grid[:, :, :, head].float())
     logits = torch.matmul(queries, keys.transpose(0, 1)) * scale
@@ -243,6 +253,128 @@ def select_seed_distribution(
     return approx_probs, approx_outputs
 
 
+def transpose_multi_seed_distribution(
+    q_grid,
+    k_grid,
+    v_grid,
+    frame,
+    row,
+    head,
+    num_merge_tokens,
+    scale,
+    include_ith=False,
+):
+    frames, rows, width, _, _ = q_grid.shape
+    sqrt_scale = scale**0.5
+
+    query_outer = torch.tensor([frame], device=q_grid.device)
+    key_outer = torch.arange(frames, device=q_grid.device)
+    seed_cols = _random_seed_columns(
+        query_outer,
+        key_outer,
+        rows,
+        width,
+        width,
+        num_merge_tokens,
+        seed=0,
+        include_ith=include_ith,
+    )[0, :, row]
+
+    seed_queries = q_grid[frame, row, seed_cols, head].float() * sqrt_scale
+    key_blocks = k_grid[:, :, :, head].float() * sqrt_scale
+    value_blocks = v_grid[:, :, :, head].float()
+    query_cols = q_grid[frame, row, :, head].float() * sqrt_scale
+
+    seed_logits = torch.einsum("flcd,fkld->flck", seed_queries, key_blocks)
+    assignment_mask = _assign_keys_to_seeds(
+        seed_logits[None, None, None, :, None, :, :, :]
+    )[0, 0, 0, :, 0]
+    cluster_has_keys = assignment_mask.any(dim=-1)
+
+    masked_logits = seed_logits.masked_fill(~assignment_mask, torch.finfo(seed_logits.dtype).min)
+    merge_logits = masked_logits - masked_logits.amax(dim=-1, keepdim=True)
+    merge_logits = merge_logits.masked_fill(~assignment_mask, torch.finfo(seed_logits.dtype).min)
+    merge_weights = torch.softmax(merge_logits, dim=-1).masked_fill(~assignment_mask, 0)
+
+    merged_keys = torch.einsum("flck,fkld->flcd", merge_weights, key_blocks)
+    merged_values = torch.einsum("flck,fkld->flcd", merge_weights, value_blocks)
+
+    merge_logprob = merge_logits - torch.logsumexp(merge_logits, dim=-1, keepdim=True)
+    merge_logprob = merge_logprob.masked_fill(~assignment_mask, 0)
+    routing_bias = (merge_weights * merge_logprob).sum(dim=-1)
+
+    routing_logits = torch.einsum("flcd,jd->jflc", merged_keys, query_cols)
+    routing_logits = routing_logits - routing_bias.unsqueeze(0)
+    routing_logits = routing_logits.masked_fill(
+        ~cluster_has_keys.unsqueeze(0),
+        torch.finfo(routing_logits.dtype).min,
+    )
+    routing_weights = torch.softmax(routing_logits.flatten(1), dim=-1).view(
+        width, frames, width, num_merge_tokens
+    )
+
+    expanded = routing_weights[:, :, :, :, None] * merge_weights[None]
+    approx_probs = expanded.sum(dim=3).permute(0, 1, 3, 2).reshape(width, frames * rows * width)
+    approx_outputs = torch.einsum("jflc,flcd->jd", routing_weights, merged_values)
+    return approx_probs, approx_outputs
+
+
+def transpose_select_seed_distribution(
+    q_grid,
+    k_grid,
+    v_grid,
+    frame,
+    row,
+    head,
+    num_merge_tokens,
+    scale,
+    include_ith=False,
+):
+    frames, rows, width, _, _ = q_grid.shape
+    sqrt_scale = scale**0.5
+
+    query_outer = torch.tensor([frame], device=q_grid.device)
+    key_outer = torch.arange(frames, device=q_grid.device)
+    seed_cols = _random_seed_columns(
+        query_outer,
+        key_outer,
+        rows,
+        width,
+        width,
+        num_merge_tokens,
+        seed=0,
+        include_ith=include_ith,
+    )[0, :, row]
+
+    seed_queries = q_grid[frame, row, seed_cols, head].float() * sqrt_scale
+    key_blocks = k_grid[:, :, :, head].float() * sqrt_scale
+    value_blocks = v_grid[:, :, :, head].float()
+    query_cols = q_grid[frame, row, :, head].float() * sqrt_scale
+
+    merge_logits = torch.einsum("flcd,fkld->flck", seed_queries, key_blocks)
+    merge_logits = merge_logits - merge_logits.amax(dim=-1, keepdim=True)
+    merge_logprob = torch.log_softmax(merge_logits, dim=-1)
+    merge_weights = merge_logprob.exp()
+
+    merged_keys = torch.einsum("flck,fkld->flcd", merge_weights, key_blocks)
+    merged_values = torch.einsum("flck,fkld->flcd", merge_weights, value_blocks)
+    entropy = -(merge_weights * merge_logprob).sum(dim=-1)
+
+    candidate_scores = torch.einsum("flcd,jd->jflc", merged_keys, query_cols)
+    candidate_scores = candidate_scores + entropy.unsqueeze(0)
+    selected_scores, selected_seed = candidate_scores.max(dim=-1)
+
+    routing_weights = torch.softmax(selected_scores.flatten(1), dim=-1).view(width, frames, width)
+    selected_mask = F.one_hot(selected_seed, num_classes=num_merge_tokens).float()
+    selected_merge_weights = torch.einsum("jflc,flck->jflk", selected_mask, merge_weights)
+    selected_values = torch.einsum("jflc,flcd->jfld", selected_mask, merged_values)
+
+    expanded = routing_weights[:, :, :, None] * selected_merge_weights
+    approx_probs = expanded.permute(0, 1, 3, 2).reshape(width, frames * rows * width)
+    approx_outputs = torch.einsum("jfl,jfld->jd", routing_weights, selected_values)
+    return approx_probs, approx_outputs
+
+
 class AttentionMetricCollector:
     def __init__(self, sample_groups_per_call):
         self.sample_groups_per_call = sample_groups_per_call
@@ -252,14 +384,15 @@ class AttentionMetricCollector:
         self.results = defaultdict(lambda: defaultdict(list))
         self.invalid = {}
 
-    def sample_groups(self, frames, width, heads):
+    def sample_groups(self, frames, rows, width, heads):
         groups = []
         base = self.call_index * 1009 + self.current_denoise * 9173
         for idx in range(self.sample_groups_per_call):
             frame = (base + idx * 7) % frames
+            row = (base * 7 + idx * 17) % rows
             col = (base * 3 + idx * 11) % width
             head = (base * 5 + idx * 13) % heads
-            groups.append((frame, col, head))
+            groups.append((frame, row, col, head))
         return groups
 
     def add_metrics(self, name, dense_probs, dense_outputs, approx_probs, approx_outputs):
@@ -304,7 +437,7 @@ class AttentionMetricCollector:
         k_grid = k[0].reshape(frames, rows, width, heads, dim)
         v_grid = v[0].reshape(frames, rows, width, heads, dim)
 
-        variants = [
+        column_variants = [
             ("C2_w1", "c", 2),
             ("C4_w1", "c", 4),
             ("C6_w1", "c", 6),
@@ -325,11 +458,20 @@ class AttentionMetricCollector:
             ("w_reduce13", "w", 13),
         ]
 
-        for frame, col, head in self.sample_groups(frames, width, heads):
+        transpose_variants = [
+            ("transpose_C2_w1_with_ith", "transpose_c_ith", 2),
+            ("transpose_C4_w1_with_ith", "transpose_c_ith", 4),
+            ("transpose_C6_w1_with_ith", "transpose_c_ith", 6),
+            ("transpose_select_C2_w1_with_ith", "transpose_select_ith", 2),
+            ("transpose_select_C4_w1_with_ith", "transpose_select_ith", 4),
+            ("transpose_select_C6_w1_with_ith", "transpose_select_ith", 6),
+        ]
+
+        for frame, row, col, head in self.sample_groups(frames, rows, width, heads):
             dense_probs, dense_outputs, _ = dense_attention_for_column(
                 q_grid, k_grid, v_grid, frame, col, head, scale
             )
-            for name, kind, value in variants:
+            for name, kind, value in column_variants:
                 if kind == "w" and width % value:
                     self.invalid[name] = (
                         f"width token count {width} is not divisible by w_reduce={value}; "
@@ -355,6 +497,20 @@ class AttentionMetricCollector:
                 else:
                     approx_probs, approx_outputs = one_token_w_reduce_distribution(
                         q_grid, k_grid, v_grid, frame, col, head, value, scale
+                    )
+                self.add_metrics(name, dense_probs, dense_outputs, approx_probs, approx_outputs)
+
+            dense_probs, dense_outputs, _ = dense_attention_for_row(
+                q_grid, k_grid, v_grid, frame, row, head, scale
+            )
+            for name, kind, value in transpose_variants:
+                if kind == "transpose_c_ith":
+                    approx_probs, approx_outputs = transpose_multi_seed_distribution(
+                        q_grid, k_grid, v_grid, frame, row, head, value, scale, include_ith=True
+                    )
+                else:
+                    approx_probs, approx_outputs = transpose_select_seed_distribution(
+                        q_grid, k_grid, v_grid, frame, row, head, value, scale, include_ith=True
                     )
                 self.add_metrics(name, dense_probs, dense_outputs, approx_probs, approx_outputs)
 

@@ -143,11 +143,77 @@ def _random_seed_rows(
     return scores.topk(num_seeds, dim=-1).indices.long()
 
 
+def _random_seed_columns(
+    query_outer,
+    key_outer,
+    query_rows,
+    key_columns,
+    query_columns,
+    num_seeds,
+    seed,
+    include_ith=False,
+):
+    """Deterministic pseudo-random query-column seeds for transposed blocks."""
+    if num_seeds > query_columns:
+        raise ValueError("num_merge_tokens cannot exceed query columns per block.")
+
+    device = query_outer.device
+    query_row = torch.arange(query_rows, device=device).view(1, 1, query_rows, 1)
+    key_col = torch.arange(key_columns, device=device).view(1, 1, 1, key_columns)
+    base = (
+        query_outer.view(-1, 1, 1, 1) * 73856093
+        + key_outer.view(1, -1, 1, 1) * 19349663
+        + query_row * 83492791
+        + key_col * 2654435761
+        + int(seed)
+    )
+
+    if include_ith:
+        ith_seed = key_col.expand(query_outer.numel(), key_outer.numel(), query_rows, key_columns)
+        if num_seeds == 1:
+            return ith_seed.unsqueeze(-1).long()
+
+        seed_col = torch.arange(query_columns, device=device).view(1, 1, 1, 1, query_columns)
+        scores = (
+            base.unsqueeze(-1).remainder(2147483647)
+            + seed_col * 374761393
+        ).remainder(2147483647)
+        scores = (scores * (scores + 1274126177)).remainder(2147483647)
+        scores = (scores * (scores + 60493)).remainder(2147483647)
+        scores = scores * query_columns + seed_col
+        scores = scores.masked_fill(seed_col == ith_seed.unsqueeze(-1), -1)
+        random_seeds = scores.topk(num_seeds - 1, dim=-1).indices.long()
+        return torch.cat((ith_seed.unsqueeze(-1).long(), random_seeds), dim=-1)
+
+    if num_seeds == 2:
+        col0 = base.remainder(query_columns)
+        step = (base.div(query_columns, rounding_mode="floor").remainder(query_columns - 1)) + 1
+        col1 = (col0 + step).remainder(query_columns)
+        return torch.stack((col0, col1), dim=-1).long()
+
+    seed_col = torch.arange(query_columns, device=device).view(1, 1, 1, 1, query_columns)
+    scores = (
+        base.unsqueeze(-1).remainder(2147483647)
+        + seed_col * 374761393
+    ).remainder(2147483647)
+    scores = (scores * (scores + 1274126177)).remainder(2147483647)
+    scores = (scores * (scores + 60493)).remainder(2147483647)
+    scores = scores * query_columns + seed_col
+    return scores.topk(num_seeds, dim=-1).indices.long()
+
+
 def _gather_seed_queries(q, seed_rows):
     # q: [B, A, I, J, H, D], seed_rows: [A, F, K, J, C].
     query_outer = torch.arange(q.size(1), device=q.device).view(-1, 1, 1, 1, 1)
     query_col = torch.arange(q.size(3), device=q.device).view(1, 1, 1, -1, 1)
     return q[:, query_outer, seed_rows, query_col]
+
+
+def _gather_seed_queries_transpose(q, seed_cols):
+    # q: [B, A, I, J, H, D], seed_cols: [A, F, I, L, C].
+    query_outer = torch.arange(q.size(1), device=q.device).view(-1, 1, 1, 1, 1)
+    query_row = torch.arange(q.size(2), device=q.device).view(1, 1, -1, 1, 1)
+    return q[:, query_outer, query_row, seed_cols]
 
 
 def _assign_keys_to_seeds(seed_logits):
@@ -482,6 +548,162 @@ def _select_seed_query_column_key_row(
     return torch.einsum("bhafjkci,bafjkche->baijhe", routing_weights, merged_values)
 
 
+def _multi_seed_query_row_key_column(
+    q,
+    k,
+    v,
+    scale,
+    num_merge_tokens,
+    seed_mode,
+    seed,
+    query_outer_offset,
+):
+    # Transposed multi-token path:
+    # q:   [B, A, I, J, H, D]
+    # k/v: [B, F, K, L, H, D]
+    # A fixed (a, f, i, l) block has J queries x K keys.
+    include_ith = seed_mode == "random_with_ith"
+    if seed_mode not in {"random", "random_with_ith"}:
+        raise ValueError(
+            "transposed multi-token merging currently supports seed_mode='random' "
+            "or 'random_with_ith'."
+        )
+    if num_merge_tokens > q.size(3):
+        raise ValueError("num_merge_tokens cannot exceed query columns per block.")
+
+    scale_sqrt = scale**0.5
+    q = q * scale_sqrt
+    k = k * scale_sqrt
+
+    query_outer = torch.arange(
+        query_outer_offset,
+        query_outer_offset + q.size(1),
+        device=q.device,
+    )
+    key_outer = torch.arange(k.size(1), device=q.device)
+    seed_cols = _random_seed_columns(
+        query_outer,
+        key_outer,
+        q.size(2),
+        k.size(3),
+        q.size(3),
+        num_merge_tokens,
+        seed,
+        include_ith=include_ith,
+    )
+    seed_queries = _gather_seed_queries_transpose(q, seed_cols)
+
+    seed_logits = torch.einsum("bafilchd,bfklhd->bhafilck", seed_queries, k).float()
+    assignment_mask = _assign_keys_to_seeds(seed_logits)
+    cluster_has_keys = assignment_mask.any(dim=-1)
+
+    masked_logits = seed_logits.masked_fill(~assignment_mask, torch.finfo(seed_logits.dtype).min)
+    merge_logits = masked_logits - masked_logits.amax(dim=-1, keepdim=True)
+    merge_logits = merge_logits.masked_fill(~assignment_mask, torch.finfo(seed_logits.dtype).min)
+    merge_weights = torch.softmax(merge_logits, dim=-1).masked_fill(~assignment_mask, 0).to(k.dtype)
+
+    merged_keys = torch.einsum("bhafilck,bfklhd->bafilchd", merge_weights, k)
+    merged_values = torch.einsum("bhafilck,bfklhe->bafilche", merge_weights, v)
+
+    merge_logprob = merge_logits - torch.logsumexp(merge_logits, dim=-1, keepdim=True)
+    merge_logprob = merge_logprob.masked_fill(~assignment_mask, 0)
+    routing_bias = (merge_weights * merge_logprob).sum(dim=-1)
+    routing_bias = routing_bias.unsqueeze(-1)
+
+    routing_logits = torch.einsum("bafilchd,baijhd->bhafilcj", merged_keys, q)
+    routing_logits = routing_logits - routing_bias
+    routing_logits = routing_logits.masked_fill(
+        ~cluster_has_keys.unsqueeze(-1),
+        torch.finfo(routing_logits.dtype).min,
+    )
+
+    routing_weights = rearrange(routing_logits, "b h a f i l c j -> b h a i j (f l c)")
+    routing_weights = torch.softmax(routing_weights.float(), dim=-1).to(q.dtype)
+    routing_weights = rearrange(
+        routing_weights,
+        "b h a i j (f l c) -> b h a f i l c j",
+        f=k.size(1),
+        l=k.size(3),
+        c=num_merge_tokens,
+    )
+
+    return torch.einsum("bhafilcj,bafilche->baijhe", routing_weights, merged_values)
+
+
+def _select_seed_query_row_key_column(
+    q,
+    k,
+    v,
+    scale,
+    num_merge_tokens,
+    seed_mode,
+    seed,
+    query_outer_offset,
+):
+    # Transposed selective path. Each seed compresses all K key rows in a fixed
+    # (a, f, i, l) block; each query column picks the best compressed KV via
+    # q_j dot K_c + H(alpha_c).
+    include_ith = seed_mode == "random_with_ith"
+    if seed_mode not in {"random", "random_with_ith"}:
+        raise ValueError(
+            "transposed selective token merging currently supports seed_mode='random' "
+            "or 'random_with_ith'."
+        )
+
+    scale_sqrt = scale**0.5
+    q = q * scale_sqrt
+    k = k * scale_sqrt
+
+    query_outer = torch.arange(
+        query_outer_offset,
+        query_outer_offset + q.size(1),
+        device=q.device,
+    )
+    key_outer = torch.arange(k.size(1), device=q.device)
+    seed_cols = _random_seed_columns(
+        query_outer,
+        key_outer,
+        q.size(2),
+        k.size(3),
+        q.size(3),
+        num_merge_tokens,
+        seed,
+        include_ith=include_ith,
+    )
+    seed_queries = _gather_seed_queries_transpose(q, seed_cols)
+
+    merge_logits = torch.einsum("bafilchd,bfklhd->bhafilck", seed_queries, k).float()
+    merge_logits = merge_logits - merge_logits.amax(dim=-1, keepdim=True)
+    merge_weights = torch.softmax(merge_logits, dim=-1).to(k.dtype)
+
+    merged_keys = torch.einsum("bhafilck,bfklhd->bafilchd", merge_weights, k)
+    merged_values = torch.einsum("bhafilck,bfklhe->bafilche", merge_weights, v)
+
+    merge_logprob = merge_logits - torch.logsumexp(merge_logits, dim=-1, keepdim=True)
+    entropy = -(merge_weights.float() * merge_logprob).sum(dim=-1).unsqueeze(-1)
+
+    candidate_scores = torch.einsum("bafilchd,baijhd->bhafilcj", merged_keys, q).float()
+    candidate_scores = candidate_scores + entropy
+    selected_scores, selected_seed = candidate_scores.max(dim=-2)
+
+    routing_weights = rearrange(selected_scores, "b h a f i l j -> b h a i j (f l)")
+    routing_weights = torch.softmax(routing_weights.float(), dim=-1).to(q.dtype)
+    routing_weights = rearrange(
+        routing_weights,
+        "b h a i j (f l) -> b h a f i l j",
+        f=k.size(1),
+        l=k.size(3),
+    )
+
+    selected_seed = torch.nn.functional.one_hot(
+        selected_seed,
+        num_classes=num_merge_tokens,
+    ).movedim(-1, -2).to(q.dtype)
+    routing_weights = routing_weights.unsqueeze(-2) * selected_seed
+
+    return torch.einsum("bhafilcj,bafilche->baijhe", routing_weights, merged_values)
+
+
 def _one_step_query_row_key_column(q, k, v, scale, q_init):
     # Symmetric layout to _one_step_query_column_key_row:
     #   q:   [B, A, I, J, H, D]
@@ -554,10 +776,16 @@ def token_merging_attn(
     if sm_scale is None:
         sm_scale = q.size(-1) ** -0.5
     query_outer_chunk = max(1, int(query_outer_chunk or 1))
-    if layout not in {"query_column_key_row", "query_row_key_column", "query_column_key_row_select", "global"}:
+    if layout not in {
+        "query_column_key_row",
+        "query_row_key_column",
+        "query_column_key_row_select",
+        "query_row_key_column_select",
+        "global",
+    }:
         raise ValueError(
             "layout must be 'query_column_key_row', 'query_row_key_column', "
-            "'query_column_key_row_select', or 'global', "
+            "'query_column_key_row_select', 'query_row_key_column_select', or 'global', "
             f"got {layout!r}."
         )
     if layout == "global":
@@ -576,21 +804,28 @@ def token_merging_attn(
     num_merge_tokens = int(num_merge_tokens)
     if num_merge_tokens < 1:
         raise ValueError(f"num_merge_tokens must be >= 1, got {num_merge_tokens!r}.")
-    if num_merge_tokens > 1 and layout not in {"query_column_key_row", "query_column_key_row_select"}:
+    if num_merge_tokens > 1 and layout not in {
+        "query_column_key_row",
+        "query_column_key_row_select",
+        "query_row_key_column",
+        "query_row_key_column_select",
+    }:
         raise ValueError(
-            "multi-token merging is currently implemented only for "
-            "layout='query_column_key_row' or 'query_column_key_row_select'."
+            "multi-token merging is currently implemented only for query/key row/column layouts."
         )
 
     q_blocks = _video_to_blocks(q, f_tied, h_reduce, w_reduce, h, w)
     k_blocks = _video_to_blocks(k, f_tied, h_reduce, w_reduce, h, w)
     v_blocks = _video_to_blocks(v, f_tied, h_reduce, w_reduce, h, w)
     if num_merge_tokens > 1:
-        one_step = (
-            _select_seed_query_column_key_row
-            if layout == "query_column_key_row_select"
-            else _multi_seed_query_column_key_row
-        )
+        if layout == "query_column_key_row_select":
+            one_step = _select_seed_query_column_key_row
+        elif layout == "query_row_key_column":
+            one_step = _multi_seed_query_row_key_column
+        elif layout == "query_row_key_column_select":
+            one_step = _select_seed_query_row_key_column
+        else:
+            one_step = _multi_seed_query_column_key_row
     else:
         one_step = (
             _one_step_query_column_key_row
