@@ -124,7 +124,17 @@ def one_token_w_reduce_distribution(q_grid, k_grid, v_grid, frame, col, head, w_
     return approx_probs, approx_outputs
 
 
-def multi_seed_distribution(q_grid, k_grid, v_grid, frame, col, head, num_merge_tokens, scale):
+def multi_seed_distribution(
+    q_grid,
+    k_grid,
+    v_grid,
+    frame,
+    col,
+    head,
+    num_merge_tokens,
+    scale,
+    include_ith=False,
+):
     frames, rows, width, _, _ = q_grid.shape
     sqrt_scale = scale**0.5
 
@@ -138,6 +148,7 @@ def multi_seed_distribution(q_grid, k_grid, v_grid, frame, col, head, num_merge_
         rows,
         num_merge_tokens,
         seed=0,
+        include_ith=include_ith,
     )[0, :, :, col]
 
     seed_queries = q_grid[frame, seed_rows, col, head].float() * sqrt_scale
@@ -174,7 +185,17 @@ def multi_seed_distribution(q_grid, k_grid, v_grid, frame, col, head, num_merge_
     return approx_probs, approx_outputs
 
 
-def select_seed_distribution(q_grid, k_grid, v_grid, frame, col, head, num_merge_tokens, scale):
+def select_seed_distribution(
+    q_grid,
+    k_grid,
+    v_grid,
+    frame,
+    col,
+    head,
+    num_merge_tokens,
+    scale,
+    include_ith=False,
+):
     frames, rows, width, _, _ = q_grid.shape
     sqrt_scale = scale**0.5
 
@@ -188,6 +209,7 @@ def select_seed_distribution(q_grid, k_grid, v_grid, frame, col, head, num_merge
         rows,
         num_merge_tokens,
         seed=0,
+        include_ith=include_ith,
     )[0, :, :, col]
 
     seed_queries = q_grid[frame, seed_rows, col, head].float() * sqrt_scale
@@ -287,10 +309,16 @@ class AttentionMetricCollector:
             ("C4_w1", "c", 4),
             ("C6_w1", "c", 6),
             ("C13_w1", "c", 13),
+            ("C2_w1_with_ith", "c_ith", 2),
+            ("C4_w1_with_ith", "c_ith", 4),
+            ("C6_w1_with_ith", "c_ith", 6),
             ("select_C2_w1", "select", 2),
             ("select_C4_w1", "select", 4),
             ("select_C6_w1", "select", 6),
             ("select_C13_w1", "select", 13),
+            ("select_C2_w1_with_ith", "select_ith", 2),
+            ("select_C4_w1_with_ith", "select_ith", 4),
+            ("select_C6_w1_with_ith", "select_ith", 6),
             ("w_reduce2", "w", 2),
             ("w_reduce4", "w", 4),
             ("w_reduce6", "w", 6),
@@ -312,9 +340,17 @@ class AttentionMetricCollector:
                     approx_probs, approx_outputs = multi_seed_distribution(
                         q_grid, k_grid, v_grid, frame, col, head, value, scale
                     )
+                elif kind == "c_ith":
+                    approx_probs, approx_outputs = multi_seed_distribution(
+                        q_grid, k_grid, v_grid, frame, col, head, value, scale, include_ith=True
+                    )
                 elif kind == "select":
                     approx_probs, approx_outputs = select_seed_distribution(
                         q_grid, k_grid, v_grid, frame, col, head, value, scale
+                    )
+                elif kind == "select_ith":
+                    approx_probs, approx_outputs = select_seed_distribution(
+                        q_grid, k_grid, v_grid, frame, col, head, value, scale, include_ith=True
                     )
                 else:
                     approx_probs, approx_outputs = one_token_w_reduce_distribution(
