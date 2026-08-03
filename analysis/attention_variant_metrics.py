@@ -438,6 +438,7 @@ class AttentionMetricCollector:
         v_grid = v[0].reshape(frames, rows, width, heads, dim)
 
         column_variants = [
+            ("MonarchRT", "w", 1),
             ("C2_w1", "c", 2),
             ("C4_w1", "c", 4),
             ("C6_w1", "c", 6),
