@@ -120,7 +120,52 @@ def parse_args():
     parser.add_argument("--dtype", choices=["bf16", "fp16", "fp32"], default="bf16")
     parser.add_argument("--gradient_checkpointing", action="store_true")
     parser.add_argument("--text_len", type=int, default=512)
-    return parser.parse_args()
+    parser.add_argument("--wandb_project", default="")
+    parser.add_argument("--wandb_entity", default="")
+    parser.add_argument("--wandb_run_name", default="")
+    parser.add_argument("--wandb_group", default="")
+    parser.add_argument("--wandb_tags", nargs="*", default=[])
+    parser.add_argument("--wandb_mode", choices=["online", "offline", "disabled"], default="online")
+    args = parser.parse_args()
+    if args.max_steps < 1:
+        parser.error("--max_steps must be at least 1")
+    if args.gradient_accumulation_steps < 1:
+        parser.error("--gradient_accumulation_steps must be at least 1")
+    if args.max_grad_norm <= 0:
+        parser.error("--max_grad_norm must be greater than 0")
+    return args
+
+
+def init_wandb(args, config, attention_mode: str, dataset: FastVideoLatentDataset):
+    if not args.wandb_project:
+        return None
+    try:
+        import wandb
+    except ImportError as exc:
+        raise RuntimeError(
+            "Weights & Biases logging was requested, but wandb is not installed. "
+            "Install the dependencies from requirements.txt."
+        ) from exc
+
+    run_config = vars(args).copy()
+    run_config.update(
+        {
+            "attention_mode": attention_mode,
+            "dataset_rows": len(dataset),
+            "dataset_files": len(dataset.files),
+            "effective_batch_size": args.batch_size * args.gradient_accumulation_steps,
+            "model_config": OmegaConf.to_container(config, resolve=True),
+        }
+    )
+    return wandb.init(
+        project=args.wandb_project,
+        entity=args.wandb_entity or None,
+        name=args.wandb_run_name or None,
+        group=args.wandb_group or None,
+        tags=args.wandb_tags or None,
+        mode=args.wandb_mode,
+        config=run_config,
+    )
 
 
 def load_generator_checkpoint(generator: WanDiffusionWrapper, checkpoint_path: str, use_ema: bool):
@@ -166,6 +211,7 @@ def sample_timesteps(scheduler, batch: int, frames: int, device):
 
 
 def main():
+    torch.set_float32_matmul_precision("high")
     if not torch.cuda.is_available():
         raise RuntimeError("A CUDA/ROCm GPU is required for finetuning.")
 
@@ -204,59 +250,97 @@ def main():
     )
 
     attention_mode = "token-merging" if config.get("token_merging_args", {}).get("enable", False) else "dense"
+    wandb_run = init_wandb(args, config, attention_mode, dataset)
     print(
         f"Training {attention_mode} Wan on {len(dataset)} rows from {len(dataset.files)} parquet files, "
-        f"dtype={dtype}, batch_size={args.batch_size}, max_steps={args.max_steps}."
+        f"dtype={dtype}, batch_size={args.batch_size}, "
+        f"gradient_accumulation_steps={args.gradient_accumulation_steps}, "
+        f"max_steps={args.max_steps} optimizer updates."
     )
 
     output_dir = Path(args.output_dir)
     data_iter = iter(loader)
     optimizer.zero_grad(set_to_none=True)
-    progress = tqdm(range(1, args.max_steps + 1), desc="Finetuning")
+    progress = tqdm(total=args.max_steps, desc="Finetuning", unit="update")
+    micro_step = 0
 
-    for step in progress:
-        try:
-            batch = next(data_iter)
-        except StopIteration:
-            data_iter = iter(loader)
-            batch = next(data_iter)
+    try:
+        for global_step in range(1, args.max_steps + 1):
+            accumulated_loss = 0.0
+            for _ in range(args.gradient_accumulation_steps):
+                try:
+                    batch = next(data_iter)
+                except StopIteration:
+                    data_iter = iter(loader)
+                    batch = next(data_iter)
 
-        clean_latents = batch["latents"].to(device=device, dtype=dtype, non_blocking=True)
-        text_embeddings = [
-            embedding.to(device=device, dtype=dtype, non_blocking=True)
-            for embedding in batch["text_embeddings"]
-        ]
-        noise = torch.randn_like(clean_latents)
-        timesteps = sample_timesteps(generator.scheduler, clean_latents.size(0), clean_latents.size(1), device)
-        noisy_latents = generator.scheduler.add_noise(
-            clean_latents.flatten(0, 1),
-            noise.flatten(0, 1),
-            timesteps.flatten(0, 1),
-        ).unflatten(0, clean_latents.shape[:2])
-        target = generator.scheduler.training_target(
-            clean_latents.flatten(0, 1),
-            noise.flatten(0, 1),
-            timesteps.flatten(0, 1),
-        ).unflatten(0, clean_latents.shape[:2])
+                micro_step += 1
+                clean_latents = batch["latents"].to(device=device, dtype=dtype, non_blocking=True)
+                text_embeddings = [
+                    embedding.to(device=device, dtype=dtype, non_blocking=True)
+                    for embedding in batch["text_embeddings"]
+                ]
+                noise = torch.randn_like(clean_latents)
+                timesteps = sample_timesteps(
+                    generator.scheduler, clean_latents.size(0), clean_latents.size(1), device
+                )
+                noisy_latents = generator.scheduler.add_noise(
+                    clean_latents.flatten(0, 1),
+                    noise.flatten(0, 1),
+                    timesteps.flatten(0, 1),
+                ).unflatten(0, clean_latents.shape[:2])
+                target = generator.scheduler.training_target(
+                    clean_latents.flatten(0, 1),
+                    noise.flatten(0, 1),
+                    timesteps.flatten(0, 1),
+                ).unflatten(0, clean_latents.shape[:2])
 
-        flow_pred, _ = generator(
-            noisy_image_or_video=noisy_latents,
-            conditional_dict={"prompt_embeds": text_embeddings},
-            timestep=timesteps,
-        )
-        loss = F.mse_loss(flow_pred.float(), target.float())
-        (loss / args.gradient_accumulation_steps).backward()
+                flow_pred, _ = generator(
+                    noisy_image_or_video=noisy_latents,
+                    conditional_dict={"prompt_embeds": text_embeddings},
+                    timestep=timesteps,
+                )
+                loss = F.mse_loss(flow_pred.float(), target.float())
+                if not torch.isfinite(loss):
+                    raise FloatingPointError(
+                        f"Non-finite loss at micro_step={micro_step}, global_step={global_step}: "
+                        f"{loss.item()}"
+                    )
+                accumulated_loss += loss.item()
+                (loss / args.gradient_accumulation_steps).backward()
 
-        if step % args.gradient_accumulation_steps == 0:
-            torch.nn.utils.clip_grad_norm_(generator.model.parameters(), args.max_grad_norm)
+            grad_norm = torch.nn.utils.clip_grad_norm_(
+                generator.model.parameters(), args.max_grad_norm, error_if_nonfinite=True
+            )
+            if not torch.isfinite(grad_norm):
+                raise FloatingPointError(
+                    f"Non-finite gradient norm at micro_step={micro_step}, "
+                    f"global_step={global_step}: {grad_norm.item()}"
+                )
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
 
-        progress.set_postfix(loss=f"{loss.item():.5f}")
-        if args.save_steps and step % args.save_steps == 0:
-            save_generator_checkpoint(generator, output_dir, step, config)
+            mean_loss = accumulated_loss / args.gradient_accumulation_steps
+            progress.update(1)
+            progress.set_postfix(loss=f"{mean_loss:.5f}", grad_norm=f"{grad_norm.item():.3f}")
+            if wandb_run is not None:
+                wandb_run.log(
+                    {
+                        "train/loss": mean_loss,
+                        "train/grad_norm": grad_norm.item(),
+                        "train/learning_rate": optimizer.param_groups[0]["lr"],
+                        "train/micro_step": micro_step,
+                    },
+                    step=global_step,
+                )
+            if args.save_steps and global_step % args.save_steps == 0:
+                save_generator_checkpoint(generator, output_dir, global_step, config)
 
-    save_generator_checkpoint(generator, output_dir, args.max_steps, config)
+        save_generator_checkpoint(generator, output_dir, args.max_steps, config)
+    finally:
+        progress.close()
+        if wandb_run is not None:
+            wandb_run.finish()
 
 
 if __name__ == "__main__":

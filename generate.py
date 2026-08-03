@@ -22,6 +22,14 @@ def parse_args():
     parser.add_argument("--use_ema", action="store_true")
     parser.add_argument("--fps", type=int, default=16)
     parser.add_argument("--dtype", choices=["bf16", "fp16"], default="bf16")
+    parser.add_argument(
+        "--vbench_filenames",
+        action="store_true",
+        help=(
+            "Save videos as '<prompt>-<sample>.mp4' for VBench standard evaluation. "
+            "Repeated prompts are generated only once."
+        ),
+    )
     parser.add_argument("--token_merging_w_reduce", type=int, default=None)
     parser.add_argument("--token_merging_query_outer_chunk", type=int, default=None)
     return parser.parse_args()
@@ -79,7 +87,20 @@ def main():
     latent_shape = list(config.image_or_video_shape)
     latent_shape[0] = args.num_samples
 
-    for idx, prompt in tqdm(list(enumerate(prompts)), desc="Generating"):
+    indexed_prompts = list(enumerate(prompts))
+    if args.vbench_filenames:
+        seen_prompts = set()
+        unique_indexed_prompts = []
+        for idx, prompt in indexed_prompts:
+            if prompt in seen_prompts:
+                continue
+            if "/" in prompt or os.sep in prompt:
+                raise ValueError(f"VBench prompt cannot contain a path separator: {prompt!r}")
+            seen_prompts.add(prompt)
+            unique_indexed_prompts.append((idx, prompt))
+        indexed_prompts = unique_indexed_prompts
+
+    for idx, prompt in tqdm(indexed_prompts, desc="Generating"):
         set_seed(args.seed + idx)
         noise = torch.randn(latent_shape, device=device, dtype=dtype)
         text_prompts = [prompt] * args.num_samples
@@ -88,11 +109,14 @@ def main():
         pipeline.vae.model.clear_cache()
 
         for sample_idx in range(args.num_samples):
-            output_path = output_dir / f"{idx:03d}-{sample_idx:02d}.mp4"
+            if args.vbench_filenames:
+                output_path = output_dir / f"{prompt}-{sample_idx}.mp4"
+            else:
+                output_path = output_dir / f"{idx:03d}-{sample_idx:02d}.mp4"
             save_video(str(output_path), video[sample_idx], fps=args.fps)
             print(f"Saved {output_path}")
 
-    print(f"Done. Generated {len(prompts) * args.num_samples} videos in {output_dir}.")
+    print(f"Done. Generated {len(indexed_prompts) * args.num_samples} videos in {output_dir}.")
 
 
 if __name__ == "__main__":

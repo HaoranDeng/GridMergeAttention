@@ -12,3 +12,5 @@ data/
 finetune_preview_contact_sheet.jpg
 .claude/
 dataset_compat/
+successful_runs
+
