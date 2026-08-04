@@ -2,6 +2,24 @@ import torch
 from einops import rearrange
 
 
+_HASH_MOD = 2147483647
+_BLOCK_SEED_MODES = {"random", "random_with_ith"}
+
+_LAYOUT_COLUMN_KEY_ROW = "query_column_key_row"
+_LAYOUT_ROW_KEY_COLUMN = "query_row_key_column"
+_LAYOUT_COLUMN_KEY_ROW_SELECT = "query_column_key_row_select"
+_LAYOUT_ROW_KEY_COLUMN_SELECT = "query_row_key_column_select"
+_LAYOUT_GLOBAL = "global"
+
+_LOCAL_LAYOUTS = {
+    _LAYOUT_COLUMN_KEY_ROW,
+    _LAYOUT_ROW_KEY_COLUMN,
+    _LAYOUT_COLUMN_KEY_ROW_SELECT,
+    _LAYOUT_ROW_KEY_COLUMN_SELECT,
+}
+_SUPPORTED_LAYOUTS = _LOCAL_LAYOUTS | {_LAYOUT_GLOBAL}
+_COLUMN_KEY_ROW_LAYOUTS = {_LAYOUT_COLUMN_KEY_ROW, _LAYOUT_COLUMN_KEY_ROW_SELECT}
+
 _Q_INIT_ALIASES = {
     "identity": "ith",
     "i": "ith",
@@ -12,10 +30,27 @@ _Q_INIT_ALIASES = {
 }
 
 
+def _normalize_q_init(q_init):
+    q_init = (q_init or "ith").lower()
+    return _Q_INIT_ALIASES.get(q_init, q_init)
+
+
+def _scale_qk(q, k, scale):
+    scale_sqrt = scale**0.5
+    return q * scale_sqrt, k * scale_sqrt
+
+
+def _validate_block_seed_mode(seed_mode, context):
+    if seed_mode not in _BLOCK_SEED_MODES:
+        raise ValueError(
+            f"{context} currently supports seed_mode='random' or 'random_with_ith'."
+        )
+    return seed_mode == "random_with_ith"
+
+
 def _merge_query_row(q, key_rows, q_init):
     """Choose query rows used to merge each key row's columns."""
-    q_init = (q_init or "ith").lower()
-    q_init = _Q_INIT_ALIASES.get(q_init, q_init)
+    q_init = _normalize_q_init(q_init)
 
     if q_init == "ith":
         if q.size(2) != key_rows:
@@ -33,8 +68,7 @@ def _merge_query_row(q, key_rows, q_init):
 
 def _merge_query_column(q, key_columns, q_init):
     """Choose query columns used to merge each key column's rows."""
-    q_init = (q_init or "ith").lower()
-    q_init = _Q_INIT_ALIASES.get(q_init, q_init)
+    q_init = _normalize_q_init(q_init)
 
     if q_init == "ith":
         if q.size(3) != key_columns:
@@ -84,6 +118,45 @@ def _blocks_to_video(x, f_tied, h_reduce, w_reduce):
     ).contiguous()
 
 
+def _hashed_candidate_scores(base, num_choices):
+    """Deterministic scores for choosing pseudo-random seed indices."""
+    candidate = torch.arange(num_choices, device=base.device).view(
+        *((1,) * base.ndim),
+        num_choices,
+    )
+    scores = (
+        base.unsqueeze(-1).remainder(_HASH_MOD)
+        + candidate * 374761393
+    ).remainder(_HASH_MOD)
+    scores = (scores * (scores + 1274126177)).remainder(_HASH_MOD)
+    scores = (scores * (scores + 60493)).remainder(_HASH_MOD)
+    return scores * num_choices + candidate, candidate
+
+
+def _seed_indices_from_base(base, num_choices, num_seeds, include_seed=None):
+    """Map a per-block hash base to deterministic seed indices.
+
+    The num_seeds==2 path preserves the original two-seed sampling rule.
+    """
+    if include_seed is not None:
+        if num_seeds == 1:
+            return include_seed.unsqueeze(-1).long()
+
+        scores, candidate = _hashed_candidate_scores(base, num_choices)
+        scores = scores.masked_fill(candidate == include_seed.unsqueeze(-1), -1)
+        random_seeds = scores.topk(num_seeds - 1, dim=-1).indices.long()
+        return torch.cat((include_seed.unsqueeze(-1).long(), random_seeds), dim=-1)
+
+    if num_seeds == 2:
+        seed0 = base.remainder(num_choices)
+        step = (base.div(num_choices, rounding_mode="floor").remainder(num_choices - 1)) + 1
+        seed1 = (seed0 + step).remainder(num_choices)
+        return torch.stack((seed0, seed1), dim=-1).long()
+
+    scores, _ = _hashed_candidate_scores(base, num_choices)
+    return scores.topk(num_seeds, dim=-1).indices.long()
+
+
 def _random_seed_rows(
     query_outer,
     key_outer,
@@ -108,39 +181,10 @@ def _random_seed_rows(
         + query_col * 2654435761
         + int(seed)
     )
-
+    ith_seed = None
     if include_ith:
         ith_seed = key_row.expand(query_outer.numel(), key_outer.numel(), key_rows, query_columns)
-        if num_seeds == 1:
-            return ith_seed.unsqueeze(-1).long()
-
-        query_row = torch.arange(query_rows, device=device).view(1, 1, 1, 1, query_rows)
-        scores = (
-            base.unsqueeze(-1).remainder(2147483647)
-            + query_row * 374761393
-        ).remainder(2147483647)
-        scores = (scores * (scores + 1274126177)).remainder(2147483647)
-        scores = (scores * (scores + 60493)).remainder(2147483647)
-        scores = scores * query_rows + query_row
-        scores = scores.masked_fill(query_row == ith_seed.unsqueeze(-1), -1)
-        random_seeds = scores.topk(num_seeds - 1, dim=-1).indices.long()
-        return torch.cat((ith_seed.unsqueeze(-1).long(), random_seeds), dim=-1)
-
-    if num_seeds == 2:
-        row0 = base.remainder(query_rows)
-        step = (base.div(query_rows, rounding_mode="floor").remainder(query_rows - 1)) + 1
-        row1 = (row0 + step).remainder(query_rows)
-        return torch.stack((row0, row1), dim=-1).long()
-
-    query_row = torch.arange(query_rows, device=device).view(1, 1, 1, 1, query_rows)
-    scores = (
-        base.unsqueeze(-1).remainder(2147483647)
-        + query_row * 374761393
-    ).remainder(2147483647)
-    scores = (scores * (scores + 1274126177)).remainder(2147483647)
-    scores = (scores * (scores + 60493)).remainder(2147483647)
-    scores = scores * query_rows + query_row
-    return scores.topk(num_seeds, dim=-1).indices.long()
+    return _seed_indices_from_base(base, query_rows, num_seeds, include_seed=ith_seed)
 
 
 def _random_seed_columns(
@@ -167,39 +211,10 @@ def _random_seed_columns(
         + key_col * 2654435761
         + int(seed)
     )
-
+    ith_seed = None
     if include_ith:
         ith_seed = key_col.expand(query_outer.numel(), key_outer.numel(), query_rows, key_columns)
-        if num_seeds == 1:
-            return ith_seed.unsqueeze(-1).long()
-
-        seed_col = torch.arange(query_columns, device=device).view(1, 1, 1, 1, query_columns)
-        scores = (
-            base.unsqueeze(-1).remainder(2147483647)
-            + seed_col * 374761393
-        ).remainder(2147483647)
-        scores = (scores * (scores + 1274126177)).remainder(2147483647)
-        scores = (scores * (scores + 60493)).remainder(2147483647)
-        scores = scores * query_columns + seed_col
-        scores = scores.masked_fill(seed_col == ith_seed.unsqueeze(-1), -1)
-        random_seeds = scores.topk(num_seeds - 1, dim=-1).indices.long()
-        return torch.cat((ith_seed.unsqueeze(-1).long(), random_seeds), dim=-1)
-
-    if num_seeds == 2:
-        col0 = base.remainder(query_columns)
-        step = (base.div(query_columns, rounding_mode="floor").remainder(query_columns - 1)) + 1
-        col1 = (col0 + step).remainder(query_columns)
-        return torch.stack((col0, col1), dim=-1).long()
-
-    seed_col = torch.arange(query_columns, device=device).view(1, 1, 1, 1, query_columns)
-    scores = (
-        base.unsqueeze(-1).remainder(2147483647)
-        + seed_col * 374761393
-    ).remainder(2147483647)
-    scores = (scores * (scores + 1274126177)).remainder(2147483647)
-    scores = (scores * (scores + 60493)).remainder(2147483647)
-    scores = scores * query_columns + seed_col
-    return scores.topk(num_seeds, dim=-1).indices.long()
+    return _seed_indices_from_base(base, query_columns, num_seeds, include_seed=ith_seed)
 
 
 def _gather_seed_queries(q, seed_rows):
@@ -233,6 +248,30 @@ def _assign_keys_to_seeds(seed_logits):
         )
 
     return torch.nn.functional.one_hot(assignments, num_classes=seed_logits.size(-2)).movedim(-1, -2).bool()
+
+
+def _hard_merge_weights(seed_logits, dtype):
+    """Assign each key to one seed, then softmax within each hard cluster."""
+    assignment_mask = _assign_keys_to_seeds(seed_logits)
+    cluster_has_keys = assignment_mask.any(dim=-1)
+
+    masked_logits = seed_logits.masked_fill(~assignment_mask, torch.finfo(seed_logits.dtype).min)
+    merge_logits = masked_logits - masked_logits.amax(dim=-1, keepdim=True)
+    merge_logits = merge_logits.masked_fill(~assignment_mask, torch.finfo(seed_logits.dtype).min)
+    merge_weights = torch.softmax(merge_logits, dim=-1).masked_fill(~assignment_mask, 0).to(dtype)
+
+    merge_logprob = merge_logits - torch.logsumexp(merge_logits, dim=-1, keepdim=True)
+    merge_logprob = merge_logprob.masked_fill(~assignment_mask, 0)
+    return merge_weights, merge_logprob, cluster_has_keys
+
+
+def _soft_merge_weights(merge_logits, dtype):
+    """Softmax all keys for each seed and keep the corresponding log-probs."""
+    merge_logits = merge_logits.float()
+    merge_logits = merge_logits - merge_logits.amax(dim=-1, keepdim=True)
+    merge_weights = torch.softmax(merge_logits, dim=-1).to(dtype)
+    merge_logprob = merge_logits - torch.logsumexp(merge_logits, dim=-1, keepdim=True)
+    return merge_weights, merge_logprob
 
 
 def _global_seed_indices(seq_len, seed_ratio, seed_mode, seed, device):
@@ -352,16 +391,12 @@ def _one_step_query_column_key_row(q, k, v, scale, q_init):
     # q:   [B, A, I, J, H, D]
     # k/v: [B, F, K, L, H, D]
     # A single fixed (a, f, j, k) tile is 30 queries x 52 keys by default.
-    scale_sqrt = scale**0.5
-    q = q * scale_sqrt
-    k = k * scale_sqrt
+    q, k = _scale_qk(q, k, scale)
 
     # 1. For each key row k, use the selected query row to merge key columns l.
     selected_q = _merge_query_row(q, k.size(2), q_init)
     merge_logits = torch.einsum("bakjhd,bfklhd->bhafkjl", selected_q, k)
-    merge_logits = merge_logits.float()
-    merge_logits = merge_logits - merge_logits.amax(dim=-1, keepdim=True)
-    merge_weights = torch.softmax(merge_logits, dim=-1).to(k.dtype)
+    merge_weights, merge_logprob = _soft_merge_weights(merge_logits, k.dtype)
 
     merged_keys = torch.einsum("bhafkjl,bfklhd->bafjkhd", merge_weights, k)
     merged_values = torch.einsum("bhafkjl,bfklhe->bafjkhe", merge_weights, v)
@@ -369,7 +404,6 @@ def _one_step_query_column_key_row(q, k, v, scale, q_init):
     # 2. Route each query row i to merged tokens indexed by (f, k).
     # The merge-logprob correction keeps this exactly equivalent to the old
     # one-step implementation while writing it as token merging.
-    merge_logprob = merge_logits - torch.logsumexp(merge_logits, dim=-1, keepdim=True)
     routing_bias = (merge_weights * merge_logprob).sum(dim=-1, keepdim=True)
     routing_bias = routing_bias.transpose(-2, -3)
     routing_logits = torch.einsum("bafjkhd,baijhd->bhafjki", merged_keys, q)
@@ -401,18 +435,11 @@ def _multi_seed_query_column_key_row(
     # k/v: [B, F, K, L, H, D]
     # A fixed (a, f, j, k) block has I queries x L keys. This path merges
     # the L keys into several hard-assigned merged tokens instead of one.
-    include_ith = seed_mode == "random_with_ith"
-    if seed_mode not in {"random", "random_with_ith"}:
-        raise ValueError(
-            "multi-token merging currently supports seed_mode='random' or "
-            "'random_with_ith'."
-        )
+    include_ith = _validate_block_seed_mode(seed_mode, "multi-token merging")
     if num_merge_tokens > k.size(3):
         raise ValueError("num_merge_tokens cannot exceed key columns per block.")
 
-    scale_sqrt = scale**0.5
-    q = q * scale_sqrt
-    k = k * scale_sqrt
+    q, k = _scale_qk(q, k, scale)
 
     query_outer = torch.arange(
         query_outer_offset,
@@ -432,21 +459,12 @@ def _multi_seed_query_column_key_row(
     )
     seed_queries = _gather_seed_queries(q, seed_rows)
 
-    seed_logits = torch.einsum("bafkjchd,bfklhd->bhafkjcl", seed_queries, k)
-    seed_logits = seed_logits.float()
-    assignment_mask = _assign_keys_to_seeds(seed_logits)
-    cluster_has_keys = assignment_mask.any(dim=-1)
-
-    masked_logits = seed_logits.masked_fill(~assignment_mask, torch.finfo(seed_logits.dtype).min)
-    merge_logits = masked_logits - masked_logits.amax(dim=-1, keepdim=True)
-    merge_logits = merge_logits.masked_fill(~assignment_mask, torch.finfo(seed_logits.dtype).min)
-    merge_weights = torch.softmax(merge_logits, dim=-1).masked_fill(~assignment_mask, 0).to(k.dtype)
+    seed_logits = torch.einsum("bafkjchd,bfklhd->bhafkjcl", seed_queries, k).float()
+    merge_weights, merge_logprob, cluster_has_keys = _hard_merge_weights(seed_logits, k.dtype)
 
     merged_keys = torch.einsum("bhafkjcl,bfklhd->bafjkchd", merge_weights, k)
     merged_values = torch.einsum("bhafkjcl,bfklhe->bafjkche", merge_weights, v)
 
-    merge_logprob = merge_logits - torch.logsumexp(merge_logits, dim=-1, keepdim=True)
-    merge_logprob = merge_logprob.masked_fill(~assignment_mask, 0)
     routing_bias = (merge_weights * merge_logprob).sum(dim=-1)
     routing_bias = rearrange(routing_bias, "b h a f k j c -> b h a f j k c 1")
 
@@ -486,16 +504,9 @@ def _select_seed_query_column_key_row(
     # Each seed compresses all L keys in a fixed (a, f, j, k) block. Each
     # query then selects the seed whose compressed distribution maximizes
     # q_i dot K_c + H(alpha_c), the softmax variational objective.
-    include_ith = seed_mode == "random_with_ith"
-    if seed_mode not in {"random", "random_with_ith"}:
-        raise ValueError(
-            "selective token merging currently supports seed_mode='random' or "
-            "'random_with_ith'."
-        )
+    include_ith = _validate_block_seed_mode(seed_mode, "selective token merging")
 
-    scale_sqrt = scale**0.5
-    q = q * scale_sqrt
-    k = k * scale_sqrt
+    q, k = _scale_qk(q, k, scale)
 
     query_outer = torch.arange(
         query_outer_offset,
@@ -515,14 +526,12 @@ def _select_seed_query_column_key_row(
     )
     seed_queries = _gather_seed_queries(q, seed_rows)
 
-    merge_logits = torch.einsum("bafkjchd,bfklhd->bhafkjcl", seed_queries, k).float()
-    merge_logits = merge_logits - merge_logits.amax(dim=-1, keepdim=True)
-    merge_weights = torch.softmax(merge_logits, dim=-1).to(k.dtype)
+    merge_logits = torch.einsum("bafkjchd,bfklhd->bhafkjcl", seed_queries, k)
+    merge_weights, merge_logprob = _soft_merge_weights(merge_logits, k.dtype)
 
     merged_keys = torch.einsum("bhafkjcl,bfklhd->bafjkchd", merge_weights, k)
     merged_values = torch.einsum("bhafkjcl,bfklhe->bafjkche", merge_weights, v)
 
-    merge_logprob = merge_logits - torch.logsumexp(merge_logits, dim=-1, keepdim=True)
     entropy = -(merge_weights.float() * merge_logprob).sum(dim=-1)
     entropy = rearrange(entropy, "b h a f k j c -> b h a f j k c 1")
 
@@ -562,18 +571,11 @@ def _multi_seed_query_row_key_column(
     # q:   [B, A, I, J, H, D]
     # k/v: [B, F, K, L, H, D]
     # A fixed (a, f, i, l) block has J queries x K keys.
-    include_ith = seed_mode == "random_with_ith"
-    if seed_mode not in {"random", "random_with_ith"}:
-        raise ValueError(
-            "transposed multi-token merging currently supports seed_mode='random' "
-            "or 'random_with_ith'."
-        )
+    include_ith = _validate_block_seed_mode(seed_mode, "transposed multi-token merging")
     if num_merge_tokens > q.size(3):
         raise ValueError("num_merge_tokens cannot exceed query columns per block.")
 
-    scale_sqrt = scale**0.5
-    q = q * scale_sqrt
-    k = k * scale_sqrt
+    q, k = _scale_qk(q, k, scale)
 
     query_outer = torch.arange(
         query_outer_offset,
@@ -594,19 +596,11 @@ def _multi_seed_query_row_key_column(
     seed_queries = _gather_seed_queries_transpose(q, seed_cols)
 
     seed_logits = torch.einsum("bafilchd,bfklhd->bhafilck", seed_queries, k).float()
-    assignment_mask = _assign_keys_to_seeds(seed_logits)
-    cluster_has_keys = assignment_mask.any(dim=-1)
-
-    masked_logits = seed_logits.masked_fill(~assignment_mask, torch.finfo(seed_logits.dtype).min)
-    merge_logits = masked_logits - masked_logits.amax(dim=-1, keepdim=True)
-    merge_logits = merge_logits.masked_fill(~assignment_mask, torch.finfo(seed_logits.dtype).min)
-    merge_weights = torch.softmax(merge_logits, dim=-1).masked_fill(~assignment_mask, 0).to(k.dtype)
+    merge_weights, merge_logprob, cluster_has_keys = _hard_merge_weights(seed_logits, k.dtype)
 
     merged_keys = torch.einsum("bhafilck,bfklhd->bafilchd", merge_weights, k)
     merged_values = torch.einsum("bhafilck,bfklhe->bafilche", merge_weights, v)
 
-    merge_logprob = merge_logits - torch.logsumexp(merge_logits, dim=-1, keepdim=True)
-    merge_logprob = merge_logprob.masked_fill(~assignment_mask, 0)
     routing_bias = (merge_weights * merge_logprob).sum(dim=-1)
     routing_bias = routing_bias.unsqueeze(-1)
 
@@ -643,16 +637,9 @@ def _select_seed_query_row_key_column(
     # Transposed selective path. Each seed compresses all K key rows in a fixed
     # (a, f, i, l) block; each query column picks the best compressed KV via
     # q_j dot K_c + H(alpha_c).
-    include_ith = seed_mode == "random_with_ith"
-    if seed_mode not in {"random", "random_with_ith"}:
-        raise ValueError(
-            "transposed selective token merging currently supports seed_mode='random' "
-            "or 'random_with_ith'."
-        )
+    include_ith = _validate_block_seed_mode(seed_mode, "transposed selective token merging")
 
-    scale_sqrt = scale**0.5
-    q = q * scale_sqrt
-    k = k * scale_sqrt
+    q, k = _scale_qk(q, k, scale)
 
     query_outer = torch.arange(
         query_outer_offset,
@@ -672,14 +659,12 @@ def _select_seed_query_row_key_column(
     )
     seed_queries = _gather_seed_queries_transpose(q, seed_cols)
 
-    merge_logits = torch.einsum("bafilchd,bfklhd->bhafilck", seed_queries, k).float()
-    merge_logits = merge_logits - merge_logits.amax(dim=-1, keepdim=True)
-    merge_weights = torch.softmax(merge_logits, dim=-1).to(k.dtype)
+    merge_logits = torch.einsum("bafilchd,bfklhd->bhafilck", seed_queries, k)
+    merge_weights, merge_logprob = _soft_merge_weights(merge_logits, k.dtype)
 
     merged_keys = torch.einsum("bhafilck,bfklhd->bafilchd", merge_weights, k)
     merged_values = torch.einsum("bhafilck,bfklhe->bafilche", merge_weights, v)
 
-    merge_logprob = merge_logits - torch.logsumexp(merge_logits, dim=-1, keepdim=True)
     entropy = -(merge_weights.float() * merge_logprob).sum(dim=-1).unsqueeze(-1)
 
     candidate_scores = torch.einsum("bafilchd,baijhd->bhafilcj", merged_keys, q).float()
@@ -711,22 +696,17 @@ def _one_step_query_row_key_column(q, k, v, scale, q_init):
     # A single fixed (a, f, i, l) tile is 52 queries x 30 keys by default:
     # fixed query row i routes across query columns j, while fixed key column l
     # merges key rows k.
-    scale_sqrt = scale**0.5
-    q = q * scale_sqrt
-    k = k * scale_sqrt
+    q, k = _scale_qk(q, k, scale)
 
     # 1. For each key column l, use the selected query column to merge key rows k.
     selected_q = _merge_query_column(q, k.size(3), q_init)
     merge_logits = torch.einsum("bailhd,bfklhd->bhafilk", selected_q, k)
-    merge_logits = merge_logits.float()
-    merge_logits = merge_logits - merge_logits.amax(dim=-1, keepdim=True)
-    merge_weights = torch.softmax(merge_logits, dim=-1).to(k.dtype)
+    merge_weights, merge_logprob = _soft_merge_weights(merge_logits, k.dtype)
 
     merged_keys = torch.einsum("bhafilk,bfklhd->bafilhd", merge_weights, k)
     merged_values = torch.einsum("bhafilk,bfklhe->bafilhe", merge_weights, v)
 
     # 2. Route each query column j to merged tokens indexed by (f, l).
-    merge_logprob = merge_logits - torch.logsumexp(merge_logits, dim=-1, keepdim=True)
     routing_bias = (merge_weights * merge_logprob).sum(dim=-1, keepdim=True)
     routing_logits = torch.einsum("bafilhd,baijhd->bhafilj", merged_keys, q)
     routing_logits = routing_logits - routing_bias
@@ -741,6 +721,20 @@ def _one_step_query_row_key_column(q, k, v, scale, q_init):
     )
 
     return torch.einsum("bhafilj,bafilhe->baijhe", routing_weights, merged_values)
+
+
+def _local_attention_impl(layout, num_merge_tokens):
+    if num_merge_tokens > 1:
+        return {
+            _LAYOUT_COLUMN_KEY_ROW: _multi_seed_query_column_key_row,
+            _LAYOUT_COLUMN_KEY_ROW_SELECT: _select_seed_query_column_key_row,
+            _LAYOUT_ROW_KEY_COLUMN: _multi_seed_query_row_key_column,
+            _LAYOUT_ROW_KEY_COLUMN_SELECT: _select_seed_query_row_key_column,
+        }[layout]
+
+    if layout in _COLUMN_KEY_ROW_LAYOUTS:
+        return _one_step_query_column_key_row
+    return _one_step_query_row_key_column
 
 
 def token_merging_attn(
@@ -763,7 +757,7 @@ def token_merging_attn(
     global_assign_chunk=None,
     global_query_chunk=None,
 ):
-    """One-step token-merging attention for Wan video tokens."""
+    """Grid-based token-merging attention for Wan video self-attention."""
     # Incoming q/k/v from Wan self-attention:
     #   q/k/v: [batch, sequence, head, dim]
     # Default 480p/81-frame Wan:
@@ -776,19 +770,13 @@ def token_merging_attn(
     if sm_scale is None:
         sm_scale = q.size(-1) ** -0.5
     query_outer_chunk = max(1, int(query_outer_chunk or 1))
-    if layout not in {
-        "query_column_key_row",
-        "query_row_key_column",
-        "query_column_key_row_select",
-        "query_row_key_column_select",
-        "global",
-    }:
+    if layout not in _SUPPORTED_LAYOUTS:
         raise ValueError(
             "layout must be 'query_column_key_row', 'query_row_key_column', "
             "'query_column_key_row_select', 'query_row_key_column_select', or 'global', "
             f"got {layout!r}."
         )
-    if layout == "global":
+    if layout == _LAYOUT_GLOBAL:
         return _global_token_merging_attn(
             q,
             k,
@@ -804,12 +792,7 @@ def token_merging_attn(
     num_merge_tokens = int(num_merge_tokens)
     if num_merge_tokens < 1:
         raise ValueError(f"num_merge_tokens must be >= 1, got {num_merge_tokens!r}.")
-    if num_merge_tokens > 1 and layout not in {
-        "query_column_key_row",
-        "query_column_key_row_select",
-        "query_row_key_column",
-        "query_row_key_column_select",
-    }:
+    if num_merge_tokens > 1 and layout not in _LOCAL_LAYOUTS:
         raise ValueError(
             "multi-token merging is currently implemented only for query/key row/column layouts."
         )
@@ -817,21 +800,7 @@ def token_merging_attn(
     q_blocks = _video_to_blocks(q, f_tied, h_reduce, w_reduce, h, w)
     k_blocks = _video_to_blocks(k, f_tied, h_reduce, w_reduce, h, w)
     v_blocks = _video_to_blocks(v, f_tied, h_reduce, w_reduce, h, w)
-    if num_merge_tokens > 1:
-        if layout == "query_column_key_row_select":
-            one_step = _select_seed_query_column_key_row
-        elif layout == "query_row_key_column":
-            one_step = _multi_seed_query_row_key_column
-        elif layout == "query_row_key_column_select":
-            one_step = _select_seed_query_row_key_column
-        else:
-            one_step = _multi_seed_query_column_key_row
-    else:
-        one_step = (
-            _one_step_query_column_key_row
-            if layout in {"query_column_key_row", "query_column_key_row_select"}
-            else _one_step_query_row_key_column
-        )
+    one_step = _local_attention_impl(layout, num_merge_tokens)
 
     out = torch.empty_like(v_blocks)
     for start in range(0, q_blocks.size(1), query_outer_chunk):
