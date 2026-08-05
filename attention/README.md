@@ -13,6 +13,8 @@ lives in its own file:
 
 - `gridmerge_one.py`: one-token GridMerge / MonarchRT-style compression.
 - `hard_route.py`: C-seed hard-route compression.
+- `hard_route_group_shared.py`: experimental hard-route compression shared
+  inside query-outer groups.
 - `hard_route_shared.py`: experimental C-seed hard-route compression shared
   across query outers.
 - `hard_route_triton.py`: optional fused Triton KV-compression kernel plus an
@@ -57,6 +59,8 @@ With `num_merge_tokens=C>1`, the two multi-token modes are:
 
 - `hard_route`: sample C seed queries, hard-route each key to its best seed,
   then merge one KV token per seed.
+- `hard_route_group_shared`: same hard-route compression, but one compressed KV
+  set is shared by each query-outer group. `query_outer_chunk` is the group size.
 - `hard_route_shared`: same C-seed hard-route compression, but each key outer
   is compressed once with its matching query outer and then reused for every
   query outer.
