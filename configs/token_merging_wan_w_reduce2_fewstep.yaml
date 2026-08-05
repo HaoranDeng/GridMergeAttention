@@ -18,4 +18,5 @@ token_merging_args:
   f_tied: 1
   h_reduce: 1
   w_reduce: 2
+  layout: hard_route
   q_init: ith

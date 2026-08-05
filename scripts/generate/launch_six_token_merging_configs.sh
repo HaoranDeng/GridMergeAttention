@@ -19,21 +19,21 @@ DTYPE="${DTYPE:-bf16}"
 read -r -a GPU_ID_LIST <<< "${GPU_IDS:-0 1 2 3 4 5}"
 
 CONFIGS=(
-  "configs/token_merging_wan_two_seed_fewstep.yaml"
-  "configs/token_merging_wan_four_seed_fewstep.yaml"
-  "configs/token_merging_wan_six_seed_fewstep.yaml"
-  "configs/token_merging_wan_select_c2_fewstep.yaml"
-  "configs/token_merging_wan_select_c4_fewstep.yaml"
-  "configs/token_merging_wan_select_c6_fewstep.yaml"
+  "configs/token_merging_wan_hard_route_c2_fewstep.yaml"
+  "configs/token_merging_wan_hard_route_c4_fewstep.yaml"
+  "configs/token_merging_wan_hard_route_c6_fewstep.yaml"
+  "configs/token_merging_wan_select_route_c2_fewstep.yaml"
+  "configs/token_merging_wan_select_route_c4_fewstep.yaml"
+  "configs/token_merging_wan_select_route_c6_fewstep.yaml"
 )
 
 RUN_NAMES=(
-  "hard_c2"
-  "hard_c4"
-  "hard_c6"
-  "select_c2"
-  "select_c4"
-  "select_c6"
+  "hard_route_c2"
+  "hard_route_c4"
+  "hard_route_c6"
+  "select_route_c2"
+  "select_route_c4"
+  "select_route_c6"
 )
 
 if (( ${#GPU_ID_LIST[@]} != ${#CONFIGS[@]} )); then

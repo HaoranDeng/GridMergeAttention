@@ -177,7 +177,7 @@ def one_token_h_reduce_distribution(q_grid, k_grid, v_grid, frame, col, head, h_
     return approx_probs, approx_outputs
 
 
-def multi_seed_distribution(
+def hard_route_distribution(
     q_grid,
     k_grid,
     v_grid,
@@ -238,7 +238,7 @@ def multi_seed_distribution(
     return approx_probs, approx_outputs
 
 
-def select_seed_distribution(
+def select_route_distribution(
     q_grid,
     k_grid,
     v_grid,
@@ -296,7 +296,7 @@ def select_seed_distribution(
     return approx_probs, approx_outputs
 
 
-def transpose_multi_seed_distribution(
+def hard_route_transpose_distribution(
     q_grid,
     k_grid,
     v_grid,
@@ -362,7 +362,7 @@ def transpose_multi_seed_distribution(
     return approx_probs, approx_outputs
 
 
-def transpose_select_seed_distribution(
+def select_route_transpose_distribution(
     q_grid,
     k_grid,
     v_grid,
@@ -484,20 +484,20 @@ class AttentionMetricCollector:
             ("MonarchRT", "w", 1),
             ("MonarchRT_h_reduce2", "h", 2),
             ("MonarchRT_h_reduce4", "h", 4),
-            ("C2_w1", "c", 2),
-            ("C4_w1", "c", 4),
-            ("C6_w1", "c", 6),
-            ("C13_w1", "c", 13),
-            ("C2_w1_with_ith", "c_ith", 2),
-            ("C4_w1_with_ith", "c_ith", 4),
-            ("C6_w1_with_ith", "c_ith", 6),
-            ("select_C2_w1", "select", 2),
-            ("select_C4_w1", "select", 4),
-            ("select_C6_w1", "select", 6),
-            ("select_C13_w1", "select", 13),
-            ("select_C2_w1_with_ith", "select_ith", 2),
-            ("select_C4_w1_with_ith", "select_ith", 4),
-            ("select_C6_w1_with_ith", "select_ith", 6),
+            ("hard_route_C2_w1", "hard_route", 2),
+            ("hard_route_C4_w1", "hard_route", 4),
+            ("hard_route_C6_w1", "hard_route", 6),
+            ("hard_route_C13_w1", "hard_route", 13),
+            ("hard_route_C2_w1_with_ith", "hard_route_ith", 2),
+            ("hard_route_C4_w1_with_ith", "hard_route_ith", 4),
+            ("hard_route_C6_w1_with_ith", "hard_route_ith", 6),
+            ("select_route_C2_w1", "select_route", 2),
+            ("select_route_C4_w1", "select_route", 4),
+            ("select_route_C6_w1", "select_route", 6),
+            ("select_route_C13_w1", "select_route", 13),
+            ("select_route_C2_w1_with_ith", "select_route_ith", 2),
+            ("select_route_C4_w1_with_ith", "select_route_ith", 4),
+            ("select_route_C6_w1_with_ith", "select_route_ith", 6),
             ("w_reduce2", "w", 2),
             ("w_reduce4", "w", 4),
             ("w_reduce6", "w", 6),
@@ -505,12 +505,12 @@ class AttentionMetricCollector:
         ]
 
         transpose_variants = [
-            ("transpose_C2_w1_with_ith", "transpose_c_ith", 2),
-            ("transpose_C4_w1_with_ith", "transpose_c_ith", 4),
-            ("transpose_C6_w1_with_ith", "transpose_c_ith", 6),
-            ("transpose_select_C2_w1_with_ith", "transpose_select_ith", 2),
-            ("transpose_select_C4_w1_with_ith", "transpose_select_ith", 4),
-            ("transpose_select_C6_w1_with_ith", "transpose_select_ith", 6),
+            ("hard_route_C2_w1_with_ith_transpose", "hard_route_ith_transpose", 2),
+            ("hard_route_C4_w1_with_ith_transpose", "hard_route_ith_transpose", 4),
+            ("hard_route_C6_w1_with_ith_transpose", "hard_route_ith_transpose", 6),
+            ("select_route_C2_w1_with_ith_transpose", "select_route_ith_transpose", 2),
+            ("select_route_C4_w1_with_ith_transpose", "select_route_ith_transpose", 4),
+            ("select_route_C6_w1_with_ith_transpose", "select_route_ith_transpose", 6),
         ]
 
         for frame, row, col, head in self.sample_groups(frames, rows, width, heads):
@@ -530,20 +530,20 @@ class AttentionMetricCollector:
                         "current token_merging_attn requires exact divisibility."
                     )
                     continue
-                if kind == "c":
-                    approx_probs, approx_outputs = multi_seed_distribution(
+                if kind == "hard_route":
+                    approx_probs, approx_outputs = hard_route_distribution(
                         q_grid, k_grid, v_grid, frame, col, head, value, scale
                     )
-                elif kind == "c_ith":
-                    approx_probs, approx_outputs = multi_seed_distribution(
+                elif kind == "hard_route_ith":
+                    approx_probs, approx_outputs = hard_route_distribution(
                         q_grid, k_grid, v_grid, frame, col, head, value, scale, include_ith=True
                     )
-                elif kind == "select":
-                    approx_probs, approx_outputs = select_seed_distribution(
+                elif kind == "select_route":
+                    approx_probs, approx_outputs = select_route_distribution(
                         q_grid, k_grid, v_grid, frame, col, head, value, scale
                     )
-                elif kind == "select_ith":
-                    approx_probs, approx_outputs = select_seed_distribution(
+                elif kind == "select_route_ith":
+                    approx_probs, approx_outputs = select_route_distribution(
                         q_grid, k_grid, v_grid, frame, col, head, value, scale, include_ith=True
                     )
                 elif kind == "h":
@@ -560,12 +560,12 @@ class AttentionMetricCollector:
                 q_grid, k_grid, v_grid, frame, row, head, scale
             )
             for name, kind, value in transpose_variants:
-                if kind == "transpose_c_ith":
-                    approx_probs, approx_outputs = transpose_multi_seed_distribution(
+                if kind == "hard_route_ith_transpose":
+                    approx_probs, approx_outputs = hard_route_transpose_distribution(
                         q_grid, k_grid, v_grid, frame, row, head, value, scale, include_ith=True
                     )
                 else:
-                    approx_probs, approx_outputs = transpose_select_seed_distribution(
+                    approx_probs, approx_outputs = select_route_transpose_distribution(
                         q_grid, k_grid, v_grid, frame, row, head, value, scale, include_ith=True
                     )
                 self.add_metrics(name, dense_probs, dense_outputs, approx_probs, approx_outputs)

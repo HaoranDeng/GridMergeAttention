@@ -18,5 +18,8 @@ token_merging_args:
   f_tied: 1
   h_reduce: 1
   w_reduce: 1
+  layout: hard_route
   q_init: ith
-  layout: query_row_key_column
+  num_merge_tokens: 13
+  seed_mode: random
+  seed: 0

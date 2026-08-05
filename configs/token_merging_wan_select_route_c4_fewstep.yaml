@@ -18,6 +18,7 @@ token_merging_args:
   f_tied: 1
   h_reduce: 1
   w_reduce: 1
+  layout: select_route
   q_init: ith
   num_merge_tokens: 4
   seed_mode: random_with_ith

@@ -239,7 +239,7 @@ class WanSelfAttention(nn.Module):
         self.token_merging_f_tied = 1
         self.token_merging_q_init = None
         self.token_merging_query_outer_chunk = None
-        self.token_merging_layout = "query_column_key_row"
+        self.token_merging_layout = "hard_route"
         self.token_merging_num_merge_tokens = 1
         self.token_merging_seed_mode = "random"
         self.token_merging_seed = 0
@@ -787,7 +787,7 @@ class WanModel(ModelMixin, ConfigMixin):
         w_reduce = args.get("w_reduce", 1)
         q_init = args.get("q_init", None)
         query_outer_chunk = args.get("query_outer_chunk", None)
-        layout = args.get("layout", "query_column_key_row")
+        layout = args.get("layout", "hard_route")
         num_merge_tokens = args.get("num_merge_tokens", 1)
         seed_mode = args.get("seed_mode", "random")
         seed = args.get("seed", 0)

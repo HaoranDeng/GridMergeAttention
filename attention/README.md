@@ -8,7 +8,7 @@ q, k, v: [batch, sequence, head, dim]
 out:     [batch, sequence, head, dim]
 ```
 
-`token_merging.py` is the one-step token-merging attention path. For default
+`token_merging.py` contains the GridMerge attention paths. For default
 480p/81-frame Wan generation, the sequence is rearranged into:
 
 ```text
@@ -17,10 +17,14 @@ k: [batch, key_outer=21, key_row=30, key_column=52, head, dim]
 v: [batch, key_outer=21, key_row=30, key_column=52, head, dim]
 ```
 
-Each fixed `(query_outer, key_outer, query_column, key_row)` tile is a
-`30 queries x 52 keys` attention block. The code first merges the `52`
-key-column tokens into one merged key/value token, then routes the `30`
-query rows to those merged tokens.
+In the default `hard_route` / `select_route` layout, each fixed
+`(query_outer, key_outer, query_column, key_row)` tile is a
+`30 queries x 52 keys` attention block. `hard_route_transpose` and
+`select_route_transpose` swap the row/column grouping and use
+`52 queries x 30 keys` blocks.
+
+With `num_merge_tokens=1`, GridMerge compresses each key group into one merged
+key/value token, then routes the query group to those merged tokens.
 
 ```text
 merge_weights:   [52]
@@ -33,6 +37,14 @@ The only approximation step is:
 ```text
 select merge query -> merge key/value tokens -> route queries -> aggregate values
 ```
+
+With `num_merge_tokens=C>1`, the two multi-token modes are:
+
+- `hard_route`: sample C seed queries, hard-route each key to its best seed,
+  then merge one KV token per seed.
+- `select_route`: each seed independently compresses the full key group; each
+  query then selects the best compressed KV candidate with the
+  dot-product-plus-entropy score.
 
 The easiest experimental hook is `q_init` in `_merge_query`:
 

@@ -5,20 +5,27 @@ from einops import rearrange
 _HASH_MOD = 2147483647
 _BLOCK_SEED_MODES = {"random", "random_with_ith"}
 
-_LAYOUT_COLUMN_KEY_ROW = "query_column_key_row"
-_LAYOUT_ROW_KEY_COLUMN = "query_row_key_column"
-_LAYOUT_COLUMN_KEY_ROW_SELECT = "query_column_key_row_select"
-_LAYOUT_ROW_KEY_COLUMN_SELECT = "query_row_key_column_select"
+_LAYOUT_HARD_ROUTE = "hard_route"
+_LAYOUT_SELECT_ROUTE = "select_route"
+_LAYOUT_HARD_ROUTE_TRANSPOSE = "hard_route_transpose"
+_LAYOUT_SELECT_ROUTE_TRANSPOSE = "select_route_transpose"
 _LAYOUT_GLOBAL = "global"
 
 _LOCAL_LAYOUTS = {
-    _LAYOUT_COLUMN_KEY_ROW,
-    _LAYOUT_ROW_KEY_COLUMN,
-    _LAYOUT_COLUMN_KEY_ROW_SELECT,
-    _LAYOUT_ROW_KEY_COLUMN_SELECT,
+    _LAYOUT_HARD_ROUTE,
+    _LAYOUT_SELECT_ROUTE,
+    _LAYOUT_HARD_ROUTE_TRANSPOSE,
+    _LAYOUT_SELECT_ROUTE_TRANSPOSE,
 }
 _SUPPORTED_LAYOUTS = _LOCAL_LAYOUTS | {_LAYOUT_GLOBAL}
-_COLUMN_KEY_ROW_LAYOUTS = {_LAYOUT_COLUMN_KEY_ROW, _LAYOUT_COLUMN_KEY_ROW_SELECT}
+_DEFAULT_GRID_LAYOUTS = {_LAYOUT_HARD_ROUTE, _LAYOUT_SELECT_ROUTE}
+_LAYOUT_ALIASES = {
+    # Backward-compatible names used by older configs.
+    "query_column_key_row": _LAYOUT_HARD_ROUTE,
+    "query_column_key_row_select": _LAYOUT_SELECT_ROUTE,
+    "query_row_key_column": _LAYOUT_HARD_ROUTE_TRANSPOSE,
+    "query_row_key_column_select": _LAYOUT_SELECT_ROUTE_TRANSPOSE,
+}
 
 _Q_INIT_ALIASES = {
     "identity": "ith",
@@ -33,6 +40,11 @@ _Q_INIT_ALIASES = {
 def _normalize_q_init(q_init):
     q_init = (q_init or "ith").lower()
     return _Q_INIT_ALIASES.get(q_init, q_init)
+
+
+def _normalize_layout(layout):
+    layout = layout or _LAYOUT_HARD_ROUTE
+    return _LAYOUT_ALIASES.get(layout, layout)
 
 
 def _scale_qk(q, k, scale):
@@ -250,8 +262,8 @@ def _assign_keys_to_seeds(seed_logits):
     return torch.nn.functional.one_hot(assignments, num_classes=seed_logits.size(-2)).movedim(-1, -2).bool()
 
 
-def _hard_merge_weights(seed_logits, dtype):
-    """Assign each key to one seed, then softmax within each hard cluster."""
+def _hard_route_merge_weights(seed_logits, dtype):
+    """Assign each key to one seed, then softmax within each routed cluster."""
     assignment_mask = _assign_keys_to_seeds(seed_logits)
     cluster_has_keys = assignment_mask.any(dim=-1)
 
@@ -383,7 +395,7 @@ def _global_token_merging_attn(
     return out.permute(0, 2, 1, 3).contiguous()
 
 
-def _one_step_query_column_key_row(q, k, v, scale, q_init):
+def _one_step_gridmerge(q, k, v, scale, q_init):
     # Dimension letters used below:
     #   b batch, a query_outer, f key_outer, i query_row, j query_column,
     #   k key_row, l key_column, h head, d/e head_dim.
@@ -421,7 +433,7 @@ def _one_step_query_column_key_row(q, k, v, scale, q_init):
     return torch.einsum("bhafjki,bafjkhe->baijhe", routing_weights, merged_values)
 
 
-def _multi_seed_query_column_key_row(
+def _hard_route_attention(
     q,
     k,
     v,
@@ -460,7 +472,7 @@ def _multi_seed_query_column_key_row(
     seed_queries = _gather_seed_queries(q, seed_rows)
 
     seed_logits = torch.einsum("bafkjchd,bfklhd->bhafkjcl", seed_queries, k).float()
-    merge_weights, merge_logprob, cluster_has_keys = _hard_merge_weights(seed_logits, k.dtype)
+    merge_weights, merge_logprob, cluster_has_keys = _hard_route_merge_weights(seed_logits, k.dtype)
 
     merged_keys = torch.einsum("bhafkjcl,bfklhd->bafjkchd", merge_weights, k)
     merged_values = torch.einsum("bhafkjcl,bfklhe->bafjkche", merge_weights, v)
@@ -489,7 +501,7 @@ def _multi_seed_query_column_key_row(
     return torch.einsum("bhafjkci,bafjkche->baijhe", routing_weights, merged_values)
 
 
-def _select_seed_query_column_key_row(
+def _select_route_attention(
     q,
     k,
     v,
@@ -557,7 +569,7 @@ def _select_seed_query_column_key_row(
     return torch.einsum("bhafjkci,bafjkche->baijhe", routing_weights, merged_values)
 
 
-def _multi_seed_query_row_key_column(
+def _hard_route_attention_transpose(
     q,
     k,
     v,
@@ -596,7 +608,7 @@ def _multi_seed_query_row_key_column(
     seed_queries = _gather_seed_queries_transpose(q, seed_cols)
 
     seed_logits = torch.einsum("bafilchd,bfklhd->bhafilck", seed_queries, k).float()
-    merge_weights, merge_logprob, cluster_has_keys = _hard_merge_weights(seed_logits, k.dtype)
+    merge_weights, merge_logprob, cluster_has_keys = _hard_route_merge_weights(seed_logits, k.dtype)
 
     merged_keys = torch.einsum("bhafilck,bfklhd->bafilchd", merge_weights, k)
     merged_values = torch.einsum("bhafilck,bfklhe->bafilche", merge_weights, v)
@@ -624,7 +636,7 @@ def _multi_seed_query_row_key_column(
     return torch.einsum("bhafilcj,bafilche->baijhe", routing_weights, merged_values)
 
 
-def _select_seed_query_row_key_column(
+def _select_route_attention_transpose(
     q,
     k,
     v,
@@ -689,8 +701,8 @@ def _select_seed_query_row_key_column(
     return torch.einsum("bhafilcj,bafilche->baijhe", routing_weights, merged_values)
 
 
-def _one_step_query_row_key_column(q, k, v, scale, q_init):
-    # Symmetric layout to _one_step_query_column_key_row:
+def _one_step_gridmerge_transpose(q, k, v, scale, q_init):
+    # Symmetric layout to _one_step_gridmerge:
     #   q:   [B, A, I, J, H, D]
     #   k/v: [B, F, K, L, H, D]
     # A single fixed (a, f, i, l) tile is 52 queries x 30 keys by default:
@@ -726,15 +738,15 @@ def _one_step_query_row_key_column(q, k, v, scale, q_init):
 def _local_attention_impl(layout, num_merge_tokens):
     if num_merge_tokens > 1:
         return {
-            _LAYOUT_COLUMN_KEY_ROW: _multi_seed_query_column_key_row,
-            _LAYOUT_COLUMN_KEY_ROW_SELECT: _select_seed_query_column_key_row,
-            _LAYOUT_ROW_KEY_COLUMN: _multi_seed_query_row_key_column,
-            _LAYOUT_ROW_KEY_COLUMN_SELECT: _select_seed_query_row_key_column,
+            _LAYOUT_HARD_ROUTE: _hard_route_attention,
+            _LAYOUT_SELECT_ROUTE: _select_route_attention,
+            _LAYOUT_HARD_ROUTE_TRANSPOSE: _hard_route_attention_transpose,
+            _LAYOUT_SELECT_ROUTE_TRANSPOSE: _select_route_attention_transpose,
         }[layout]
 
-    if layout in _COLUMN_KEY_ROW_LAYOUTS:
-        return _one_step_query_column_key_row
-    return _one_step_query_row_key_column
+    if layout in _DEFAULT_GRID_LAYOUTS:
+        return _one_step_gridmerge
+    return _one_step_gridmerge_transpose
 
 
 def token_merging_attn(
@@ -749,7 +761,7 @@ def token_merging_attn(
     sm_scale=None,
     q_init=None,
     query_outer_chunk=None,
-    layout="query_column_key_row",
+    layout=_LAYOUT_HARD_ROUTE,
     num_merge_tokens=1,
     seed_mode="random",
     seed=0,
@@ -770,10 +782,11 @@ def token_merging_attn(
     if sm_scale is None:
         sm_scale = q.size(-1) ** -0.5
     query_outer_chunk = max(1, int(query_outer_chunk or 1))
+    layout = _normalize_layout(layout)
     if layout not in _SUPPORTED_LAYOUTS:
         raise ValueError(
-            "layout must be 'query_column_key_row', 'query_row_key_column', "
-            "'query_column_key_row_select', 'query_row_key_column_select', or 'global', "
+            "layout must be 'hard_route', 'select_route', 'hard_route_transpose', "
+            "'select_route_transpose', or 'global', "
             f"got {layout!r}."
         )
     if layout == _LAYOUT_GLOBAL:
