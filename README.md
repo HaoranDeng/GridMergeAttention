@@ -38,6 +38,10 @@ Supported local layouts:
 
 - `hard_route`: default GridMerge layout. A block fixes one query column and one
   key row, so the default 480p token grid gives a `30q x 52k` block.
+- `hard_route_shared`: experimental C-seed hard-route variant. It compresses
+  each key outer once using the matching query outer as seeds, then shares those
+  compressed KV tokens across all query outers. This is faster but is a slight
+  method change from `hard_route`.
 - `select_route`: same block shape, but each query chooses among several
   candidate compressed KV tokens.
 - `hard_route_transpose`: transposed layout. A block fixes one query row and one
@@ -76,6 +80,8 @@ Useful configs:
 - `configs/token_merging_wan_hard_route_c2_triton_fewstep.yaml`: hard-route C=2 with fused Triton KV compression.
 - `configs/token_merging_wan_hard_route_c4_fewstep.yaml`: hard-route C=4.
 - `configs/token_merging_wan_hard_route_c4_triton_fewstep.yaml`: hard-route C=4 with fused Triton KV compression.
+- `configs/token_merging_wan_hard_route_c4_triton_chunk21_fewstep.yaml`: hard-route C=4 with fused Triton KV compression and full-query-outer chunking.
+- `configs/token_merging_wan_hard_route_c4_shared_triton_fewstep.yaml`: experimental shared-compression hard-route C=4.
 - `configs/token_merging_wan_hard_route_c6_fewstep.yaml`: hard-route C=6.
 - `configs/token_merging_wan_hard_route_c6_triton_fewstep.yaml`: hard-route C=6 with fused Triton KV compression.
 - `configs/token_merging_wan_hard_route_c13_fewstep.yaml`: hard-route C=13.

@@ -4,25 +4,28 @@ from .common import blocks_to_video, video_to_blocks
 from .gridmerge_one import gridmerge_one
 from .gridmerge_one_transpose import gridmerge_one_transpose
 from .hard_route import hard_route_attention
+from .hard_route_shared import hard_route_shared_attention
 from .hard_route_transpose import hard_route_attention_transpose
 from .select_route import select_route_attention
 from .select_route_transpose import select_route_attention_transpose
 
 
 LAYOUT_HARD_ROUTE = "hard_route"
+LAYOUT_HARD_ROUTE_SHARED = "hard_route_shared"
 LAYOUT_SELECT_ROUTE = "select_route"
 LAYOUT_HARD_ROUTE_TRANSPOSE = "hard_route_transpose"
 LAYOUT_SELECT_ROUTE_TRANSPOSE = "select_route_transpose"
 
 LOCAL_LAYOUTS = {
     LAYOUT_HARD_ROUTE,
+    LAYOUT_HARD_ROUTE_SHARED,
     LAYOUT_SELECT_ROUTE,
     LAYOUT_HARD_ROUTE_TRANSPOSE,
     LAYOUT_SELECT_ROUTE_TRANSPOSE,
 }
 SUPPORTED_LAYOUTS = LOCAL_LAYOUTS
 DEFAULT_GRID_LAYOUTS = {LAYOUT_HARD_ROUTE, LAYOUT_SELECT_ROUTE}
-HARD_ROUTE_LAYOUTS = {LAYOUT_HARD_ROUTE, LAYOUT_HARD_ROUTE_TRANSPOSE}
+HARD_ROUTE_LAYOUTS = {LAYOUT_HARD_ROUTE, LAYOUT_HARD_ROUTE_SHARED, LAYOUT_HARD_ROUTE_TRANSPOSE}
 
 LAYOUT_ALIASES = {
     # Backward-compatible names used by older configs.
@@ -42,6 +45,7 @@ def _local_attention_impl(layout, num_merge_tokens):
     if num_merge_tokens > 1:
         return {
             LAYOUT_HARD_ROUTE: hard_route_attention,
+            LAYOUT_HARD_ROUTE_SHARED: hard_route_shared_attention,
             LAYOUT_SELECT_ROUTE: select_route_attention,
             LAYOUT_HARD_ROUTE_TRANSPOSE: hard_route_attention_transpose,
             LAYOUT_SELECT_ROUTE_TRANSPOSE: select_route_attention_transpose,
@@ -98,11 +102,27 @@ def token_merging_attn(
         raise ValueError(
             "multi-token merging is currently implemented only for grid layouts."
         )
+    if layout == LAYOUT_HARD_ROUTE_SHARED and num_merge_tokens == 1:
+        raise ValueError("layout='hard_route_shared' requires num_merge_tokens > 1.")
 
     q_blocks = video_to_blocks(q, f_tied, h_reduce, w_reduce, h, w)
     k_blocks = video_to_blocks(k, f_tied, h_reduce, w_reduce, h, w)
     v_blocks = video_to_blocks(v, f_tied, h_reduce, w_reduce, h, w)
     attention_impl = _local_attention_impl(layout, num_merge_tokens)
+
+    if layout == LAYOUT_HARD_ROUTE_SHARED:
+        out = attention_impl(
+            q_blocks,
+            k_blocks,
+            v_blocks,
+            sm_scale,
+            num_merge_tokens,
+            seed_mode,
+            seed,
+            0,
+            hard_route_backend,
+        )
+        return blocks_to_video(out, f_tied, h_reduce, w_reduce)
 
     out = torch.empty_like(v_blocks)
     for start in range(0, q_blocks.size(1), query_outer_chunk):
@@ -137,6 +157,7 @@ __all__ = [
     "token_merging_attn",
     "normalize_layout",
     "LAYOUT_HARD_ROUTE",
+    "LAYOUT_HARD_ROUTE_SHARED",
     "LAYOUT_SELECT_ROUTE",
     "LAYOUT_HARD_ROUTE_TRANSPOSE",
     "LAYOUT_SELECT_ROUTE_TRANSPOSE",
