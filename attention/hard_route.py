@@ -26,14 +26,11 @@ def assign_keys_to_seeds(seed_logits):
     best_key_per_seed = seed_logits.argmax(dim=-1)
     key_idx = torch.arange(num_keys, device=seed_logits.device)
     key_idx = key_idx.view(*((1,) * best_key_per_seed.ndim), num_keys)
+    # Empty clusters are rare; give each empty seed its best key without a
+    # Python loop. In this fallback only, a key may be shared by two seeds.
     force_mask = (~has_seed).unsqueeze(-1) & (best_key_per_seed.unsqueeze(-1) == key_idx)
 
-    force_scores = seed_logits.masked_fill(~force_mask, torch.finfo(seed_logits.dtype).min)
-    forced_assignments = force_scores.argmax(dim=-2)
-    has_forced_owner = force_mask.any(dim=-2)
-    assignments = torch.where(has_forced_owner, forced_assignments, assignments)
-
-    return torch.nn.functional.one_hot(assignments, num_classes=num_seeds).movedim(-1, -2).bool()
+    return assignment_mask | force_mask
 
 
 def hard_route_merge_weights(seed_logits, dtype):
