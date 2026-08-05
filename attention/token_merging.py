@@ -22,6 +22,7 @@ LOCAL_LAYOUTS = {
 }
 SUPPORTED_LAYOUTS = LOCAL_LAYOUTS
 DEFAULT_GRID_LAYOUTS = {LAYOUT_HARD_ROUTE, LAYOUT_SELECT_ROUTE}
+HARD_ROUTE_LAYOUTS = {LAYOUT_HARD_ROUTE, LAYOUT_HARD_ROUTE_TRANSPOSE}
 
 LAYOUT_ALIASES = {
     # Backward-compatible names used by older configs.
@@ -67,6 +68,7 @@ def token_merging_attn(
     num_merge_tokens=1,
     seed_mode="random",
     seed=0,
+    hard_route_backend="sdpa",
 ):
     """Grid-based token-merging attention for Wan video self-attention."""
     # Incoming q/k/v from Wan self-attention:
@@ -106,7 +108,7 @@ def token_merging_attn(
     for start in range(0, q_blocks.size(1), query_outer_chunk):
         end = min(start + query_outer_chunk, q_blocks.size(1))
         if num_merge_tokens > 1:
-            out[:, start:end] = attention_impl(
+            args = [
                 q_blocks[:, start:end],
                 k_blocks,
                 v_blocks,
@@ -115,7 +117,10 @@ def token_merging_attn(
                 seed_mode,
                 seed,
                 start,
-            )
+            ]
+            if layout in HARD_ROUTE_LAYOUTS:
+                args.append(hard_route_backend)
+            out[:, start:end] = attention_impl(*args)
         else:
             out[:, start:end] = attention_impl(
                 q_blocks[:, start:end],

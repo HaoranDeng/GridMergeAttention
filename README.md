@@ -31,6 +31,7 @@ token_merging_args:
   num_merge_tokens: 1
   seed_mode: random_with_ith
   seed: 0
+  hard_route_backend: sdpa
 ```
 
 Supported local layouts:
@@ -60,12 +61,19 @@ For the current experiments, `seed_mode: random_with_ith` keeps the original
 index-matched query as one seed and samples the remaining seeds
 deterministically from the same block.
 
+`hard_route_backend` switches only the hard-route routing implementation:
+
+- `sdpa`: default PyTorch SDPA path.
+- `triton`: fused Triton routing kernel. The original SDPA path remains
+  available by switching this value back to `sdpa`.
+
 Useful configs:
 
 - `configs/token_merging_wan_fewstep.yaml`: one-token MonarchRT-style baseline.
 - `configs/token_merging_wan_hard_route_c2_fewstep.yaml`: hard-route C=2.
 - `configs/token_merging_wan_hard_route_c4_fewstep.yaml`: hard-route C=4.
 - `configs/token_merging_wan_hard_route_c6_fewstep.yaml`: hard-route C=6.
+- `configs/token_merging_wan_hard_route_c6_triton_fewstep.yaml`: hard-route C=6 with Triton routing.
 - `configs/token_merging_wan_hard_route_c13_fewstep.yaml`: hard-route C=13.
 - `configs/token_merging_wan_select_route_c2_fewstep.yaml`: select-route C=2.
 - `configs/token_merging_wan_select_route_c4_fewstep.yaml`: select-route C=4.
@@ -74,6 +82,7 @@ Useful configs:
 - `configs/token_merging_wan_hard_route_c2_transpose_fewstep.yaml`: hard-route C=2 transpose.
 - `configs/token_merging_wan_hard_route_c4_transpose_fewstep.yaml`: hard-route C=4 transpose.
 - `configs/token_merging_wan_hard_route_c6_transpose_fewstep.yaml`: hard-route C=6 transpose.
+- `configs/token_merging_wan_hard_route_c6_transpose_triton_fewstep.yaml`: hard-route C=6 transpose with Triton routing.
 - `configs/token_merging_wan_select_route_c2_transpose_fewstep.yaml`: select-route C=2 transpose.
 - `configs/token_merging_wan_select_route_c4_transpose_fewstep.yaml`: select-route C=4 transpose.
 - `configs/token_merging_wan_select_route_c6_transpose_fewstep.yaml`: select-route C=6 transpose.

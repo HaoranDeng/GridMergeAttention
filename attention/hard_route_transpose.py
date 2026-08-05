@@ -9,6 +9,16 @@ from .common import (
     scale_qk,
     validate_block_seed_mode,
 )
+from .hard_route_triton import triton_biased_attention
+
+
+def _route(query, key, value, bias, backend):
+    backend = (backend or "sdpa").lower()
+    if backend == "sdpa":
+        return biased_sdpa(query, key, value, bias)
+    if backend == "triton":
+        return triton_biased_attention(query, key, value, bias)
+    raise ValueError(f"unsupported hard_route_backend={backend!r}; expected 'sdpa' or 'triton'.")
 
 
 def hard_route_attention_transpose(
@@ -20,6 +30,7 @@ def hard_route_attention_transpose(
     seed_mode,
     seed,
     query_outer_offset,
+    hard_route_backend="sdpa",
 ):
     # q:   [B, A, I, J, H, D]
     # k/v: [B, F, K, L, H, D]
@@ -59,9 +70,8 @@ def hard_route_attention_transpose(
     key = rearrange(merged_keys, "b a f i l c h d -> (b h a i) (f l c) d")
     value = rearrange(merged_values, "b a f i l c h d -> (b h a i) (f l c) d")
     bias = rearrange(routing_bias, "b h a f i l c -> (b h a i) (f l c)")
-    valid = rearrange(cluster_has_keys, "b h a f i l c -> (b h a i) (f l c)")
-
-    out = biased_sdpa(query, key, value, bias, valid=valid)
+    del cluster_has_keys
+    out = _route(query, key, value, bias, hard_route_backend)
     return rearrange(
         out,
         "(b h a i) j d -> b a i j h d",
