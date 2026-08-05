@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from omegaconf import OmegaConf
 
 import wan.modules.model as wan_model
-from attention.token_merging import _assign_keys_to_seeds, _random_seed_columns, _random_seed_rows
+from attention.common import assign_keys_to_seeds, random_seed_columns, random_seed_rows
 from utils.misc import set_seed
 from utils.wan_wrapper import WanDiffusionWrapper, WanTextEncoder
 
@@ -193,7 +193,7 @@ def hard_route_distribution(
 
     query_outer = torch.tensor([frame], device=q_grid.device)
     key_outer = torch.arange(frames, device=q_grid.device)
-    seed_rows = _random_seed_rows(
+    seed_rows = random_seed_rows(
         query_outer,
         key_outer,
         rows,
@@ -210,7 +210,7 @@ def hard_route_distribution(
     query_rows = q_grid[frame, :, col, head].float() * sqrt_scale
 
     seed_logits = torch.einsum("frcd,frld->frcl", seed_queries, key_blocks)
-    assignment_mask = _assign_keys_to_seeds(
+    assignment_mask = assign_keys_to_seeds(
         seed_logits[None, None, None, :, :, None, :, :]
     )[0, 0, 0, :, :, 0]
 
@@ -254,7 +254,7 @@ def select_route_distribution(
 
     query_outer = torch.tensor([frame], device=q_grid.device)
     key_outer = torch.arange(frames, device=q_grid.device)
-    seed_rows = _random_seed_rows(
+    seed_rows = random_seed_rows(
         query_outer,
         key_outer,
         rows,
@@ -312,7 +312,7 @@ def hard_route_transpose_distribution(
 
     query_outer = torch.tensor([frame], device=q_grid.device)
     key_outer = torch.arange(frames, device=q_grid.device)
-    seed_cols = _random_seed_columns(
+    seed_cols = random_seed_columns(
         query_outer,
         key_outer,
         rows,
@@ -329,7 +329,7 @@ def hard_route_transpose_distribution(
     query_cols = q_grid[frame, row, :, head].float() * sqrt_scale
 
     seed_logits = torch.einsum("flcd,fkld->flck", seed_queries, key_blocks)
-    assignment_mask = _assign_keys_to_seeds(
+    assignment_mask = assign_keys_to_seeds(
         seed_logits[None, None, None, :, None, :, :, :]
     )[0, 0, 0, :, 0]
     cluster_has_keys = assignment_mask.any(dim=-1)
@@ -378,7 +378,7 @@ def select_route_transpose_distribution(
 
     query_outer = torch.tensor([frame], device=q_grid.device)
     key_outer = torch.arange(frames, device=q_grid.device)
-    seed_cols = _random_seed_columns(
+    seed_cols = random_seed_columns(
         query_outer,
         key_outer,
         rows,

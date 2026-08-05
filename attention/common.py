@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 from einops import rearrange
 
 
@@ -257,3 +258,25 @@ def soft_merge_weights(merge_logits, dtype):
     merge_weights = torch.softmax(merge_logits, dim=-1).to(dtype)
     merge_logprob = merge_logits - torch.logsumexp(merge_logits, dim=-1, keepdim=True)
     return merge_weights, merge_logprob
+
+
+def biased_sdpa(query, key, value, bias, valid=None):
+    """Attention over compressed tokens with a per-key additive bias.
+
+    query: [G, Q, D], key/value: [G, K, D], bias: [G, K].
+    The attention logits are query @ key.T - bias.
+    """
+    attn_bias = -bias.float()
+    if valid is not None:
+        attn_bias = attn_bias.masked_fill(~valid, torch.finfo(attn_bias.dtype).min)
+
+    out = F.scaled_dot_product_attention(
+        query.unsqueeze(1),
+        key.unsqueeze(1),
+        value.unsqueeze(1),
+        attn_mask=attn_bias.to(query.dtype).unsqueeze(1).unsqueeze(2),
+        dropout_p=0.0,
+        is_causal=False,
+        scale=1.0,
+    )
+    return out.squeeze(1)

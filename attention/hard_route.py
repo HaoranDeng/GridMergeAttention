@@ -2,6 +2,7 @@ import torch
 from einops import rearrange
 
 from .common import (
+    biased_sdpa,
     gather_seed_queries,
     hard_route_merge_weights,
     random_seed_rows,
@@ -55,27 +56,21 @@ def hard_route_attention(
     merged_values = torch.einsum("bhafkjcl,bfklhe->bafjkche", merge_weights, v)
 
     routing_bias = (merge_weights * merge_logprob).sum(dim=-1)
-    routing_bias = rearrange(routing_bias, "b h a f k j c -> b h a f j k c 1")
+    query = rearrange(q, "b a i j h d -> (b h a j) i d")
+    key = rearrange(merged_keys, "b a f j k c h d -> (b h a j) (f k c) d")
+    value = rearrange(merged_values, "b a f j k c h d -> (b h a j) (f k c) d")
+    bias = rearrange(routing_bias, "b h a f k j c -> (b h a j) (f k c)")
+    valid = rearrange(cluster_has_keys, "b h a f k j c -> (b h a j) (f k c)")
 
-    routing_logits = torch.einsum("bafjkchd,baijhd->bhafjkci", merged_keys, q)
-    routing_logits = routing_logits - routing_bias
-    cluster_has_keys = rearrange(cluster_has_keys, "b h a f k j c -> b h a f j k c 1")
-    routing_logits = routing_logits.masked_fill(
-        ~cluster_has_keys,
-        torch.finfo(routing_logits.dtype).min,
+    out = biased_sdpa(query, key, value, bias, valid=valid)
+    return rearrange(
+        out,
+        "(b h a j) i d -> b a i j h d",
+        b=q.size(0),
+        h=q.size(4),
+        a=q.size(1),
+        j=q.size(3),
     )
-
-    routing_weights = rearrange(routing_logits, "b h a f j k c i -> b h a j i (f k c)")
-    routing_weights = torch.softmax(routing_weights.float(), dim=-1).to(q.dtype)
-    routing_weights = rearrange(
-        routing_weights,
-        "b h a j i (f k c) -> b h a f j k c i",
-        f=k.size(1),
-        k=k.size(2),
-        c=num_merge_tokens,
-    )
-
-    return torch.einsum("bhafjkci,bafjkche->baijhe", routing_weights, merged_values)
 
 
 __all__ = ["hard_route_attention"]
