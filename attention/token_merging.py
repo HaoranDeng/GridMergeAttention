@@ -73,6 +73,7 @@ def token_merging_attn(
     seed_mode="random",
     seed=0,
     hard_route_backend="sdpa",
+    hard_route_routing_backend="sdpa",
 ):
     """Grid-based token-merging attention for Wan video self-attention."""
     # Incoming q/k/v from Wan self-attention:
@@ -90,8 +91,8 @@ def token_merging_attn(
     layout = normalize_layout(layout)
     if layout not in SUPPORTED_LAYOUTS:
         raise ValueError(
-            "layout must be 'hard_route', 'select_route', 'hard_route_transpose', "
-            "or 'select_route_transpose', "
+            "layout must be 'hard_route', 'hard_route_shared', 'select_route', "
+            "'hard_route_transpose', or 'select_route_transpose', "
             f"got {layout!r}."
         )
 
@@ -121,6 +122,7 @@ def token_merging_attn(
             seed,
             0,
             hard_route_backend,
+            hard_route_routing_backend,
         )
         return blocks_to_video(out, f_tied, h_reduce, w_reduce)
 
@@ -140,6 +142,7 @@ def token_merging_attn(
             ]
             if layout in HARD_ROUTE_LAYOUTS:
                 args.append(hard_route_backend)
+                args.append(hard_route_routing_backend)
             out[:, start:end] = attention_impl(*args)
         else:
             out[:, start:end] = attention_impl(

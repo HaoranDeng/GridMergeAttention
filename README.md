@@ -73,6 +73,12 @@ deterministically from the same block.
   same SDPA routing path. The original PyTorch path remains available by
   switching this value back to `sdpa`.
 
+`hard_route_routing_backend` separately switches the second compressed-attention
+step:
+
+- `sdpa`: default PyTorch routing over compressed KV tokens.
+- `triton`: experimental fused Triton routing kernel for `q @ K_merged - bias`.
+
 Useful configs:
 
 - `configs/token_merging_wan_fewstep.yaml`: one-token MonarchRT-style baseline.
@@ -81,7 +87,9 @@ Useful configs:
 - `configs/token_merging_wan_hard_route_c4_fewstep.yaml`: hard-route C=4.
 - `configs/token_merging_wan_hard_route_c4_triton_fewstep.yaml`: hard-route C=4 with fused Triton KV compression.
 - `configs/token_merging_wan_hard_route_c4_triton_chunk21_fewstep.yaml`: hard-route C=4 with fused Triton KV compression and full-query-outer chunking.
+- `configs/token_merging_wan_hard_route_c4_triton_chunk21_route_triton_fewstep.yaml`: hard-route C=4 with fused Triton KV compression, full-query-outer chunking, and fused Triton routing.
 - `configs/token_merging_wan_hard_route_c4_shared_triton_fewstep.yaml`: experimental shared-compression hard-route C=4.
+- `configs/token_merging_wan_hard_route_c4_shared_triton_route_triton_fewstep.yaml`: experimental shared-compression hard-route C=4 with fused Triton routing.
 - `configs/token_merging_wan_hard_route_c6_fewstep.yaml`: hard-route C=6.
 - `configs/token_merging_wan_hard_route_c6_triton_fewstep.yaml`: hard-route C=6 with fused Triton KV compression.
 - `configs/token_merging_wan_hard_route_c13_fewstep.yaml`: hard-route C=13.

@@ -70,6 +70,11 @@ With `num_merge_tokens=C>1`, the two multi-token modes are:
 - `triton`: fused Triton hard-assignment/KV-compression kernel followed by the
   same SDPA routing path.
 
+`hard_route_routing_backend` controls the second compressed-attention step:
+
+- `sdpa`: PyTorch SDPA with the routing bias.
+- `triton`: fused Triton routing kernel for `q @ K_merged - bias`.
+
 The easiest experimental hook is `q_init` in `common.merge_query_row` and
 `common.merge_query_column`:
 

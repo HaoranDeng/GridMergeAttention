@@ -8,7 +8,7 @@ from .common import (
     scale_qk,
     validate_block_seed_mode,
 )
-from .hard_route_triton import triton_hard_route_merge
+from .hard_route_triton import triton_biased_attention, triton_hard_route_merge
 
 
 def assign_keys_to_seeds(seed_logits):
@@ -63,6 +63,17 @@ def _merge(seed_queries, k, v, backend):
     raise ValueError(f"unsupported hard_route_backend={backend!r}; expected 'sdpa' or 'triton'.")
 
 
+def hard_route_compressed_attention(query, key, value, bias, backend):
+    backend = (backend or "sdpa").lower()
+    if backend == "sdpa":
+        return biased_sdpa(query, key, value, bias)
+    if backend == "triton":
+        return triton_biased_attention(query, key, value, bias)
+    raise ValueError(
+        f"unsupported hard_route_routing_backend={backend!r}; expected 'sdpa' or 'triton'."
+    )
+
+
 def hard_route_attention(
     q,
     k,
@@ -73,6 +84,7 @@ def hard_route_attention(
     seed,
     query_outer_offset,
     hard_route_backend="sdpa",
+    hard_route_routing_backend="sdpa",
 ):
     # q:   [B, A, I, J, H, D]
     # k/v: [B, F, K, L, H, D]
@@ -114,7 +126,13 @@ def hard_route_attention(
     value = rearrange(merged_values, "b a f j k c h d -> (b h a j) (f k c) d")
     bias = rearrange(routing_bias, "b h a f k j c -> (b h a j) (f k c)")
     del cluster_has_keys
-    out = biased_sdpa(query, key, value, bias)
+    out = hard_route_compressed_attention(
+        query,
+        key,
+        value,
+        bias,
+        hard_route_routing_backend,
+    )
     return rearrange(
         out,
         "(b h a j) i d -> b a i j h d",
@@ -125,4 +143,9 @@ def hard_route_attention(
     )
 
 
-__all__ = ["assign_keys_to_seeds", "hard_route_attention", "hard_route_merge_weights"]
+__all__ = [
+    "assign_keys_to_seeds",
+    "hard_route_attention",
+    "hard_route_compressed_attention",
+    "hard_route_merge_weights",
+]

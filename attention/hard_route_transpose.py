@@ -2,13 +2,12 @@ import torch
 from einops import rearrange
 
 from .common import (
-    biased_sdpa,
     gather_seed_queries_transpose,
     random_seed_columns,
     scale_qk,
     validate_block_seed_mode,
 )
-from .hard_route import hard_route_merge_weights
+from .hard_route import hard_route_compressed_attention, hard_route_merge_weights
 from .hard_route_triton import triton_hard_route_merge
 
 
@@ -61,6 +60,7 @@ def hard_route_attention_transpose(
     seed,
     query_outer_offset,
     hard_route_backend="sdpa",
+    hard_route_routing_backend="sdpa",
 ):
     # q:   [B, A, I, J, H, D]
     # k/v: [B, F, K, L, H, D]
@@ -101,7 +101,13 @@ def hard_route_attention_transpose(
     value = rearrange(merged_values, "b a f i l c h d -> (b h a i) (f l c) d")
     bias = rearrange(routing_bias, "b h a f i l c -> (b h a i) (f l c)")
     del cluster_has_keys
-    out = biased_sdpa(query, key, value, bias)
+    out = hard_route_compressed_attention(
+        query,
+        key,
+        value,
+        bias,
+        hard_route_routing_backend,
+    )
     return rearrange(
         out,
         "(b h a i) j d -> b a i j h d",

@@ -244,6 +244,7 @@ class WanSelfAttention(nn.Module):
         self.token_merging_seed_mode = "random"
         self.token_merging_seed = 0
         self.token_merging_hard_route_backend = "sdpa"
+        self.token_merging_hard_route_routing_backend = "sdpa"
 
         # layers
         self.q = nn.Linear(dim, dim)
@@ -299,6 +300,7 @@ class WanSelfAttention(nn.Module):
                 seed_mode=self.token_merging_seed_mode,
                 seed=self.token_merging_seed,
                 hard_route_backend=self.token_merging_hard_route_backend,
+                hard_route_routing_backend=self.token_merging_hard_route_routing_backend,
             )
         else:
             x = flash_attention(
@@ -788,6 +790,7 @@ class WanModel(ModelMixin, ConfigMixin):
         seed_mode = args.get("seed_mode", "random")
         seed = args.get("seed", 0)
         hard_route_backend = args.get("hard_route_backend", "sdpa")
+        hard_route_routing_backend = args.get("hard_route_routing_backend", "sdpa")
 
         for block in self.blocks:
             block.self_attn.enable_token_merging = enable
@@ -801,6 +804,7 @@ class WanModel(ModelMixin, ConfigMixin):
             block.self_attn.token_merging_seed_mode = seed_mode
             block.self_attn.token_merging_seed = seed
             block.self_attn.token_merging_hard_route_backend = hard_route_backend
+            block.self_attn.token_merging_hard_route_routing_backend = hard_route_routing_backend
 
     def _set_gradient_checkpointing(self, module, value=False):
         self.gradient_checkpointing = value
