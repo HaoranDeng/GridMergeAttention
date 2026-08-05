@@ -119,9 +119,9 @@ def hard_route_shared_attention(
     )
 
     query = rearrange(q, "b a i j h d -> (b h j) (a i) d")
-    key = rearrange(merged_keys, "b one f j k c h d -> (b h j) (f k c) d")
-    value = rearrange(merged_values, "b one f j k c h d -> (b h j) (f k c) d")
-    bias = rearrange(routing_bias, "b h one f k j c -> (b h j) (f k c)")
+    key = rearrange(merged_keys[:, 0], "b f j k c h d -> (b h j) (f k c) d")
+    value = rearrange(merged_values[:, 0], "b f j k c h d -> (b h j) (f k c) d")
+    bias = rearrange(routing_bias[:, :, 0], "b h f k j c -> (b h j) (f k c)")
     del cluster_has_keys
     out = hard_route_compressed_attention(
         query,
