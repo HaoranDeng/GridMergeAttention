@@ -4,11 +4,11 @@ from einops import rearrange
 from .common import (
     biased_sdpa,
     gather_seed_queries_transpose,
-    hard_route_merge_weights,
     random_seed_columns,
     scale_qk,
     validate_block_seed_mode,
 )
+from .hard_route import hard_route_merge_weights
 from .hard_route_triton import triton_hard_route_merge
 
 

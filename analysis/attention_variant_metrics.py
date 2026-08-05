@@ -9,7 +9,8 @@ import torch.nn.functional as F
 from omegaconf import OmegaConf
 
 import wan.modules.model as wan_model
-from attention.common import assign_keys_to_seeds, random_seed_columns, random_seed_rows
+from attention.common import random_seed_columns, random_seed_rows
+from attention.hard_route import assign_keys_to_seeds
 from utils.misc import set_seed
 from utils.wan_wrapper import WanDiffusionWrapper, WanTextEncoder
 

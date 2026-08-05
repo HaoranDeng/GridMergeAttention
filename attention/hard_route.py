@@ -4,12 +4,42 @@ from einops import rearrange
 from .common import (
     biased_sdpa,
     gather_seed_queries,
-    hard_route_merge_weights,
     random_seed_rows,
     scale_qk,
     validate_block_seed_mode,
 )
 from .hard_route_triton import triton_hard_route_merge
+
+
+def assign_keys_to_seeds(seed_logits):
+    # seed_logits: [B, H, A, F, K, J, C, L].
+    assignments = seed_logits.argmax(dim=-2)
+    key_col = torch.arange(seed_logits.size(-1), device=seed_logits.device)
+
+    for seed_idx in range(seed_logits.size(-2)):
+        has_seed = (assignments == seed_idx).any(dim=-1)
+        best_key = seed_logits[..., seed_idx, :].argmax(dim=-1)
+        force_seed_shape = (1,) * (assignments.ndim - 1) + (-1,)
+        force_seed = key_col.view(*force_seed_shape) == best_key.unsqueeze(-1)
+        assignments = torch.where(
+            has_seed.unsqueeze(-1),
+            assignments,
+            torch.where(force_seed, seed_idx, assignments),
+        )
+
+    return torch.nn.functional.one_hot(assignments, num_classes=seed_logits.size(-2)).movedim(-1, -2).bool()
+
+
+def hard_route_merge_weights(seed_logits, dtype):
+    """Assign each key to one seed, then softmax within each routed cluster."""
+    assignment_mask = assign_keys_to_seeds(seed_logits)
+    cluster_has_keys = assignment_mask.any(dim=-1)
+
+    masked_logits = seed_logits.masked_fill(~assignment_mask, torch.finfo(seed_logits.dtype).min)
+    merge_logprob = torch.log_softmax(masked_logits, dim=-1)
+    merge_weights = merge_logprob.exp().masked_fill(~assignment_mask, 0).to(dtype)
+    merge_logprob = merge_logprob.masked_fill(~assignment_mask, 0)
+    return merge_weights, merge_logprob, cluster_has_keys
 
 
 def _torch_merge(seed_queries, k, v):
@@ -93,4 +123,4 @@ def hard_route_attention(
     )
 
 
-__all__ = ["hard_route_attention"]
+__all__ = ["hard_route_attention", "hard_route_merge_weights"]
