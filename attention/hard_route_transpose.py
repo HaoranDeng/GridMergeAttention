@@ -59,11 +59,9 @@ def _merge(seed_queries, k, v, backend):
         return _triton_merge(seed_queries, k, v, use_c4_kernel=True)
     if backend == "triton_c4_j16":
         return _triton_merge(seed_queries, k, v, use_c4_kernel=True, block_j_target=16)
-    if backend == "triton_c4_j32":
-        return _triton_merge(seed_queries, k, v, use_c4_kernel=True, block_j_target=32)
     raise ValueError(
         f"unsupported hard_route_backend={backend!r}; expected 'sdpa', 'triton', "
-        "'triton_c4', 'triton_c4_j16', or 'triton_c4_j32'."
+        "'triton_c4', or 'triton_c4_j16'."
     )
 
 
