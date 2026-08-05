@@ -13,7 +13,8 @@ lives in its own file:
 
 - `gridmerge_one.py`: one-token GridMerge / MonarchRT-style compression.
 - `hard_route.py`: C-seed hard-route compression.
-- `hard_route_triton.py`: optional fused Triton routing kernel for hard-route.
+- `hard_route_triton.py`: optional fused Triton KV-compression kernel plus an
+  experimental routing kernel for hard-route.
 - `select_route.py`: C-seed select-route compression.
 - `gridmerge_one_transpose.py`: one-token transpose layout.
 - `hard_route_transpose.py`: hard-route transpose layout.
@@ -58,10 +59,11 @@ With `num_merge_tokens=C>1`, the two multi-token modes are:
   query then selects the best compressed KV candidate with the
   dot-product-plus-entropy score.
 
-`hard_route_backend` controls only the hard-route routing backend:
+`hard_route_backend` controls the hard-route KV-compression backend:
 
-- `sdpa`: default implementation, kept as the reference path.
-- `triton`: fused Triton routing kernel.
+- `sdpa`: default PyTorch implementation, kept as the reference path.
+- `triton`: fused Triton hard-assignment/KV-compression kernel followed by the
+  same SDPA routing path.
 
 The easiest experimental hook is `q_init` in `common.merge_query_row` and
 `common.merge_query_column`:
