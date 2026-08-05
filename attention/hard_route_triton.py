@@ -317,6 +317,13 @@ def triton_hard_route_merge(seed_queries, key, value):
     if block_d > 128:
         raise ValueError(f"Triton hard-route merge supports head dim <= 128, got {dim}.")
 
+    output_elements = batch * query_outer * key_outer * query_columns * key_rows * num_seeds * heads * dim
+    if output_elements > torch.iinfo(torch.int32).max:
+        raise ValueError(
+            "Triton hard-route merge output is too large for one launch. "
+            "Reduce query_outer_chunk; for default 480p C=4 use query_outer_chunk<=10."
+        )
+
     merged_key = torch.empty(
         (batch, query_outer, key_outer, query_columns, key_rows, num_seeds, heads, dim),
         device=key.device,

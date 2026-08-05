@@ -20,9 +20,8 @@ token_merging_args:
   w_reduce: 1
   layout: hard_route
   q_init: ith
-  query_outer_chunk: 21
+  query_outer_chunk: 7
   num_merge_tokens: 4
-  seed_mode: fast_random_with_ith
+  seed_mode: random_with_ith
   seed: 0
   hard_route_backend: triton
-  hard_route_routing_backend: triton

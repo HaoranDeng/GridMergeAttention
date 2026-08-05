@@ -89,9 +89,9 @@ Useful configs:
 - `configs/token_merging_wan_hard_route_c2_triton_fewstep.yaml`: hard-route C=2 with fused Triton KV compression.
 - `configs/token_merging_wan_hard_route_c4_fewstep.yaml`: hard-route C=4.
 - `configs/token_merging_wan_hard_route_c4_triton_fewstep.yaml`: hard-route C=4 with fused Triton KV compression.
-- `configs/token_merging_wan_hard_route_c4_triton_chunk21_fewstep.yaml`: hard-route C=4 with fused Triton KV compression and full-query-outer chunking.
-- `configs/token_merging_wan_hard_route_c4_triton_chunk21_route_triton_fewstep.yaml`: hard-route C=4 with fused Triton KV compression, full-query-outer chunking, and fused Triton routing.
-- `configs/token_merging_wan_hard_route_c4_fastseed_triton_chunk21_route_triton_fewstep.yaml`: same as above, with lightweight deterministic seed selection.
+- `configs/token_merging_wan_hard_route_c4_triton_chunk7_fewstep.yaml`: hard-route C=4 with fused Triton KV compression and safe query-outer chunking.
+- `configs/token_merging_wan_hard_route_c4_triton_chunk7_route_triton_fewstep.yaml`: hard-route C=4 with fused Triton KV compression, safe query-outer chunking, and fused Triton routing.
+- `configs/token_merging_wan_hard_route_c4_fastseed_triton_chunk7_route_triton_fewstep.yaml`: same as above, with lightweight deterministic seed selection.
 - `configs/token_merging_wan_hard_route_c4_shared_triton_fewstep.yaml`: experimental shared-compression hard-route C=4.
 - `configs/token_merging_wan_hard_route_c4_shared_triton_route_triton_fewstep.yaml`: experimental shared-compression hard-route C=4 with fused Triton routing.
 - `configs/token_merging_wan_hard_route_c4_shared_fastseed_triton_route_triton_fewstep.yaml`: shared-compression hard-route C=4 with lightweight deterministic seed selection.
