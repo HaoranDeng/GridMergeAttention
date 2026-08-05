@@ -17,7 +17,6 @@ lives in its own file:
 - `gridmerge_one_transpose.py`: one-token transpose layout.
 - `hard_route_transpose.py`: hard-route transpose layout.
 - `select_route_transpose.py`: select-route transpose layout.
-- `global_attention.py`: global seed-token merging without local grid blocks.
 - `common.py`: shared reshape, seed sampling, and merge-weight utilities.
 
 For default

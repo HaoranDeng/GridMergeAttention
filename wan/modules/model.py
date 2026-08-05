@@ -243,9 +243,6 @@ class WanSelfAttention(nn.Module):
         self.token_merging_num_merge_tokens = 1
         self.token_merging_seed_mode = "random"
         self.token_merging_seed = 0
-        self.token_merging_global_seed_ratio = 0.1
-        self.token_merging_global_assign_chunk = None
-        self.token_merging_global_query_chunk = None
 
         # layers
         self.q = nn.Linear(dim, dim)
@@ -300,9 +297,6 @@ class WanSelfAttention(nn.Module):
                 num_merge_tokens=self.token_merging_num_merge_tokens,
                 seed_mode=self.token_merging_seed_mode,
                 seed=self.token_merging_seed,
-                global_seed_ratio=self.token_merging_global_seed_ratio,
-                global_assign_chunk=self.token_merging_global_assign_chunk,
-                global_query_chunk=self.token_merging_global_query_chunk,
             )
         else:
             x = flash_attention(
@@ -791,9 +785,6 @@ class WanModel(ModelMixin, ConfigMixin):
         num_merge_tokens = args.get("num_merge_tokens", 1)
         seed_mode = args.get("seed_mode", "random")
         seed = args.get("seed", 0)
-        global_seed_ratio = args.get("global_seed_ratio", 0.1)
-        global_assign_chunk = args.get("global_assign_chunk", None)
-        global_query_chunk = args.get("global_query_chunk", None)
 
         for block in self.blocks:
             block.self_attn.enable_token_merging = enable
@@ -806,9 +797,6 @@ class WanModel(ModelMixin, ConfigMixin):
             block.self_attn.token_merging_num_merge_tokens = num_merge_tokens
             block.self_attn.token_merging_seed_mode = seed_mode
             block.self_attn.token_merging_seed = seed
-            block.self_attn.token_merging_global_seed_ratio = global_seed_ratio
-            block.self_attn.token_merging_global_assign_chunk = global_assign_chunk
-            block.self_attn.token_merging_global_query_chunk = global_query_chunk
 
     def _set_gradient_checkpointing(self, module, value=False):
         self.gradient_checkpointing = value

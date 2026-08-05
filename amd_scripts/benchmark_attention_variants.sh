@@ -46,7 +46,6 @@ NAMES=(
   "hard_route_c6_transpose"
   "select_route_c6"
   "select_route_c6_transpose"
-  "global10"
 )
 
 CONFIGS=(
@@ -57,7 +56,6 @@ CONFIGS=(
   "configs/token_merging_wan_hard_route_c6_transpose_fewstep.yaml"
   "configs/token_merging_wan_select_route_c6_fewstep.yaml"
   "configs/token_merging_wan_select_route_c6_transpose_fewstep.yaml"
-  "configs/token_merging_wan_global10_fewstep.yaml"
 )
 
 cd "${REPO_DIR}"

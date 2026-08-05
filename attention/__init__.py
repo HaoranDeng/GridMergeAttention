@@ -1,5 +1,4 @@
 from .core import attention, flash_attention
-from .global_attention import global_attention
 from .gridmerge_one import gridmerge_one
 from .gridmerge_one_transpose import gridmerge_one_transpose
 from .hard_route import hard_route_attention
@@ -11,7 +10,6 @@ from .token_merging import token_merging_attn
 __all__ = [
     "attention",
     "flash_attention",
-    "global_attention",
     "gridmerge_one",
     "gridmerge_one_transpose",
     "hard_route_attention",

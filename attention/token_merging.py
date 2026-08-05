@@ -1,7 +1,6 @@
 import torch
 
 from .common import blocks_to_video, video_to_blocks
-from .global_attention import global_attention
 from .gridmerge_one import gridmerge_one
 from .gridmerge_one_transpose import gridmerge_one_transpose
 from .hard_route import hard_route_attention
@@ -14,7 +13,6 @@ LAYOUT_HARD_ROUTE = "hard_route"
 LAYOUT_SELECT_ROUTE = "select_route"
 LAYOUT_HARD_ROUTE_TRANSPOSE = "hard_route_transpose"
 LAYOUT_SELECT_ROUTE_TRANSPOSE = "select_route_transpose"
-LAYOUT_GLOBAL = "global"
 
 LOCAL_LAYOUTS = {
     LAYOUT_HARD_ROUTE,
@@ -22,7 +20,7 @@ LOCAL_LAYOUTS = {
     LAYOUT_HARD_ROUTE_TRANSPOSE,
     LAYOUT_SELECT_ROUTE_TRANSPOSE,
 }
-SUPPORTED_LAYOUTS = LOCAL_LAYOUTS | {LAYOUT_GLOBAL}
+SUPPORTED_LAYOUTS = LOCAL_LAYOUTS
 DEFAULT_GRID_LAYOUTS = {LAYOUT_HARD_ROUTE, LAYOUT_SELECT_ROUTE}
 
 LAYOUT_ALIASES = {
@@ -69,9 +67,6 @@ def token_merging_attn(
     num_merge_tokens=1,
     seed_mode="random",
     seed=0,
-    global_seed_ratio=0.1,
-    global_assign_chunk=None,
-    global_query_chunk=None,
 ):
     """Grid-based token-merging attention for Wan video self-attention."""
     # Incoming q/k/v from Wan self-attention:
@@ -90,20 +85,8 @@ def token_merging_attn(
     if layout not in SUPPORTED_LAYOUTS:
         raise ValueError(
             "layout must be 'hard_route', 'select_route', 'hard_route_transpose', "
-            "'select_route_transpose', or 'global', "
+            "or 'select_route_transpose', "
             f"got {layout!r}."
-        )
-    if layout == LAYOUT_GLOBAL:
-        return global_attention(
-            q,
-            k,
-            v,
-            sm_scale,
-            global_seed_ratio,
-            seed_mode,
-            seed,
-            global_assign_chunk,
-            global_query_chunk,
         )
 
     num_merge_tokens = int(num_merge_tokens)
@@ -152,5 +135,4 @@ __all__ = [
     "LAYOUT_SELECT_ROUTE",
     "LAYOUT_HARD_ROUTE_TRANSPOSE",
     "LAYOUT_SELECT_ROUTE_TRANSPOSE",
-    "LAYOUT_GLOBAL",
 ]
