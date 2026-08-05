@@ -36,8 +36,7 @@ NUM_SAMPLES="${NUM_SAMPLES:-1}"
 SEED="${SEED:-0}"
 FPS="${FPS:-16}"
 DTYPE="${DTYPE:-bf16}"
-
-read -r -a GPU_ID_LIST <<< "${GPU_IDS:-0 1 2 3 4 5 6 7}"
+GPU_ID="${GPU_ID:-0}"
 
 NAMES=(
   "dense"
@@ -61,11 +60,6 @@ CONFIGS=(
   "configs/token_merging_wan_global10_fewstep.yaml"
 )
 
-if (( ${#GPU_ID_LIST[@]} != ${#NAMES[@]} )); then
-  echo "Expected ${#NAMES[@]} GPU ids, got ${#GPU_ID_LIST[@]}: ${GPU_ID_LIST[*]}" >&2
-  exit 1
-fi
-
 cd "${REPO_DIR}"
 mkdir -p out "${OUTPUT_ROOT}" "${RESULT_DIR}"
 rm -rf "${OUTPUT_ROOT:?}/"*
@@ -87,7 +81,7 @@ export TOKEN_MERGING_FORCE_TORCH_RMSNORM="${TOKEN_MERGING_FORCE_TORCH_RMSNORM:-1
 
 run_one() {
   local index="$1"
-  local gpu_id="${GPU_ID_LIST[$index]}"
+  local gpu_id="${GPU_ID}"
   local name="${NAMES[$index]}"
   local config="${CONFIGS[$index]}"
   local output_dir="${OUTPUT_ROOT}/${name}"
@@ -153,26 +147,9 @@ PY
   return "${status}"
 }
 
-pids=()
-for index in "${!NAMES[@]}"; do
-  run_one "${index}" &
-  pids+=("$!")
-done
-
-stop_jobs() {
-  echo "Stopping benchmark jobs..." >&2
-  for pid in "${pids[@]}"; do
-    if kill -0 "${pid}" 2>/dev/null; then
-      kill "${pid}" 2>/dev/null || true
-    fi
-  done
-  wait || true
-}
-trap stop_jobs INT TERM
-
 status=0
-for index in "${!pids[@]}"; do
-  if wait "${pids[$index]}"; then
+for index in "${!NAMES[@]}"; do
+  if run_one "${index}"; then
     echo "Completed ${NAMES[$index]}."
   else
     job_status=$?
