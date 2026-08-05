@@ -8,7 +8,19 @@ q, k, v: [batch, sequence, head, dim]
 out:     [batch, sequence, head, dim]
 ```
 
-`token_merging.py` contains the GridMerge attention paths. For default
+`token_merging.py` is only the GridMerge dispatcher. Each attention variant now
+lives in its own file:
+
+- `gridmerge_one.py`: one-token GridMerge / MonarchRT-style compression.
+- `hard_route.py`: C-seed hard-route compression.
+- `select_route.py`: C-seed select-route compression.
+- `gridmerge_one_transpose.py`: one-token transpose layout.
+- `hard_route_transpose.py`: hard-route transpose layout.
+- `select_route_transpose.py`: select-route transpose layout.
+- `global_attention.py`: global seed-token merging without local grid blocks.
+- `common.py`: shared reshape, seed sampling, and merge-weight utilities.
+
+For default
 480p/81-frame Wan generation, the sequence is rearranged into:
 
 ```text
@@ -46,7 +58,8 @@ With `num_merge_tokens=C>1`, the two multi-token modes are:
   query then selects the best compressed KV candidate with the
   dot-product-plus-entropy score.
 
-The easiest experimental hook is `q_init` in `_merge_query`:
+The easiest experimental hook is `q_init` in `common.merge_query_row` and
+`common.merge_query_column`:
 
 - `ith`: key row `i` initializes with query row `i`
 - `mean`: every key row initializes with the mean query
