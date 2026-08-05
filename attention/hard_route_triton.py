@@ -77,7 +77,7 @@ if triton is not None:
                 mask=(seed_idx < C_SEEDS) & valid_query[:, None] & valid_dim[None, :],
                 other=0.0,
             )
-            logits = tl.dot(seed_vec, tl.trans(key_block))
+            logits = tl.dot(seed_vec, tl.trans(key_block), input_precision="ieee")
             logits = tl.where(
                 (seed_idx < C_SEEDS) & valid_query[:, None] & valid_key[None, :],
                 logits,
@@ -100,7 +100,7 @@ if triton is not None:
                 mask=(seed_idx < C_SEEDS) & valid_query[:, None] & valid_dim[None, :],
                 other=0.0,
             )
-            logits = tl.dot(seed_vec, tl.trans(key_block))
+            logits = tl.dot(seed_vec, tl.trans(key_block), input_precision="ieee")
             active_seed = seed_idx < C_SEEDS
             active = active_seed & valid_query[:, None] & valid_key[None, :]
             has_seed = tl.sum(tl.where((assignments == seed_idx) & active, 1, 0), axis=1) > 0
@@ -119,7 +119,7 @@ if triton is not None:
                 mask=(seed_idx < C_SEEDS) & valid_query[:, None] & valid_dim[None, :],
                 other=0.0,
             )
-            logits = tl.dot(seed_vec, tl.trans(key_block))
+            logits = tl.dot(seed_vec, tl.trans(key_block), input_precision="ieee")
             active = (
                 (seed_idx < C_SEEDS)
                 & valid_query[:, None]
