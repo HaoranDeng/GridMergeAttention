@@ -91,6 +91,7 @@ def hard_route_attention(
     # A fixed (a, f, j, k) block has I queries x L keys. This path merges
     # the L keys into several hard-assigned merged tokens instead of one.
     include_ith = validate_block_seed_mode(seed_mode, "multi-token merging")
+    fast_with_include = seed_mode == "fast_random_with_ith"
     if num_merge_tokens > k.size(3):
         raise ValueError("num_merge_tokens cannot exceed key columns per block.")
 
@@ -111,6 +112,7 @@ def hard_route_attention(
         num_merge_tokens,
         seed,
         include_ith=include_ith,
+        fast_with_include=fast_with_include,
     )
     seed_queries = gather_seed_queries(q, seed_rows)
 

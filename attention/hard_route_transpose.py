@@ -66,6 +66,7 @@ def hard_route_attention_transpose(
     # k/v: [B, F, K, L, H, D]
     # A fixed (a, f, i, l) block has J queries x K keys.
     include_ith = validate_block_seed_mode(seed_mode, "transposed multi-token merging")
+    fast_with_include = seed_mode == "fast_random_with_ith"
     if num_merge_tokens > q.size(3):
         raise ValueError("num_merge_tokens cannot exceed query columns per block.")
 
@@ -86,6 +87,7 @@ def hard_route_attention_transpose(
         num_merge_tokens,
         seed,
         include_ith=include_ith,
+        fast_with_include=fast_with_include,
     )
     seed_queries = gather_seed_queries_transpose(q, seed_cols)
 

@@ -4,7 +4,7 @@ from einops import rearrange
 
 
 HASH_MOD = 2147483647
-BLOCK_SEED_MODES = {"random", "random_with_ith"}
+BLOCK_SEED_MODES = {"random", "random_with_ith", "fast_random_with_ith"}
 
 _Q_INIT_ALIASES = {
     "identity": "ith",
@@ -29,9 +29,10 @@ def scale_qk(q, k, scale):
 def validate_block_seed_mode(seed_mode, context):
     if seed_mode not in BLOCK_SEED_MODES:
         raise ValueError(
-            f"{context} currently supports seed_mode='random' or 'random_with_ith'."
+            f"{context} currently supports seed_mode='random', "
+            "'random_with_ith', or 'fast_random_with_ith'."
         )
-    return seed_mode == "random_with_ith"
+    return seed_mode in {"random_with_ith", "fast_random_with_ith"}
 
 
 def merge_query_row(q, key_rows, q_init):
@@ -143,6 +144,24 @@ def seed_indices_from_base(base, num_choices, num_seeds, include_seed=None):
     return scores.topk(num_seeds, dim=-1).indices.long()
 
 
+def fast_seed_indices_with_include(base, num_choices, num_seeds, include_seed):
+    """Choose distinct deterministic seeds without scoring every candidate."""
+    if num_seeds == 1:
+        return include_seed.unsqueeze(-1).long()
+    if num_seeds > num_choices:
+        raise ValueError("num_seeds cannot exceed num_choices.")
+
+    pool_size = num_choices - 1
+    extra_count = num_seeds - 1
+    offsets = torch.arange(extra_count, device=base.device).view(
+        *((1,) * base.ndim),
+        extra_count,
+    )
+    extra = (base.unsqueeze(-1).remainder(pool_size) + offsets).remainder(pool_size)
+    extra = extra + (extra >= include_seed.unsqueeze(-1)).long()
+    return torch.cat((include_seed.unsqueeze(-1).long(), extra.long()), dim=-1)
+
+
 def random_seed_rows(
     query_outer,
     key_outer,
@@ -152,6 +171,7 @@ def random_seed_rows(
     num_seeds,
     seed,
     include_ith=False,
+    fast_with_include=False,
 ):
     """Deterministic pseudo-random query-row seeds for each block."""
     if num_seeds > query_rows:
@@ -170,6 +190,8 @@ def random_seed_rows(
     ith_seed = None
     if include_ith:
         ith_seed = key_row.expand(query_outer.numel(), key_outer.numel(), key_rows, query_columns)
+        if fast_with_include:
+            return fast_seed_indices_with_include(base, query_rows, num_seeds, ith_seed)
     return seed_indices_from_base(base, query_rows, num_seeds, include_seed=ith_seed)
 
 
@@ -182,6 +204,7 @@ def random_seed_columns(
     num_seeds,
     seed,
     include_ith=False,
+    fast_with_include=False,
 ):
     """Deterministic pseudo-random query-column seeds for transposed blocks."""
     if num_seeds > query_columns:
@@ -200,6 +223,8 @@ def random_seed_columns(
     ith_seed = None
     if include_ith:
         ith_seed = key_col.expand(query_outer.numel(), key_outer.numel(), query_rows, key_columns)
+        if fast_with_include:
+            return fast_seed_indices_with_include(base, query_columns, num_seeds, ith_seed)
     return seed_indices_from_base(base, query_columns, num_seeds, include_seed=ith_seed)
 
 

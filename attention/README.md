@@ -64,6 +64,10 @@ With `num_merge_tokens=C>1`, the two multi-token modes are:
   query then selects the best compressed KV candidate with the
   dot-product-plus-entropy score.
 
+`seed_mode: fast_random_with_ith` keeps the same index-matched seed used by
+`random_with_ith`, but chooses the remaining seeds with a lightweight
+deterministic hash instead of ranking every candidate query row.
+
 `hard_route_backend` controls the hard-route KV-compression backend:
 
 - `sdpa`: default PyTorch implementation, kept as the reference path.

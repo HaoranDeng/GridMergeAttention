@@ -3,6 +3,7 @@ from einops import rearrange
 
 from .common import (
     scale_qk,
+    fast_seed_indices_with_include,
     seed_indices_from_base,
     validate_block_seed_mode,
 )
@@ -10,7 +11,16 @@ from .hard_route import hard_route_compressed_attention, hard_route_merge_weight
 from .hard_route_triton import triton_hard_route_merge
 
 
-def shared_seed_rows(key_outer, key_rows, query_columns, query_rows, num_seeds, seed, include_ith=False):
+def shared_seed_rows(
+    key_outer,
+    key_rows,
+    query_columns,
+    query_rows,
+    num_seeds,
+    seed,
+    include_ith=False,
+    fast_with_include=False,
+):
     """Choose seed query rows once per key outer, key row, and query column."""
     if num_seeds > query_rows:
         raise ValueError("num_merge_tokens cannot exceed query rows per block.")
@@ -28,6 +38,8 @@ def shared_seed_rows(key_outer, key_rows, query_columns, query_rows, num_seeds, 
     ith_seed = None
     if include_ith:
         ith_seed = key_row.expand(key_outer.numel(), key_rows, query_columns)
+        if fast_with_include:
+            return fast_seed_indices_with_include(base, query_rows, num_seeds, ith_seed)
     return seed_indices_from_base(base, query_rows, num_seeds, include_seed=ith_seed)
 
 
@@ -80,6 +92,7 @@ def hard_route_shared_attention(
     # repeated per-query-outer KV compression used by hard_route_attention.
     del query_outer_offset
     include_ith = validate_block_seed_mode(seed_mode, "shared multi-token merging")
+    fast_with_include = seed_mode == "fast_random_with_ith"
     if q.size(1) != k.size(1):
         raise ValueError("shared hard-route expects query_outer and key_outer to match.")
     if num_merge_tokens > k.size(3):
@@ -95,6 +108,7 @@ def hard_route_shared_attention(
         num_merge_tokens,
         seed,
         include_ith=include_ith,
+        fast_with_include=fast_with_include,
     )
     seed_queries = gather_shared_seed_queries(q, seed_rows)
     merged_keys, merged_values, routing_bias, cluster_has_keys = _merge(
