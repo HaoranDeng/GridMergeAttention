@@ -8,7 +8,11 @@ from .common import (
     scale_qk,
     validate_block_seed_mode,
 )
-from .hard_route_triton import triton_biased_attention, triton_hard_route_merge
+from .hard_route_triton import (
+    triton_biased_attention,
+    triton_hard_route_merge,
+    triton_hard_route_merge_c4,
+)
 
 
 def assign_keys_to_seeds(seed_logits):
@@ -60,7 +64,11 @@ def _merge(seed_queries, k, v, backend):
         return _torch_merge(seed_queries, k, v)
     if backend == "triton":
         return triton_hard_route_merge(seed_queries, k, v)
-    raise ValueError(f"unsupported hard_route_backend={backend!r}; expected 'sdpa' or 'triton'.")
+    if backend == "triton_c4":
+        return triton_hard_route_merge_c4(seed_queries, k, v)
+    raise ValueError(
+        f"unsupported hard_route_backend={backend!r}; expected 'sdpa', 'triton', or 'triton_c4'."
+    )
 
 
 def hard_route_compressed_attention(query, key, value, bias, backend):

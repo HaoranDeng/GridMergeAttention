@@ -78,6 +78,8 @@ candidate row.
 - `triton`: fused Triton hard-assignment/KV-compression kernel followed by the
   same SDPA routing path. The original PyTorch path remains available by
   switching this value back to `sdpa`.
+- `triton_c4`: C=4-only Triton KV-compression kernel that reuses the seed-key
+  dot products between hard assignment and merge.
 
 `hard_route_routing_backend` separately switches the second compressed-attention
 step:
@@ -94,9 +96,11 @@ Useful configs:
 - `configs/token_merging_wan_hard_route_c4_triton_fewstep.yaml`: hard-route C=4 with fused Triton KV compression.
 - `configs/token_merging_wan_hard_route_c4_triton_chunk7_fewstep.yaml`: hard-route C=4 with fused Triton KV compression and safe query-outer chunking.
 - `configs/token_merging_wan_hard_route_c4_group_shared_chunk7_triton_fewstep.yaml`: experimental group-shared C=4, sharing one compression across each group of seven query outers.
+- `configs/token_merging_wan_hard_route_c4_group_shared_chunk7_triton_c4_fewstep.yaml`: group-shared C=4 with the C=4-specialized Triton kernel.
 - `configs/token_merging_wan_hard_route_c4_triton_chunk7_route_triton_fewstep.yaml`: hard-route C=4 with fused Triton KV compression, safe query-outer chunking, and fused Triton routing.
 - `configs/token_merging_wan_hard_route_c4_fastseed_triton_chunk7_route_triton_fewstep.yaml`: same as above, with lightweight deterministic seed selection.
 - `configs/token_merging_wan_hard_route_c4_shared_triton_fewstep.yaml`: experimental shared-compression hard-route C=4.
+- `configs/token_merging_wan_hard_route_c4_shared_triton_c4_fewstep.yaml`: shared-compression C=4 with the C=4-specialized Triton kernel.
 - `configs/token_merging_wan_hard_route_c4_shared_triton_route_triton_fewstep.yaml`: experimental shared-compression hard-route C=4 with fused Triton routing.
 - `configs/token_merging_wan_hard_route_c4_shared_fastseed_triton_route_triton_fewstep.yaml`: shared-compression hard-route C=4 with lightweight deterministic seed selection.
 - `configs/token_merging_wan_hard_route_c6_fewstep.yaml`: hard-route C=6.

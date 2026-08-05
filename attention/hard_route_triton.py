@@ -145,6 +145,155 @@ if triton is not None:
                 routing_bias,
                 mask=(seed_idx < C_SEEDS) & valid_query,
             )
+
+    @triton.jit
+    def _hard_route_merge_c4_kernel(
+        seed_ptr,
+        key_ptr,
+        value_ptr,
+        merged_key_ptr,
+        merged_value_ptr,
+        routing_bias_ptr,
+        A: tl.constexpr,
+        F: tl.constexpr,
+        K_ROWS: tl.constexpr,
+        J: tl.constexpr,
+        H: tl.constexpr,
+        L: tl.constexpr,
+        D_HEAD: tl.constexpr,
+        BLOCK_J: tl.constexpr,
+        BLOCK_L: tl.constexpr,
+        BLOCK_D: tl.constexpr,
+    ):
+        group_id = tl.program_id(0)
+        query_col_block = tl.program_id(1)
+
+        head = group_id % H
+        tmp = group_id // H
+        key_row = tmp % K_ROWS
+        tmp = tmp // K_ROWS
+        key_outer = tmp % F
+        tmp = tmp // F
+        query_outer = tmp % A
+        batch = tmp // A
+
+        query_offsets = query_col_block * BLOCK_J + tl.arange(0, BLOCK_J)
+        key_offsets = tl.arange(0, BLOCK_L)
+        dim_offsets = tl.arange(0, BLOCK_D)
+        valid_query = query_offsets < J
+        valid_key = key_offsets < L
+        valid_dim = dim_offsets < D_HEAD
+
+        key_base = key_ptr + (((batch * F + key_outer) * K_ROWS + key_row) * L * H + head) * D_HEAD
+        key_block = tl.load(
+            key_base + key_offsets[:, None] * H * D_HEAD + dim_offsets[None, :],
+            mask=valid_key[:, None] & valid_dim[None, :],
+            other=0.0,
+        )
+        value_base = value_ptr + (((batch * F + key_outer) * K_ROWS + key_row) * L * H + head) * D_HEAD
+        value_block = tl.load(
+            value_base + key_offsets[:, None] * H * D_HEAD + dim_offsets[None, :],
+            mask=valid_key[:, None] & valid_dim[None, :],
+            other=0.0,
+        )
+
+        seed_base = (
+            ((((((batch * A + query_outer) * F + key_outer) * K_ROWS + key_row) * J
+               + query_offsets[:, None]) * 4) * H + head) * D_HEAD
+        )
+        seed0 = tl.load(
+            seed_ptr + seed_base + dim_offsets[None, :],
+            mask=valid_query[:, None] & valid_dim[None, :],
+            other=0.0,
+        )
+        seed1 = tl.load(
+            seed_ptr + seed_base + H * D_HEAD + dim_offsets[None, :],
+            mask=valid_query[:, None] & valid_dim[None, :],
+            other=0.0,
+        )
+        seed2 = tl.load(
+            seed_ptr + seed_base + 2 * H * D_HEAD + dim_offsets[None, :],
+            mask=valid_query[:, None] & valid_dim[None, :],
+            other=0.0,
+        )
+        seed3 = tl.load(
+            seed_ptr + seed_base + 3 * H * D_HEAD + dim_offsets[None, :],
+            mask=valid_query[:, None] & valid_dim[None, :],
+            other=0.0,
+        )
+
+        logits0 = tl.dot(seed0, tl.trans(key_block), input_precision="ieee")
+        logits1 = tl.dot(seed1, tl.trans(key_block), input_precision="ieee")
+        logits2 = tl.dot(seed2, tl.trans(key_block), input_precision="ieee")
+        logits3 = tl.dot(seed3, tl.trans(key_block), input_precision="ieee")
+        valid_logits = valid_query[:, None] & valid_key[None, :]
+        logits0 = tl.where(valid_logits, logits0, -float("inf"))
+        logits1 = tl.where(valid_logits, logits1, -float("inf"))
+        logits2 = tl.where(valid_logits, logits2, -float("inf"))
+        logits3 = tl.where(valid_logits, logits3, -float("inf"))
+
+        best_logits = logits0
+        assignments = tl.zeros((BLOCK_J, BLOCK_L), tl.int32)
+        update = logits1 > best_logits
+        best_logits = tl.where(update, logits1, best_logits)
+        assignments = tl.where(update, 1, assignments)
+        update = logits2 > best_logits
+        best_logits = tl.where(update, logits2, best_logits)
+        assignments = tl.where(update, 2, assignments)
+        update = logits3 > best_logits
+        assignments = tl.where(update, 3, assignments)
+
+        for seed_idx in tl.static_range(0, 4):
+            logits = logits0
+            if seed_idx == 1:
+                logits = logits1
+            if seed_idx == 2:
+                logits = logits2
+            if seed_idx == 3:
+                logits = logits3
+
+            assigned_to_seed = assignments == seed_idx
+            has_seed = tl.sum(tl.where(assigned_to_seed & valid_logits, 1, 0), axis=1) > 0
+            forced_first_key = (~has_seed[:, None]) & (key_offsets[None, :] == 0)
+            active = valid_logits & (assigned_to_seed | forced_first_key)
+            has_keys = tl.sum(tl.where(active, 1, 0), axis=1) > 0
+
+            row_max = tl.max(tl.where(active, logits, -float("inf")), axis=1)
+            probs = tl.where(active, tl.exp(logits - row_max[:, None]), 0.0)
+            denom = tl.sum(probs, axis=1)
+            safe_denom = tl.where(denom > 0.0, denom, 1.0)
+            weights = probs / safe_denom[:, None]
+            log_denom = row_max + tl.log(safe_denom)
+
+            merged_key = tl.dot(weights.to(key_block.dtype), key_block)
+            merged_value = tl.dot(weights.to(value_block.dtype), value_block)
+            routing_bias = tl.sum(
+                tl.where(active, weights * (logits - log_denom[:, None]), 0.0),
+                axis=1,
+            )
+            routing_bias = tl.where(has_keys, routing_bias, 0.0)
+
+            merged_offset = (
+                ((((((batch * A + query_outer) * F + key_outer) * J + query_offsets[:, None])
+                   * K_ROWS + key_row) * 4 + seed_idx) * H + head)
+                * D_HEAD + dim_offsets[None, :]
+            )
+            tl.store(
+                merged_key_ptr + merged_offset,
+                merged_key,
+                mask=valid_query[:, None] & valid_dim[None, :],
+            )
+            tl.store(
+                merged_value_ptr + merged_offset,
+                merged_value,
+                mask=valid_query[:, None] & valid_dim[None, :],
+            )
+            bias_offset = (
+                ((((((batch * H + head) * A + query_outer) * F + key_outer)
+                   * K_ROWS + key_row) * J + query_offsets) * 4 + seed_idx)
+            )
+            tl.store(routing_bias_ptr + bias_offset, routing_bias, mask=valid_query)
+
     @triton.jit
     def _biased_attention_kernel(
         query_ptr,
@@ -356,4 +505,79 @@ def triton_hard_route_merge(seed_queries, key, value):
     return merged_key, merged_value, routing_bias, None
 
 
-__all__ = ["triton_biased_attention", "triton_hard_route_merge"]
+def triton_hard_route_merge_c4(seed_queries, key, value):
+    """C=4 specialized hard-route merge that reuses seed logits."""
+    if triton is None:
+        raise RuntimeError("hard_route_backend='triton_c4' requires Triton.")
+    if not seed_queries.is_cuda:
+        raise RuntimeError("hard_route_backend='triton_c4' requires CUDA/ROCm tensors.")
+    if seed_queries.dtype not in (torch.float16, torch.bfloat16):
+        raise RuntimeError("hard_route_backend='triton_c4' requires fp16 or bf16 tensors.")
+
+    seed_queries = seed_queries.contiguous()
+    key = key.contiguous()
+    value = value.contiguous()
+
+    batch, query_outer, key_outer, key_rows, query_columns, num_seeds, heads, dim = seed_queries.shape
+    if num_seeds != 4:
+        raise ValueError(f"triton_c4 requires exactly 4 seeds, got {num_seeds}.")
+    if key.shape[:3] != (batch, key_outer, key_rows) or value.shape != key.shape:
+        raise ValueError("seed_queries/key/value shapes are inconsistent for Triton hard-route merge.")
+    key_columns = key.size(3)
+    if key.size(4) != heads or key.size(5) != dim:
+        raise ValueError("seed_queries/key head dimensions are inconsistent for Triton hard-route merge.")
+
+    block_j = min(8, triton.next_power_of_2(query_columns))
+    block_l = triton.next_power_of_2(key_columns)
+    block_d = triton.next_power_of_2(dim)
+    if block_l > 128:
+        raise ValueError(f"Triton hard-route merge supports at most 128 key tokens per block, got {key_columns}.")
+    if block_d > 128:
+        raise ValueError(f"Triton hard-route merge supports head dim <= 128, got {dim}.")
+
+    output_elements = batch * query_outer * key_outer * query_columns * key_rows * num_seeds * heads * dim
+    if output_elements > torch.iinfo(torch.int32).max:
+        raise ValueError(
+            "Triton hard-route merge output is too large for one launch. "
+            "Reduce query_outer_chunk; for default 480p C=4 use query_outer_chunk<=10."
+        )
+
+    merged_key = torch.empty(
+        (batch, query_outer, key_outer, query_columns, key_rows, num_seeds, heads, dim),
+        device=key.device,
+        dtype=key.dtype,
+    )
+    merged_value = torch.empty_like(merged_key)
+    routing_bias = torch.empty(
+        (batch, heads, query_outer, key_outer, key_rows, query_columns, num_seeds),
+        device=key.device,
+        dtype=torch.float32,
+    )
+
+    grid = (
+        batch * query_outer * key_outer * key_rows * heads,
+        triton.cdiv(query_columns, block_j),
+    )
+    _hard_route_merge_c4_kernel[grid](
+        seed_queries,
+        key,
+        value,
+        merged_key,
+        merged_value,
+        routing_bias,
+        A=query_outer,
+        F=key_outer,
+        K_ROWS=key_rows,
+        J=query_columns,
+        H=heads,
+        L=key_columns,
+        D_HEAD=dim,
+        BLOCK_J=block_j,
+        BLOCK_L=block_l,
+        BLOCK_D=block_d,
+        num_warps=4,
+    )
+    return merged_key, merged_value, routing_bias, None
+
+
+__all__ = ["triton_biased_attention", "triton_hard_route_merge", "triton_hard_route_merge_c4"]

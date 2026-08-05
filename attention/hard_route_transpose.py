@@ -8,7 +8,7 @@ from .common import (
     validate_block_seed_mode,
 )
 from .hard_route import hard_route_compressed_attention, hard_route_merge_weights
-from .hard_route_triton import triton_hard_route_merge
+from .hard_route_triton import triton_hard_route_merge, triton_hard_route_merge_c4
 
 
 def _torch_merge(seed_queries, k, v):
@@ -21,7 +21,7 @@ def _torch_merge(seed_queries, k, v):
     return merged_keys, merged_values, routing_bias, cluster_has_keys
 
 
-def _triton_merge(seed_queries, k, v):
+def _triton_merge(seed_queries, k, v, use_c4_kernel=False):
     # Reuse the row-routing Triton kernel by treating original key columns as
     # fixed key rows and original key rows as the merged key-token dimension.
     seed_queries_for_kernel = rearrange(
@@ -31,7 +31,8 @@ def _triton_merge(seed_queries, k, v):
     key_for_kernel = rearrange(k, "b f k l h d -> b f l k h d").contiguous()
     value_for_kernel = rearrange(v, "b f k l h d -> b f l k h d").contiguous()
 
-    merged_keys, merged_values, routing_bias, cluster_has_keys = triton_hard_route_merge(
+    merge_fn = triton_hard_route_merge_c4 if use_c4_kernel else triton_hard_route_merge
+    merged_keys, merged_values, routing_bias, cluster_has_keys = merge_fn(
         seed_queries_for_kernel,
         key_for_kernel,
         value_for_kernel,
@@ -47,7 +48,11 @@ def _merge(seed_queries, k, v, backend):
         return _torch_merge(seed_queries, k, v)
     if backend == "triton":
         return _triton_merge(seed_queries, k, v)
-    raise ValueError(f"unsupported hard_route_backend={backend!r}; expected 'sdpa' or 'triton'.")
+    if backend == "triton_c4":
+        return _triton_merge(seed_queries, k, v, use_c4_kernel=True)
+    raise ValueError(
+        f"unsupported hard_route_backend={backend!r}; expected 'sdpa', 'triton', or 'triton_c4'."
+    )
 
 
 def hard_route_attention_transpose(

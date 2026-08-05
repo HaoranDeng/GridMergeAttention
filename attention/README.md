@@ -77,6 +77,8 @@ deterministic hash instead of ranking every candidate query row.
 - `sdpa`: default PyTorch implementation, kept as the reference path.
 - `triton`: fused Triton hard-assignment/KV-compression kernel followed by the
   same SDPA routing path.
+- `triton_c4`: C=4-only Triton kernel that reuses seed-key dot products between
+  hard assignment and KV merge.
 
 `hard_route_routing_backend` controls the second compressed-attention step:
 
