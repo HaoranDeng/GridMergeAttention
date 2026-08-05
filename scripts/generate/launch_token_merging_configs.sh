@@ -33,6 +33,7 @@ OUTPUT_ROOT="${OUTPUT_ROOT:-${REPO_DIR}/videos/token_merging_configs}"
 LOG_DIR="${LOG_DIR:-${OUTPUT_ROOT}/logs}"
 NUM_VIDEOS="${NUM_VIDEOS:--1}"
 NUM_SAMPLES="${NUM_SAMPLES:-5}"
+SAMPLE_BATCH_SIZE="${SAMPLE_BATCH_SIZE:-2}"
 SEED="${SEED:-0}"
 FPS="${FPS:-16}"
 DTYPE="${DTYPE:-bf16}"
@@ -125,6 +126,8 @@ for i in "${!CONFIG_PATHS[@]}"; do
       --output_dir "${output_dir}" \
       --num_videos "${NUM_VIDEOS}" \
       --num_samples "${NUM_SAMPLES}" \
+      --sample_batch_size "${SAMPLE_BATCH_SIZE}" \
+      --skip_existing \
       --seed "${SEED}" \
       --fps "${FPS}" \
       --dtype "${DTYPE}" \
