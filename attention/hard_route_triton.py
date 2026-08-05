@@ -18,7 +18,6 @@ if triton is not None:
         merged_key_ptr,
         merged_value_ptr,
         routing_bias_ptr,
-        valid_ptr,
         A: tl.constexpr,
         F: tl.constexpr,
         K_ROWS: tl.constexpr,
@@ -146,12 +145,6 @@ if triton is not None:
                 routing_bias,
                 mask=(seed_idx < C_SEEDS) & valid_query,
             )
-            tl.store(
-                valid_ptr + bias_offset,
-                has_keys,
-                mask=(seed_idx < C_SEEDS) & valid_query,
-            )
-
     @triton.jit
     def _biased_attention_kernel(
         query_ptr,
@@ -335,12 +328,6 @@ def triton_hard_route_merge(seed_queries, key, value):
         device=key.device,
         dtype=torch.float32,
     )
-    cluster_has_keys = torch.empty(
-        (batch, heads, query_outer, key_outer, key_rows, query_columns, num_seeds),
-        device=key.device,
-        dtype=torch.bool,
-    )
-
     grid = (
         batch * query_outer * key_outer * key_rows * heads,
         triton.cdiv(query_columns, block_j),
@@ -352,7 +339,6 @@ def triton_hard_route_merge(seed_queries, key, value):
         merged_key,
         merged_value,
         routing_bias,
-        cluster_has_keys,
         A=query_outer,
         F=key_outer,
         K_ROWS=key_rows,
@@ -367,7 +353,7 @@ def triton_hard_route_merge(seed_queries, key, value):
         BLOCK_D=block_d,
         num_warps=4,
     )
-    return merged_key, merged_value, routing_bias, cluster_has_keys
+    return merged_key, merged_value, routing_bias, None
 
 
 __all__ = ["triton_biased_attention", "triton_hard_route_merge"]
