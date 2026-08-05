@@ -4,7 +4,7 @@
 #SBATCH -o out/job.%j.out
 #SBATCH -e out/job.%j.err
 #SBATCH -N 1
-#SBATCH -n 64
+#SBATCH -n 8
 #SBATCH -t 01:30:00
 #SBATCH -p mi3001x
 
