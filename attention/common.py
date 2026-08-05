@@ -242,11 +242,8 @@ def hard_route_merge_weights(seed_logits, dtype):
     cluster_has_keys = assignment_mask.any(dim=-1)
 
     masked_logits = seed_logits.masked_fill(~assignment_mask, torch.finfo(seed_logits.dtype).min)
-    merge_logits = masked_logits - masked_logits.amax(dim=-1, keepdim=True)
-    merge_logits = merge_logits.masked_fill(~assignment_mask, torch.finfo(seed_logits.dtype).min)
-    merge_weights = torch.softmax(merge_logits, dim=-1).masked_fill(~assignment_mask, 0).to(dtype)
-
-    merge_logprob = merge_logits - torch.logsumexp(merge_logits, dim=-1, keepdim=True)
+    merge_logprob = torch.log_softmax(masked_logits, dim=-1)
+    merge_weights = merge_logprob.exp().masked_fill(~assignment_mask, 0).to(dtype)
     merge_logprob = merge_logprob.masked_fill(~assignment_mask, 0)
     return merge_weights, merge_logprob, cluster_has_keys
 
