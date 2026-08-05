@@ -328,7 +328,8 @@ def triton_hard_route_merge(seed_queries, key, value):
         raise ValueError("seed_queries/key head dimensions are inconsistent for Triton hard-route merge.")
 
     block_c = triton.next_power_of_2(num_seeds)
-    block_j = min(8, triton.next_power_of_2(query_columns))
+    target_block_j = 16 if key_columns <= 32 else 8
+    block_j = min(target_block_j, triton.next_power_of_2(query_columns))
     block_l = triton.next_power_of_2(key_columns)
     block_d = triton.next_power_of_2(dim)
     if block_c > 16:
