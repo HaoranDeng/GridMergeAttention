@@ -505,7 +505,7 @@ def triton_hard_route_merge(seed_queries, key, value):
     return merged_key, merged_value, routing_bias, None
 
 
-def triton_hard_route_merge_c4(seed_queries, key, value):
+def triton_hard_route_merge_c4(seed_queries, key, value, block_j_target=8):
     """C=4 specialized hard-route merge that reuses seed logits."""
     if triton is None:
         raise RuntimeError("hard_route_backend='triton_c4' requires Triton.")
@@ -527,7 +527,7 @@ def triton_hard_route_merge_c4(seed_queries, key, value):
     if key.size(4) != heads or key.size(5) != dim:
         raise ValueError("seed_queries/key head dimensions are inconsistent for Triton hard-route merge.")
 
-    block_j = min(8, triton.next_power_of_2(query_columns))
+    block_j = min(int(block_j_target), triton.next_power_of_2(query_columns))
     block_l = triton.next_power_of_2(key_columns)
     block_d = triton.next_power_of_2(dim)
     if block_l > 128:

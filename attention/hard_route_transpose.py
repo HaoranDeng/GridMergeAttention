@@ -21,7 +21,7 @@ def _torch_merge(seed_queries, k, v):
     return merged_keys, merged_values, routing_bias, cluster_has_keys
 
 
-def _triton_merge(seed_queries, k, v, use_c4_kernel=False):
+def _triton_merge(seed_queries, k, v, use_c4_kernel=False, block_j_target=8):
     # Reuse the row-routing Triton kernel by treating original key columns as
     # fixed key rows and original key rows as the merged key-token dimension.
     seed_queries_for_kernel = rearrange(
@@ -31,12 +31,19 @@ def _triton_merge(seed_queries, k, v, use_c4_kernel=False):
     key_for_kernel = rearrange(k, "b f k l h d -> b f l k h d").contiguous()
     value_for_kernel = rearrange(v, "b f k l h d -> b f l k h d").contiguous()
 
-    merge_fn = triton_hard_route_merge_c4 if use_c4_kernel else triton_hard_route_merge
-    merged_keys, merged_values, routing_bias, cluster_has_keys = merge_fn(
-        seed_queries_for_kernel,
-        key_for_kernel,
-        value_for_kernel,
-    )
+    if use_c4_kernel:
+        merged_keys, merged_values, routing_bias, cluster_has_keys = triton_hard_route_merge_c4(
+            seed_queries_for_kernel,
+            key_for_kernel,
+            value_for_kernel,
+            block_j_target=block_j_target,
+        )
+    else:
+        merged_keys, merged_values, routing_bias, cluster_has_keys = triton_hard_route_merge(
+            seed_queries_for_kernel,
+            key_for_kernel,
+            value_for_kernel,
+        )
     routing_bias = rearrange(routing_bias, "b h a f l i c -> b h a f i l c")
     cluster_has_keys = rearrange(cluster_has_keys, "b h a f l i c -> b h a f i l c")
     return merged_keys, merged_values, routing_bias, cluster_has_keys
@@ -50,8 +57,11 @@ def _merge(seed_queries, k, v, backend):
         return _triton_merge(seed_queries, k, v)
     if backend == "triton_c4":
         return _triton_merge(seed_queries, k, v, use_c4_kernel=True)
+    if backend == "triton_c4_j16":
+        return _triton_merge(seed_queries, k, v, use_c4_kernel=True, block_j_target=16)
     raise ValueError(
-        f"unsupported hard_route_backend={backend!r}; expected 'sdpa', 'triton', or 'triton_c4'."
+        f"unsupported hard_route_backend={backend!r}; expected 'sdpa', 'triton', "
+        "'triton_c4', or 'triton_c4_j16'."
     )
 
 
