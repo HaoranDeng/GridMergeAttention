@@ -23,12 +23,11 @@ def assign_keys_to_seeds(seed_logits):
     ).movedim(-1, -2).bool()
 
     has_seed = assignment_mask.any(dim=-1)
-    best_key_per_seed = seed_logits.argmax(dim=-1)
     key_idx = torch.arange(num_keys, device=seed_logits.device)
-    key_idx = key_idx.view(*((1,) * best_key_per_seed.ndim), num_keys)
-    # Empty clusters are rare; give each empty seed its best key without a
-    # Python loop. In this fallback only, a key may be shared by two seeds.
-    force_mask = (~has_seed).unsqueeze(-1) & (best_key_per_seed.unsqueeze(-1) == key_idx)
+    key_idx = key_idx.view(*((1,) * has_seed.ndim), num_keys)
+    # Empty clusters are rare; give each empty seed the first key without a
+    # Python loop. In this fallback only, key 0 may be shared by multiple seeds.
+    force_mask = (~has_seed).unsqueeze(-1) & (key_idx == 0)
 
     return assignment_mask | force_mask
 

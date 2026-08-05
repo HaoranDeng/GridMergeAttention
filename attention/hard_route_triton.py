@@ -87,8 +87,6 @@ if triton is not None:
             best_logits = tl.where(update, logits, best_logits)
             assignments = tl.where(update, seed_idx, assignments)
 
-        # Preserve the Python reference behavior: if a seed owns no key after
-        # argmax assignment, force its best key to that seed.
         for seed_idx in tl.static_range(0, BLOCK_C):
             seed_offsets = (
                 (((((batch * A + query_outer) * F + key_outer) * K_ROWS + key_row)
@@ -101,31 +99,11 @@ if triton is not None:
                 other=0.0,
             )
             logits = tl.dot(seed_vec, tl.trans(key_block), input_precision="ieee")
-            active_seed = seed_idx < C_SEEDS
-            active = active_seed & valid_query[:, None] & valid_key[None, :]
-            has_seed = tl.sum(tl.where((assignments == seed_idx) & active, 1, 0), axis=1) > 0
-            best_logit = tl.max(tl.where(active, logits, -float("inf")), axis=1)
-            force_key = active & (~has_seed[:, None]) & (logits == best_logit[:, None])
-            assignments = tl.where(force_key, seed_idx, assignments)
-
-        for seed_idx in tl.static_range(0, BLOCK_C):
-            seed_offsets = (
-                (((((batch * A + query_outer) * F + key_outer) * K_ROWS + key_row)
-                  * J + query_offsets[:, None]) * C_SEEDS + seed_idx)
-                * H + head
-            ) * D_HEAD + dim_offsets[None, :]
-            seed_vec = tl.load(
-                seed_ptr + seed_offsets,
-                mask=(seed_idx < C_SEEDS) & valid_query[:, None] & valid_dim[None, :],
-                other=0.0,
-            )
-            logits = tl.dot(seed_vec, tl.trans(key_block), input_precision="ieee")
-            active = (
-                (seed_idx < C_SEEDS)
-                & valid_query[:, None]
-                & valid_key[None, :]
-                & (assignments == seed_idx)
-            )
+            active_seed = (seed_idx < C_SEEDS) & valid_query[:, None] & valid_key[None, :]
+            assigned_to_seed = assignments == seed_idx
+            has_seed = tl.sum(tl.where(assigned_to_seed & active_seed, 1, 0), axis=1) > 0
+            forced_first_key = (~has_seed[:, None]) & (key_offsets[None, :] == 0)
+            active = active_seed & (assigned_to_seed | forced_first_key)
             has_keys = tl.sum(tl.where(active, 1, 0), axis=1) > 0
 
             row_max = tl.max(tl.where(active, logits, -float("inf")), axis=1)
