@@ -13,21 +13,27 @@ from .hard_route_triton import triton_hard_route_merge
 
 def assign_keys_to_seeds(seed_logits):
     # seed_logits: [B, H, A, F, K, J, C, L].
+    num_seeds = seed_logits.size(-2)
+    num_keys = seed_logits.size(-1)
+
     assignments = seed_logits.argmax(dim=-2)
-    key_col = torch.arange(seed_logits.size(-1), device=seed_logits.device)
+    assignment_mask = torch.nn.functional.one_hot(
+        assignments,
+        num_classes=num_seeds,
+    ).movedim(-1, -2).bool()
 
-    for seed_idx in range(seed_logits.size(-2)):
-        has_seed = (assignments == seed_idx).any(dim=-1)
-        best_key = seed_logits[..., seed_idx, :].argmax(dim=-1)
-        force_seed_shape = (1,) * (assignments.ndim - 1) + (-1,)
-        force_seed = key_col.view(*force_seed_shape) == best_key.unsqueeze(-1)
-        assignments = torch.where(
-            has_seed.unsqueeze(-1),
-            assignments,
-            torch.where(force_seed, seed_idx, assignments),
-        )
+    has_seed = assignment_mask.any(dim=-1)
+    best_key_per_seed = seed_logits.argmax(dim=-1)
+    key_idx = torch.arange(num_keys, device=seed_logits.device)
+    key_idx = key_idx.view(*((1,) * best_key_per_seed.ndim), num_keys)
+    force_mask = (~has_seed).unsqueeze(-1) & (best_key_per_seed.unsqueeze(-1) == key_idx)
 
-    return torch.nn.functional.one_hot(assignments, num_classes=seed_logits.size(-2)).movedim(-1, -2).bool()
+    force_scores = seed_logits.masked_fill(~force_mask, torch.finfo(seed_logits.dtype).min)
+    forced_assignments = force_scores.argmax(dim=-2)
+    has_forced_owner = force_mask.any(dim=-2)
+    assignments = torch.where(has_forced_owner, forced_assignments, assignments)
+
+    return torch.nn.functional.one_hot(assignments, num_classes=num_seeds).movedim(-1, -2).bool()
 
 
 def hard_route_merge_weights(seed_logits, dtype):
@@ -123,4 +129,4 @@ def hard_route_attention(
     )
 
 
-__all__ = ["hard_route_attention", "hard_route_merge_weights"]
+__all__ = ["assign_keys_to_seeds", "hard_route_attention", "hard_route_merge_weights"]
