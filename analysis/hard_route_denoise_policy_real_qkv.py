@@ -89,7 +89,7 @@ def load_pipeline(config_path, checkpoint, dtype, device, use_ema):
     return config, pipeline
 
 
-MERGE_BACKEND = "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached"
+DEFAULT_MERGE_BACKEND = "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached"
 R3_BACKEND = "triton_grid_outer_exact_r3_m128_n64_s1_exp2"
 R4_BACKEND = "triton_grid_outer_exact_r4_m128_n64_s1_exp2"
 
@@ -112,7 +112,7 @@ def policy_backend(policy, denoise_idx, num_denoise_steps):
     raise ValueError(f"unknown policy={policy!r}")
 
 
-def install_probe(stats, max_calls, policies, state):
+def install_probe(stats, max_calls, policies, state, merge_backend):
     import wan.modules.model as wan_model
 
     call_index = {"value": 0}
@@ -138,7 +138,7 @@ def install_probe(stats, max_calls, policies, state):
             num_merge_tokens=4,
             seed_mode="fast_random_with_ith",
             seed=0,
-            hard_route_backend=MERGE_BACKEND,
+            hard_route_backend=merge_backend,
             hard_route_routing_backend=policy_backend(
                 policy,
                 int(state["current_denoise_idx"]),
@@ -220,6 +220,7 @@ def parse_args():
     parser.add_argument("--dtype", choices=["bf16", "fp16"], default="bf16")
     parser.add_argument("--use_ema", action="store_true")
     parser.add_argument("--max_calls", type=int, default=90)
+    parser.add_argument("--hard_route_backend", default=DEFAULT_MERGE_BACKEND)
     parser.add_argument(
         "--policies",
         default="r4_all,r3_all,r3_first_step,r3_last_step,r3_first_two_steps,r3_last_two_steps,r3_middle_step",
@@ -244,7 +245,7 @@ def main():
         "num_denoise_steps": num_denoise_steps,
     }
     stats = defaultdict(Stats)
-    install_probe(stats, args.max_calls, policies, state)
+    install_probe(stats, args.max_calls, policies, state, args.hard_route_backend)
 
     sync()
     start = time.perf_counter()
@@ -262,7 +263,7 @@ def main():
         "max_calls": args.max_calls,
         "policies": policies,
         "wall_seconds": time.perf_counter() - start,
-        "merge_backend": MERGE_BACKEND,
+        "merge_backend": args.hard_route_backend,
         "r3_backend": R3_BACKEND,
         "r4_backend": R4_BACKEND,
         "variants": {
