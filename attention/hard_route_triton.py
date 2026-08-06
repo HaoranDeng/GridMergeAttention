@@ -691,18 +691,19 @@ if triton is not None:
             key_frame = query_outer + frame_slot - RADIUS
             route_token = key_frame * tokens_per_frame + frame_inner
             valid_key = (local_keys < local_tokens) & (key_frame >= 0) & (key_frame < A_OUTER)
+            safe_route_token = tl.where(valid_key, route_token, 0)
 
             k = tl.load(
-                key_base + route_token[:, None] * D_HEAD + dim_offsets[None, :],
+                key_base + safe_route_token[:, None] * D_HEAD + dim_offsets[None, :],
                 mask=valid_key[:, None] & (dim_offsets[None, :] < D_HEAD),
                 other=0.0,
             )
             v = tl.load(
-                value_base + route_token[:, None] * D_HEAD + dim_offsets[None, :],
+                value_base + safe_route_token[:, None] * D_HEAD + dim_offsets[None, :],
                 mask=valid_key[:, None] & (dim_offsets[None, :] < D_HEAD),
                 other=0.0,
             )
-            bias = tl.load(bias_base + route_token, mask=valid_key, other=float("inf"))
+            bias = tl.load(bias_base + safe_route_token, mask=valid_key, other=float("inf"))
 
             logits = tl.dot(q, tl.trans(k)) * SCORE_SCALE - bias[None, :]
             logits = tl.where(
