@@ -443,7 +443,10 @@ if triton is not None:
                 merged_key = tl.dot(weights.to(key_block.dtype), key_block)
                 merged_value = tl.dot(weights.to(value_block.dtype), value_block)
                 if WRITE_BIAS:
-                    log_denom = row_max + tl.log(safe_denom)
+                    if USE_EXP2:
+                        log_denom = row_max + tl.log2(safe_denom) * 0.6931471805599453
+                    else:
+                        log_denom = row_max + tl.log(safe_denom)
                     routing_bias = tl.sum(
                         tl.where(active, weights * (logits - log_denom[:, None]), 0.0),
                         axis=1,
