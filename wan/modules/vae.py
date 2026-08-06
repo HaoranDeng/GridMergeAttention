@@ -509,6 +509,8 @@ class WanVAE_(nn.Module):
         self.conv2 = CausalConv3d(z_dim, z_dim, 1)
         self.decoder = Decoder3d(dim, z_dim, dim_mult, num_res_blocks,
                                  attn_scales, self.temperal_upsample, dropout)
+        self._conv_num = count_conv3d(self.decoder)
+        self._enc_conv_num = count_conv3d(self.encoder)
         self.clear_cache()
 
     def forward(self, x):
@@ -595,11 +597,9 @@ class WanVAE_(nn.Module):
         return mu + std * torch.randn_like(std)
 
     def clear_cache(self):
-        self._conv_num = count_conv3d(self.decoder)
         self._conv_idx = [0]
         self._feat_map = [None] * self._conv_num
         # cache encode
-        self._enc_conv_num = count_conv3d(self.encoder)
         self._enc_conv_idx = [0]
         self._enc_feat_map = [None] * self._enc_conv_num
 
