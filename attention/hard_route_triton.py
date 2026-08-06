@@ -533,7 +533,7 @@ if triton is not None:
         )
 
 
-def triton_biased_attention(query, key, value, bias, block_m=16, block_n=128, scale=1.0):
+def triton_biased_attention(query, key, value, bias, block_m=16, block_n=128, scale=1.0, num_stages=None):
     """Fused Triton attention for hard-route compressed KV routing.
 
     query: [groups, query_tokens, dim]
@@ -565,6 +565,9 @@ def triton_biased_attention(query, key, value, bias, block_m=16, block_n=128, sc
 
     out = torch.empty_like(query)
     grid = (groups, triton.cdiv(query_len, block_m))
+    meta = {"num_warps": 4}
+    if num_stages is not None:
+        meta["num_stages"] = int(num_stages)
     _biased_attention_kernel[grid](
         query,
         key,
@@ -578,7 +581,7 @@ def triton_biased_attention(query, key, value, bias, block_m=16, block_n=128, sc
         BLOCK_N=block_n,
         BLOCK_D=block_d,
         SCORE_SCALE=float(scale),
-        num_warps=4,
+        **meta,
     )
     return out
 
