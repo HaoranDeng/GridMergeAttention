@@ -162,6 +162,9 @@ deterministic hash instead of ranking every candidate query row.
   `triton_grid_outer_exact_r5_m256_n64_s1_exp2`,
   `triton_grid_outer_exact_r5_m256_n128_s1_exp2`, and the corresponding R6
   `n128`/`m256` variants: tile-size tuning hooks for the exact-window backend.
+- `triton_grid_outer_exact_r5_m128_n32_s1_exp2` and
+  `triton_grid_outer_exact_r5_m128_n32_w4_s2_exp2`: narrower key-tile tuning
+  hooks for the current R5 exact-window backend.
 - `triton_grid_outer_exact_r4_m64_n64_s1_exp2` through
   `triton_grid_outer_exact_r6_m64_n64_s1_exp2`: smaller query-tile tuning hooks
   for the exact-window backend.
