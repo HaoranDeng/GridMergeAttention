@@ -333,6 +333,7 @@ if triton is not None:
         SCORE_SCALE: tl.constexpr,
         ROUTE_LAYOUT: tl.constexpr,
         WRITE_BIAS: tl.constexpr,
+        BIAS_MODE: tl.constexpr,
         FORCE_SEED_KEYS: tl.constexpr,
         USE_EXP2: tl.constexpr,
     ):
@@ -457,11 +458,17 @@ if triton is not None:
                 merged_key = tl.dot(weights.to(key_block.dtype), key_block)
                 merged_value = tl.dot(weights.to(value_block.dtype), value_block)
                 if WRITE_BIAS:
-                    log_denom = row_max + tl.log(safe_denom)
-                    routing_bias = tl.sum(
-                        tl.where(active, weights * (logits - log_denom[:, None]), 0.0),
-                        axis=1,
-                    )
+                    if BIAS_MODE == 1:
+                        routing_bias = -tl.log(safe_denom)
+                    elif BIAS_MODE == 2:
+                        count = tl.sum(tl.where(active, 1.0, 0.0), axis=1)
+                        routing_bias = -tl.log(tl.maximum(count, 1.0))
+                    else:
+                        log_denom = row_max + tl.log(safe_denom)
+                        routing_bias = tl.sum(
+                            tl.where(active, weights * (logits - log_denom[:, None]), 0.0),
+                            axis=1,
+                        )
                     if not FORCE_SEED_KEYS:
                         routing_bias = tl.where(has_keys, routing_bias, 0.0)
 
@@ -1240,6 +1247,7 @@ def triton_hard_route_shared_merge_c4(query, seed_rows, key, value, scale=1.0, b
         SCORE_SCALE=float(scale),
         ROUTE_LAYOUT=False,
         WRITE_BIAS=True,
+        BIAS_MODE=0,
         FORCE_SEED_KEYS=False,
         USE_EXP2=False,
         num_warps=4,
@@ -1256,6 +1264,7 @@ def triton_hard_route_shared_merge_c4_route_layout(
     block_j_target=16,
     num_warps=4,
     write_bias=True,
+    bias_mode="exact",
     force_seed_keys=False,
     use_exp2=False,
     workspace_cache=False,
@@ -1295,6 +1304,10 @@ def triton_hard_route_shared_merge_c4_route_layout(
         raise ValueError(f"Triton hard-route merge supports at most 128 key tokens per block, got {key_columns}.")
     if block_d > 128:
         raise ValueError(f"Triton hard-route merge supports head dim <= 128, got {dim}.")
+    bias_mode = (bias_mode or "exact").lower()
+    bias_mode_id = {"exact": 0, "maxprob": 1, "count": 2}.get(bias_mode)
+    if bias_mode_id is None:
+        raise ValueError(f"unsupported hard-route routing bias mode: {bias_mode!r}.")
 
     route_groups = batch * heads * query_columns
     route_tokens = query_outer * key_rows * 4
@@ -1349,6 +1362,7 @@ def triton_hard_route_shared_merge_c4_route_layout(
         SCORE_SCALE=float(scale),
         ROUTE_LAYOUT=True,
         WRITE_BIAS=bool(write_bias),
+        BIAS_MODE=bias_mode_id,
         FORCE_SEED_KEYS=bool(force_seed_keys),
         USE_EXP2=bool(use_exp2),
         num_warps=int(num_warps),
@@ -1438,6 +1452,7 @@ def triton_hard_route_shared_merge_c3_route_layout(
         SCORE_SCALE=float(scale),
         ROUTE_LAYOUT=True,
         WRITE_BIAS=True,
+        BIAS_MODE=0,
         FORCE_SEED_KEYS=bool(force_seed_keys),
         USE_EXP2=bool(use_exp2),
         num_warps=int(num_warps),
