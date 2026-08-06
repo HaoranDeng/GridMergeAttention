@@ -1127,6 +1127,7 @@ def triton_hard_route_shared_merge_c4_route_layout(
         H=heads,
         L=key_columns,
         D_HEAD=dim,
+        C_SEEDS=4,
         BLOCK_J=block_j,
         BLOCK_L=block_l,
         BLOCK_D=block_d,
