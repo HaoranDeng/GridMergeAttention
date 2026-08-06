@@ -317,6 +317,7 @@ if triton is not None:
         SCORE_SCALE: tl.constexpr,
         ROUTE_LAYOUT: tl.constexpr,
         WRITE_BIAS: tl.constexpr,
+        FORCE_SEED_KEYS: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -396,6 +397,12 @@ if triton is not None:
         assignments = tl.where(update, 2, assignments)
         update = logits3 > best_logits
         assignments = tl.where(update, 3, assignments)
+        if FORCE_SEED_KEYS:
+            assignments = tl.where(
+                valid_logits & (key_offsets[None, :] < 4),
+                key_offsets[None, :],
+                assignments,
+            )
 
         for seed_idx in tl.static_range(0, 4):
             logits = logits0
@@ -407,10 +414,13 @@ if triton is not None:
                 logits = logits3
 
             assigned_to_seed = assignments == seed_idx
-            has_seed = tl.sum(tl.where(assigned_to_seed & valid_logits, 1, 0), axis=1) > 0
-            forced_first_key = (~has_seed[:, None]) & (key_offsets[None, :] == 0)
-            active = valid_logits & (assigned_to_seed | forced_first_key)
-            has_keys = tl.sum(tl.where(active, 1, 0), axis=1) > 0
+            if FORCE_SEED_KEYS:
+                active = valid_logits & assigned_to_seed
+            else:
+                has_seed = tl.sum(tl.where(assigned_to_seed & valid_logits, 1, 0), axis=1) > 0
+                forced_first_key = (~has_seed[:, None]) & (key_offsets[None, :] == 0)
+                active = valid_logits & (assigned_to_seed | forced_first_key)
+                has_keys = tl.sum(tl.where(active, 1, 0), axis=1) > 0
 
             row_max = tl.max(tl.where(active, logits, -float("inf")), axis=1)
             probs = tl.where(active, tl.exp(logits - row_max[:, None]), 0.0)
@@ -427,7 +437,8 @@ if triton is not None:
                     tl.where(active, weights * (logits - log_denom[:, None]), 0.0),
                     axis=1,
                 )
-                routing_bias = tl.where(has_keys, routing_bias, 0.0)
+                if not FORCE_SEED_KEYS:
+                    routing_bias = tl.where(has_keys, routing_bias, 0.0)
 
             if ROUTE_LAYOUT:
                 group = (batch * H + head) * J + query_offsets
@@ -1002,6 +1013,7 @@ def triton_hard_route_shared_merge_c4(query, seed_rows, key, value, scale=1.0, b
         SCORE_SCALE=float(scale),
         ROUTE_LAYOUT=False,
         WRITE_BIAS=True,
+        FORCE_SEED_KEYS=False,
         num_warps=4,
     )
     return merged_key, merged_value, routing_bias, None
@@ -1016,6 +1028,7 @@ def triton_hard_route_shared_merge_c4_route_layout(
     block_j_target=16,
     num_warps=4,
     write_bias=True,
+    force_seed_keys=False,
 ):
     """C=4 shared hard-route merge with routing-ready K/V/bias layout.
 
@@ -1097,6 +1110,7 @@ def triton_hard_route_shared_merge_c4_route_layout(
         SCORE_SCALE=float(scale),
         ROUTE_LAYOUT=True,
         WRITE_BIAS=bool(write_bias),
+        FORCE_SEED_KEYS=bool(force_seed_keys),
         num_warps=int(num_warps),
     )
     return merged_key, merged_value, routing_bias, None
