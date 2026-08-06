@@ -81,8 +81,11 @@ deterministic hash instead of ranking every candidate query row.
   hard assignment and KV merge.
 - `triton_c4_direct_route_j16`: shared C=4 kernel that writes compressed K/V
   directly in routing layout.
+- `triton_c4_direct_route_j32_w2`: route-layout shared C=4 kernel using
+  `block_j=32` and `num_warps=2`; fastest current merge backend for the
+  default 480p C=4 setup.
 - `triton_c4_direct_route_j64`: wider-tile version of the route-layout shared
-  C=4 kernel; fastest current merge backend for the default 480p C=4 setup.
+  C=4 kernel; kept as a stable comparison point.
 
 `hard_route_routing_backend` controls the second compressed-attention step:
 

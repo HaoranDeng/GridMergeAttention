@@ -90,10 +90,11 @@ indices without recomputing them.
 - `triton_c4_direct_route_j16`: same direct shared C=4 kernel, but writes
   compressed K/V and routing bias directly in the layout consumed by routing
   SDPA.
+- `triton_c4_direct_route_j32_w2`: route-layout direct shared C=4 kernel with
+  `block_j=32` and `num_warps=2`. This is the fastest current
+  `hard_route_shared` merge backend in the default 480p C=4 benchmark.
 - `triton_c4_direct_route_j64`: same route-layout direct shared C=4 kernel
-  with a wider query-column tile. This is the fastest current
-  `hard_route_shared` merge backend in the 480p C=4 benchmark, with tiny BF16
-  accumulation-order drift relative to `j16`.
+  with a wider query-column tile; kept as a stable comparison point.
 
 `hard_route_routing_backend` separately switches the second compressed-attention
 step:
@@ -125,8 +126,9 @@ Useful configs:
 - `configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j16_fewstep.yaml`: explicit direct route-layout shared-compression C=4 backend.
 - `configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j16_routing_triton_fewstep.yaml`: direct route-layout shared-compression C=4 backend with fast Triton routing.
 - `configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j16_routing_triton_m256_fewstep.yaml`: direct route-layout shared-compression C=4 backend with `triton_m256_n32` routing.
+- `configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j32_w2_routing_triton_m128_fewstep.yaml`: current fastest shared-compression C=4 config, using the `j32_w2` route-layout merge kernel and `triton_m128_n32` routing.
 - `configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j64_routing_triton_m256_fewstep.yaml`: wider `j64` route-layout merge tile with `triton_m256_n32` routing.
-- `configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j64_routing_triton_m128_fewstep.yaml`: current fastest shared-compression C=4 config, using the wider `j64` route-layout merge tile and `triton_m128_n32` routing.
+- `configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j64_routing_triton_m128_fewstep.yaml`: wider `j64` route-layout merge tile with `triton_m128_n32` routing.
 - `configs/token_merging_wan_hard_route_c4_shared_triton_route_triton_fewstep.yaml`: experimental shared-compression hard-route C=4 with fused Triton routing.
 - `configs/token_merging_wan_hard_route_c4_shared_fastseed_triton_route_triton_fewstep.yaml`: shared-compression hard-route C=4 with lightweight deterministic seed selection.
 - `configs/token_merging_wan_hard_route_c6_fewstep.yaml`: hard-route C=6.
