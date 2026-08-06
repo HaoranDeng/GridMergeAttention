@@ -476,7 +476,6 @@ if triton is not None:
         BLOCK_N: tl.constexpr,
         BLOCK_D: tl.constexpr,
         SCORE_SCALE: tl.constexpr,
-        USE_BIAS: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_block_id = tl.program_id(1)
@@ -513,10 +512,9 @@ if triton is not None:
                 mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
                 other=0.0,
             )
-            logits = tl.dot(q, tl.trans(k)) * SCORE_SCALE
-            if USE_BIAS:
-                bias = tl.load(bias_base + keys, mask=keys < K_LEN, other=float("inf"))
-                logits = logits - bias[None, :]
+            bias = tl.load(bias_base + keys, mask=keys < K_LEN, other=float("inf"))
+
+            logits = tl.dot(q, tl.trans(k)) * SCORE_SCALE - bias[None, :]
             logits = tl.where(
                 (query_offsets[:, None] < Q_LEN) & (keys[None, :] < K_LEN),
                 logits,
@@ -557,6 +555,7 @@ if triton is not None:
         BLOCK_N: tl.constexpr,
         BLOCK_D: tl.constexpr,
         SCORE_SCALE: tl.constexpr,
+        USE_BIAS: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_block_id = tl.program_id(1)
@@ -603,9 +602,10 @@ if triton is not None:
                 mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
                 other=0.0,
             )
-            bias = tl.load(bias_base + keys, mask=keys < K_LEN, other=float("inf"))
-
-            logits = tl.dot(q, tl.trans(k)) * SCORE_SCALE - bias[None, :]
+            logits = tl.dot(q, tl.trans(k)) * SCORE_SCALE
+            if USE_BIAS:
+                bias = tl.load(bias_base + keys, mask=keys < K_LEN, other=float("inf"))
+                logits = logits - bias[None, :]
             logits = tl.where(
                 (query_offsets[:, None] < Q_LEN) & (keys[None, :] < K_LEN),
                 logits,
