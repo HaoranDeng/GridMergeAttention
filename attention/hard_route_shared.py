@@ -130,7 +130,8 @@ def _merge(seed_queries, k, v, backend, scale):
         f"unsupported hard_route_backend={backend!r}; expected 'sdpa', 'triton', "
         "'triton_c4', 'triton_c4_j16', 'triton_c4_direct', 'triton_c4_direct_j16', "
         "'triton_c4_direct_route', 'triton_c4_direct_route_j16', "
-        "'triton_c4_direct_route_j32_w2', 'triton_c4_direct_route_j32_w2_nobias', "
+        "'triton_c4_direct_route_j32_w2', 'triton_c4_direct_route_j32_w2_s1', "
+        "'triton_c4_direct_route_j32_w2_nobias', "
         "or 'triton_c4_direct_route_j64'."
     )
 
@@ -154,6 +155,17 @@ def _merge_shared(q, seed_rows, k, v, backend, scale):
             scale=scale,
             block_j_target=32,
             num_warps=2,
+        )
+    if backend == "triton_c4_direct_route_j32_w2_s1":
+        return triton_hard_route_shared_merge_c4_route_layout(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=2,
+            num_stages=1,
         )
     if backend == "triton_c4_direct_route_j32_w2_nobias":
         return triton_hard_route_shared_merge_c4_route_layout(
@@ -222,6 +234,7 @@ def hard_route_shared_attention(
         "triton_c4_direct_route",
         "triton_c4_direct_route_j16",
         "triton_c4_direct_route_j32_w2",
+        "triton_c4_direct_route_j32_w2_s1",
         "triton_c4_direct_route_j32_w2_nobias",
         "triton_c4_direct_route_j64",
     }

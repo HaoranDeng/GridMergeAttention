@@ -1015,6 +1015,7 @@ def triton_hard_route_shared_merge_c4_route_layout(
     scale=1.0,
     block_j_target=16,
     num_warps=4,
+    num_stages=None,
     write_bias=True,
 ):
     """C=4 shared hard-route merge with routing-ready K/V/bias layout.
@@ -1076,6 +1077,9 @@ def triton_hard_route_shared_merge_c4_route_layout(
         batch * query_outer * key_rows * heads,
         triton.cdiv(query_columns, block_j),
     )
+    meta = {"num_warps": int(num_warps)}
+    if num_stages is not None:
+        meta["num_stages"] = int(num_stages)
     _hard_route_shared_merge_c4_kernel[grid](
         query,
         seed_rows,
@@ -1097,7 +1101,7 @@ def triton_hard_route_shared_merge_c4_route_layout(
         SCORE_SCALE=float(scale),
         ROUTE_LAYOUT=True,
         WRITE_BIAS=bool(write_bias),
-        num_warps=int(num_warps),
+        **meta,
     )
     return merged_key, merged_value, routing_bias, None
 
