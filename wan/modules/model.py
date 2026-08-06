@@ -43,13 +43,22 @@ def maybe_save_first_attention_qkv(q, k, v, tag):
         raise SystemExit(0)
 
 
-def resolve_hard_route_routing_backend_policy(default_backend, policy, layer_idx, num_layers):
+def resolve_hard_route_routing_backend_policy(
+    default_backend,
+    policy,
+    layer_idx,
+    num_layers,
+    denoise_idx=0,
+    num_denoise_steps=1,
+):
     policy = (policy or "").lower()
     if not policy:
         return default_backend
 
     r3 = "triton_grid_outer_exact_r3_m128_n64_s1_exp2"
     r4 = "triton_grid_outer_exact_r4_m128_n64_s1_exp2"
+    denoise_idx = int(denoise_idx)
+    num_denoise_steps = max(1, int(num_denoise_steps))
     if policy == "r3_first_half_r4_second_half":
         return r3 if int(layer_idx) < int(num_layers) // 2 else r4
     if policy == "r4_first_half_r3_second_half":
@@ -58,6 +67,16 @@ def resolve_hard_route_routing_backend_policy(default_backend, policy, layer_idx
         return r3 if int(layer_idx) % 2 == 0 else r4
     if policy == "r4_even_r3_odd":
         return r4 if int(layer_idx) % 2 == 0 else r3
+    if policy == "r3_first_step_r4_rest":
+        return r3 if denoise_idx == 0 else r4
+    if policy == "r3_middle_step_r4_rest":
+        return r3 if denoise_idx == num_denoise_steps // 2 else r4
+    if policy == "r3_last_step_r4_rest":
+        return r3 if denoise_idx == num_denoise_steps - 1 else r4
+    if policy == "r3_first_two_steps_r4_rest":
+        return r3 if denoise_idx < min(2, num_denoise_steps) else r4
+    if policy == "r3_last_two_steps_r4_rest":
+        return r3 if denoise_idx >= max(0, num_denoise_steps - 2) else r4
 
     raise ValueError(f"unsupported hard_route_routing_backend_policy={policy!r}")
 
@@ -267,6 +286,8 @@ class WanSelfAttention(nn.Module):
         self.token_merging_hard_route_routing_backend_policy = None
         self.token_merging_layer_idx = 0
         self.token_merging_num_layers = 1
+        self.token_merging_denoise_idx = 0
+        self.token_merging_num_denoise_steps = 1
 
         # layers
         self.q = nn.Linear(dim, dim)
@@ -311,6 +332,8 @@ class WanSelfAttention(nn.Module):
                 self.token_merging_hard_route_routing_backend_policy,
                 self.token_merging_layer_idx,
                 self.token_merging_num_layers,
+                self.token_merging_denoise_idx,
+                self.token_merging_num_denoise_steps,
             )
             x = token_merging_attn(
                 roped_query,
@@ -838,6 +861,13 @@ class WanModel(ModelMixin, ConfigMixin):
             block.self_attn.token_merging_hard_route_routing_backend_policy = hard_route_routing_backend_policy
             block.self_attn.token_merging_layer_idx = idx
             block.self_attn.token_merging_num_layers = num_layers
+            block.self_attn.token_merging_denoise_idx = 0
+            block.self_attn.token_merging_num_denoise_steps = 1
+
+    def set_token_merging_denoise_step(self, denoise_idx: int, num_denoise_steps: int):
+        for block in self.blocks:
+            block.self_attn.token_merging_denoise_idx = denoise_idx
+            block.self_attn.token_merging_num_denoise_steps = num_denoise_steps
 
     def _set_gradient_checkpointing(self, module, value=False):
         self.gradient_checkpointing = value
