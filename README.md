@@ -91,8 +91,11 @@ indices without recomputing them.
   compressed K/V and routing bias directly in the layout consumed by routing
   SDPA.
 - `triton_c4_direct_route_j32_w2`: route-layout direct shared C=4 kernel with
-  `block_j=32` and `num_warps=2`. This is the fastest current
-  `hard_route_shared` merge backend in the default 480p C=4 benchmark.
+  `block_j=32` and `num_warps=2`. This is the default stable
+  `hard_route_shared` merge backend in the 480p C=4 benchmark.
+- `triton_c4_direct_route_j32_w2_s1`: same `j32_w2` merge backend launched
+  with `num_stages=1`. It is mathematically identical to `j32_w2` and can be
+  slightly faster in isolated attention microbenchmarks.
 - `triton_c4_direct_route_j32_w2_nobias`: aggressive `j32_w2` variant that
   skips routing-bias computation and storage. It is faster, but changes the
   approximation and is not the default best path.
