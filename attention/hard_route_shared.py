@@ -8,7 +8,6 @@ from .common import (
 )
 from .hard_route import hard_route_compressed_attention, hard_route_merge_weights
 from .hard_route_triton import (
-    triton_biased_attention_blocks,
     triton_hard_route_merge,
     triton_hard_route_merge_c4,
     triton_hard_route_shared_merge_c4,
@@ -193,26 +192,12 @@ def hard_route_shared_attention(
         scale,
     )
 
-    route_layout_backend = (hard_route_backend or "").lower() in {
+    query = rearrange(q, "b a i j h d -> (b h j) (a i) d")
+    if (hard_route_backend or "").lower() in {
         "triton_c4_direct_route",
         "triton_c4_direct_route_j16",
         "triton_c4_direct_route_j64",
-    }
-    routing_backend = (hard_route_routing_backend or "").lower()
-    if route_layout_backend and routing_backend == "triton_blocks_m256_n32":
-        del cluster_has_keys
-        return triton_biased_attention_blocks(
-            q,
-            merged_keys,
-            merged_values,
-            routing_bias,
-            block_m=256,
-            block_n=32,
-            scale=scale,
-        )
-
-    query = rearrange(q, "b a i j h d -> (b h j) (a i) d")
-    if route_layout_backend:
+    }:
         key = merged_keys
         value = merged_values
         bias = routing_bias
