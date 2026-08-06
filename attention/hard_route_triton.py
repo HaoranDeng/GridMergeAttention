@@ -1126,6 +1126,8 @@ def triton_grid_outer_exact_local_biased_attention(
     block_n=64,
     scale=1.0,
     use_bias=True,
+    num_warps=4,
+    num_stages=1,
 ):
     """Grid routing over the exact local key-outer window for each query tile."""
     if triton is None:
@@ -1190,8 +1192,8 @@ def triton_grid_outer_exact_local_biased_attention(
         BLOCK_D=block_d,
         SCORE_SCALE=float(scale),
         USE_BIAS=bool(use_bias),
-        num_warps=4,
-        num_stages=1,
+        num_warps=int(num_warps),
+        num_stages=int(num_stages),
     )
     return out
 
