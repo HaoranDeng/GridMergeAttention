@@ -90,6 +90,7 @@ def load_pipeline(config_path, checkpoint, dtype, device, use_ema):
 
 
 DEFAULT_MERGE_BACKEND = "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached"
+R2_BACKEND = "triton_grid_outer_exact_r2_m128_n64_s1_exp2"
 R3_BACKEND = "triton_grid_outer_exact_r3_m128_n64_s1_exp2"
 R4_BACKEND = "triton_grid_outer_exact_r4_m128_n64_s1_exp2"
 
@@ -99,6 +100,12 @@ def policy_backend(policy, denoise_idx, num_denoise_steps):
         return R3_BACKEND
     if policy == "r4_all":
         return R4_BACKEND
+    if policy == "r2_all":
+        return R2_BACKEND
+    if policy == "r2_first_step":
+        return R2_BACKEND if denoise_idx == 0 else R4_BACKEND
+    if policy == "r2_first_two_steps":
+        return R2_BACKEND if denoise_idx < min(2, num_denoise_steps) else R4_BACKEND
     if policy == "r3_first_step":
         return R3_BACKEND if denoise_idx == 0 else R4_BACKEND
     if policy == "r3_last_step":
@@ -264,6 +271,7 @@ def main():
         "policies": policies,
         "wall_seconds": time.perf_counter() - start,
         "merge_backend": args.hard_route_backend,
+        "r2_backend": R2_BACKEND,
         "r3_backend": R3_BACKEND,
         "r4_backend": R4_BACKEND,
         "variants": {

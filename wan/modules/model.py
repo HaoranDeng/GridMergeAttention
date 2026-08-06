@@ -55,6 +55,7 @@ def resolve_hard_route_routing_backend_policy(
     if not policy:
         return default_backend
 
+    r2 = "triton_grid_outer_exact_r2_m128_n64_s1_exp2"
     r3 = "triton_grid_outer_exact_r3_m128_n64_s1_exp2"
     r4 = "triton_grid_outer_exact_r4_m128_n64_s1_exp2"
     denoise_idx = int(denoise_idx)
@@ -77,6 +78,10 @@ def resolve_hard_route_routing_backend_policy(
         return r3 if denoise_idx < min(2, num_denoise_steps) else r4
     if policy == "r3_last_two_steps_r4_rest":
         return r3 if denoise_idx >= max(0, num_denoise_steps - 2) else r4
+    if policy == "r2_first_step_r4_rest":
+        return r2 if denoise_idx == 0 else r4
+    if policy == "r2_first_two_steps_r4_rest":
+        return r2 if denoise_idx < min(2, num_denoise_steps) else r4
 
     raise ValueError(f"unsupported hard_route_routing_backend_policy={policy!r}")
 
