@@ -80,8 +80,19 @@ def hard_route_compressed_attention(query, key, value, bias, backend, scale):
         return biased_sdpa(query, key, value, bias, scale=scale)
     if backend == "triton":
         return triton_biased_attention(query, key, value, bias, scale=scale)
+    if backend == "triton_m128_n32":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=128,
+            block_n=32,
+            scale=scale,
+        )
     raise ValueError(
-        f"unsupported hard_route_routing_backend={backend!r}; expected 'sdpa' or 'triton'."
+        f"unsupported hard_route_routing_backend={backend!r}; expected "
+        "'sdpa', 'triton', or 'triton_m128_n32'."
     )
 
 
