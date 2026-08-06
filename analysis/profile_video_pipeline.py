@@ -59,13 +59,7 @@ def install_profiled_wan_forwards(timer):
         b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
 
         with timer.section("transformer.self_attn.qkv_norm"):
-            if torch.is_grad_enabled() or x.requires_grad:
-                q = self.norm_q(self.q(x)).view(b, s, n, d)
-                k = self.norm_k(self.k(x)).view(b, s, n, d)
-            else:
-                q = wan_model.rmsnorm(self.q(x), self.norm_q.weight, eps=self.norm_q.eps).view(b, s, n, d)
-                k = wan_model.rmsnorm(self.k(x), self.norm_k.weight, eps=self.norm_k.eps).view(b, s, n, d)
-            v = self.v(x).view(b, s, n, d)
+            q, k, v = self.project_qkv(x, b, s, n, d)
 
         with timer.section("transformer.self_attn.rope"):
             roped_query, roped_key = wan_model.apply_rope_video_tokens(q, k, rope_cache)
