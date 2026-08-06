@@ -179,6 +179,12 @@ deterministic hash instead of ranking every candidate query row.
 - `triton_grid_outer_exact_r4_m64_n64_s1_exp2` through
   `triton_grid_outer_exact_r6_m64_n64_s1_exp2`: smaller query-tile tuning hooks
   for the exact-window backend.
+- `triton_grid_outer_exact_r4_m128_n32_s1_exp2`,
+  `triton_grid_outer_exact_r4_m128_n32_w4_s2_exp2`,
+  `triton_grid_outer_exact_r4_m128_n64_w2_s1_exp2`,
+  `triton_grid_outer_exact_r4_m128_n64_w8_s1_exp2`, and
+  `triton_grid_outer_exact_r4_m128_n64_w4_s2_exp2`: launch-parameter tuning
+  hooks for the R4 exact-window backend.
 - `triton_grid_outer_exact_r5_m128_n64_w2_s1_exp2`,
   `triton_grid_outer_exact_r5_m128_n64_w8_s1_exp2`, and
   `triton_grid_outer_exact_r5_m128_n64_w2_s2_exp2`: warp-count tuning hooks

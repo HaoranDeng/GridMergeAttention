@@ -293,6 +293,65 @@ def hard_route_grid_compressed_attention(query, key, value, bias, backend, scale
             block_n=64,
             scale=scale,
         )
+    if backend == "triton_grid_outer_exact_r4_m128_n32_s1_exp2":
+        return triton_grid_outer_exact_local_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            local_radius=4,
+            block_m=128,
+            block_n=32,
+            scale=scale,
+        )
+    if backend == "triton_grid_outer_exact_r4_m128_n32_w4_s2_exp2":
+        return triton_grid_outer_exact_local_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            local_radius=4,
+            block_m=128,
+            block_n=32,
+            scale=scale,
+            num_stages=2,
+        )
+    if backend == "triton_grid_outer_exact_r4_m128_n64_w2_s1_exp2":
+        return triton_grid_outer_exact_local_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            local_radius=4,
+            block_m=128,
+            block_n=64,
+            scale=scale,
+            num_warps=2,
+        )
+    if backend == "triton_grid_outer_exact_r4_m128_n64_w8_s1_exp2":
+        return triton_grid_outer_exact_local_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            local_radius=4,
+            block_m=128,
+            block_n=64,
+            scale=scale,
+            num_warps=8,
+        )
+    if backend == "triton_grid_outer_exact_r4_m128_n64_w4_s2_exp2":
+        return triton_grid_outer_exact_local_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            local_radius=4,
+            block_m=128,
+            block_n=64,
+            scale=scale,
+            num_stages=2,
+        )
     if backend == "triton_grid_outer_exact_r4_m64_n64_s1_exp2":
         return triton_grid_outer_exact_local_biased_attention(
             query,
@@ -586,6 +645,10 @@ def hard_route_grid_compressed_attention(query, key, value, bias, backend, scale
         "'triton_grid_outer_local_r{2,3,4,5,6}_m128_n64_s1_exp2', "
         "'triton_grid_outer_local_r{3,4,5,6}_m64_n64_s1_exp2', "
         "'triton_grid_outer_exact_r{3,4,5,6}_m128_n64_s1_exp2', "
+        "'triton_grid_outer_exact_r4_m128_n32_s1_exp2', "
+        "'triton_grid_outer_exact_r4_m128_n32_w4_s2_exp2', "
+        "'triton_grid_outer_exact_r4_m128_n64_w{2,8}_s1_exp2', "
+        "'triton_grid_outer_exact_r4_m128_n64_w4_s2_exp2', "
         "'triton_grid_outer_exact_r5_m128_n32_s1_exp2', "
         "'triton_grid_outer_exact_r5_m128_n32_w4_s2_exp2', "
         "'triton_grid_outer_exact_r{4,5,6}_m64_n64_s1_exp2', "
