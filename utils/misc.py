@@ -8,7 +8,8 @@ def save_video(path, video, fps=16, preset="ultrafast", crf=23, quality=None):
     """Save (T, H, W, C) frames in [0, 255] as mp4."""
     if isinstance(video, torch.Tensor):
         video = video.cpu().numpy()
-    video = np.clip(video, 0, 255).astype(np.uint8)
+    if video.dtype != np.uint8:
+        video = np.clip(video, 0, 255).astype(np.uint8)
     kwargs = {"fps": fps, "codec": "libx264"}
     if quality is not None:
         kwargs["quality"] = quality

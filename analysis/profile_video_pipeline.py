@@ -258,7 +258,7 @@ def run_one_video(pipeline, config, prompt, seed, dtype, fps, output_path, timer
         video = (video * 0.5 + 0.5).clamp(0, 1)
 
     with ctx("pipeline.postprocess_cpu_transfer"):
-        video_cpu = (255.0 * video.permute(0, 1, 3, 4, 2)).cpu()
+        video_cpu = (255.0 * video.permute(0, 1, 3, 4, 2)).clamp_(0, 255).to(torch.uint8).cpu()
 
     if output_path is not None:
         with ctx("pipeline.save_video"):
