@@ -125,7 +125,8 @@ def _merge(seed_queries, k, v, backend, scale):
     raise ValueError(
         f"unsupported hard_route_backend={backend!r}; expected 'sdpa', 'triton', "
         "'triton_c4', 'triton_c4_j16', 'triton_c4_direct', 'triton_c4_direct_j16', "
-        "'triton_c4_direct_route', or 'triton_c4_direct_route_j16'."
+        "'triton_c4_direct_route', 'triton_c4_direct_route_j16', or "
+        "'triton_c4_direct_route_j64'."
     )
 
 
@@ -139,6 +140,8 @@ def _merge_shared(q, seed_rows, k, v, backend, scale):
         return triton_hard_route_shared_merge_c4_route_layout(q, seed_rows, k, v, scale=scale)
     if backend == "triton_c4_direct_route_j16":
         return triton_hard_route_shared_merge_c4_route_layout(q, seed_rows, k, v, scale=scale, block_j_target=16)
+    if backend == "triton_c4_direct_route_j64":
+        return triton_hard_route_shared_merge_c4_route_layout(q, seed_rows, k, v, scale=scale, block_j_target=64)
 
     seed_queries = gather_shared_seed_queries(q, seed_rows)
     return _merge(seed_queries, k, v, backend, scale)
@@ -190,7 +193,11 @@ def hard_route_shared_attention(
     )
 
     query = rearrange(q, "b a i j h d -> (b h j) (a i) d")
-    if (hard_route_backend or "").lower() in {"triton_c4_direct_route", "triton_c4_direct_route_j16"}:
+    if (hard_route_backend or "").lower() in {
+        "triton_c4_direct_route",
+        "triton_c4_direct_route_j16",
+        "triton_c4_direct_route_j64",
+    }:
         key = merged_keys
         value = merged_values
         bias = routing_bias
