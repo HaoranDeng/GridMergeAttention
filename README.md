@@ -70,6 +70,9 @@ deterministically from the same block.
 `seed_mode: fast_random_with_ith` keeps that index-matched seed but chooses the
 remaining seeds with a lightweight deterministic hash instead of scoring every
 candidate row.
+For `hard_route_shared`, the deterministic seed-row table is cached per device
+and token-grid shape, so repeated layers and denoise steps reuse the same seed
+indices without recomputing them.
 
 `hard_route_backend` switches the hard-route KV-compression implementation:
 
