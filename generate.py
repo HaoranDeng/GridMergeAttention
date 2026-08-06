@@ -108,7 +108,8 @@ def main():
         noise = torch.randn(latent_shape, device=device, dtype=dtype)
         text_prompts = [prompt] * args.num_samples
         video, _ = pipeline.inference(noise=noise, text_prompts=text_prompts, return_latents=True)
-        video = video.permute(0, 1, 3, 4, 2).mul_(255.0).clamp_(0, 255).to(torch.uint8).cpu()
+        with torch.inference_mode():
+            video = video.permute(0, 1, 3, 4, 2).mul_(255.0).clamp_(0, 255).to(torch.uint8).cpu()
 
         for sample_idx in range(args.num_samples):
             if args.vbench_filenames:
