@@ -5,7 +5,6 @@ from .common import (
     biased_sdpa,
     gather_seed_queries,
     random_seed_rows,
-    scale_qk,
     validate_block_seed_mode,
 )
 from .hard_route_triton import (
@@ -48,8 +47,9 @@ def hard_route_merge_weights(seed_logits, dtype):
     return merge_weights, merge_logprob, cluster_has_keys
 
 
-def _torch_merge(seed_queries, k, v):
+def _torch_merge(seed_queries, k, v, scale):
     seed_logits = torch.einsum("bafkjchd,bfklhd->bhafkjcl", seed_queries, k).float()
+    seed_logits = seed_logits * float(scale)
     merge_weights, merge_logprob, cluster_has_keys = hard_route_merge_weights(seed_logits, k.dtype)
 
     merged_keys = torch.einsum("bhafkjcl,bfklhd->bafjkchd", merge_weights, k)
@@ -58,28 +58,28 @@ def _torch_merge(seed_queries, k, v):
     return merged_keys, merged_values, routing_bias, cluster_has_keys
 
 
-def _merge(seed_queries, k, v, backend):
+def _merge(seed_queries, k, v, backend, scale):
     backend = (backend or "sdpa").lower()
     if backend == "sdpa":
-        return _torch_merge(seed_queries, k, v)
+        return _torch_merge(seed_queries, k, v, scale)
     if backend == "triton":
-        return triton_hard_route_merge(seed_queries, k, v)
+        return triton_hard_route_merge(seed_queries, k, v, scale=scale)
     if backend == "triton_c4":
-        return triton_hard_route_merge_c4(seed_queries, k, v)
+        return triton_hard_route_merge_c4(seed_queries, k, v, scale=scale)
     if backend == "triton_c4_j16":
-        return triton_hard_route_merge_c4(seed_queries, k, v, block_j_target=16)
+        return triton_hard_route_merge_c4(seed_queries, k, v, scale=scale, block_j_target=16)
     raise ValueError(
         f"unsupported hard_route_backend={backend!r}; expected 'sdpa', 'triton', "
         "'triton_c4', or 'triton_c4_j16'."
     )
 
 
-def hard_route_compressed_attention(query, key, value, bias, backend):
+def hard_route_compressed_attention(query, key, value, bias, backend, scale):
     backend = (backend or "sdpa").lower()
     if backend == "sdpa":
-        return biased_sdpa(query, key, value, bias)
+        return biased_sdpa(query, key, value, bias, scale=scale)
     if backend == "triton":
-        return triton_biased_attention(query, key, value, bias)
+        return triton_biased_attention(query, key, value, bias, scale=scale)
     raise ValueError(
         f"unsupported hard_route_routing_backend={backend!r}; expected 'sdpa' or 'triton'."
     )
@@ -106,8 +106,6 @@ def hard_route_attention(
     if num_merge_tokens > k.size(3):
         raise ValueError("num_merge_tokens cannot exceed key columns per block.")
 
-    q, k = scale_qk(q, k, scale)
-
     query_outer = torch.arange(
         query_outer_offset,
         query_outer_offset + q.size(1),
@@ -132,6 +130,7 @@ def hard_route_attention(
         k,
         v,
         hard_route_backend,
+        scale,
     )
 
     query = rearrange(q, "b a i j h d -> (b h a j) i d")
@@ -145,6 +144,7 @@ def hard_route_attention(
         value,
         bias,
         hard_route_routing_backend,
+        scale,
     )
     return rearrange(
         out,

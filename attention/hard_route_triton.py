@@ -30,6 +30,7 @@ if triton is not None:
         BLOCK_J: tl.constexpr,
         BLOCK_L: tl.constexpr,
         BLOCK_D: tl.constexpr,
+        SCORE_SCALE: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -76,7 +77,7 @@ if triton is not None:
                 mask=(seed_idx < C_SEEDS) & valid_query[:, None] & valid_dim[None, :],
                 other=0.0,
             )
-            logits = tl.dot(seed_vec, tl.trans(key_block), input_precision="ieee")
+            logits = tl.dot(seed_vec, tl.trans(key_block), input_precision="ieee") * SCORE_SCALE
             logits = tl.where(
                 (seed_idx < C_SEEDS) & valid_query[:, None] & valid_key[None, :],
                 logits,
@@ -97,7 +98,7 @@ if triton is not None:
                 mask=(seed_idx < C_SEEDS) & valid_query[:, None] & valid_dim[None, :],
                 other=0.0,
             )
-            logits = tl.dot(seed_vec, tl.trans(key_block), input_precision="ieee")
+            logits = tl.dot(seed_vec, tl.trans(key_block), input_precision="ieee") * SCORE_SCALE
             active_seed = (seed_idx < C_SEEDS) & valid_query[:, None] & valid_key[None, :]
             assigned_to_seed = assignments == seed_idx
             has_seed = tl.sum(tl.where(assigned_to_seed & active_seed, 1, 0), axis=1) > 0
@@ -164,6 +165,7 @@ if triton is not None:
         BLOCK_J: tl.constexpr,
         BLOCK_L: tl.constexpr,
         BLOCK_D: tl.constexpr,
+        SCORE_SCALE: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -222,10 +224,10 @@ if triton is not None:
             other=0.0,
         )
 
-        logits0 = tl.dot(seed0, tl.trans(key_block), input_precision="ieee")
-        logits1 = tl.dot(seed1, tl.trans(key_block), input_precision="ieee")
-        logits2 = tl.dot(seed2, tl.trans(key_block), input_precision="ieee")
-        logits3 = tl.dot(seed3, tl.trans(key_block), input_precision="ieee")
+        logits0 = tl.dot(seed0, tl.trans(key_block), input_precision="ieee") * SCORE_SCALE
+        logits1 = tl.dot(seed1, tl.trans(key_block), input_precision="ieee") * SCORE_SCALE
+        logits2 = tl.dot(seed2, tl.trans(key_block), input_precision="ieee") * SCORE_SCALE
+        logits3 = tl.dot(seed3, tl.trans(key_block), input_precision="ieee") * SCORE_SCALE
         valid_logits = valid_query[:, None] & valid_key[None, :]
         logits0 = tl.where(valid_logits, logits0, -float("inf"))
         logits1 = tl.where(valid_logits, logits1, -float("inf"))
@@ -307,6 +309,7 @@ if triton is not None:
         BLOCK_M: tl.constexpr,
         BLOCK_N: tl.constexpr,
         BLOCK_D: tl.constexpr,
+        SCORE_SCALE: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_block_id = tl.program_id(1)
@@ -345,7 +348,7 @@ if triton is not None:
             )
             bias = tl.load(bias_base + keys, mask=keys < K_LEN, other=float("inf"))
 
-            logits = tl.dot(q, tl.trans(k)) - bias[None, :]
+            logits = tl.dot(q, tl.trans(k)) * SCORE_SCALE - bias[None, :]
             logits = tl.where(
                 (query_offsets[:, None] < Q_LEN) & (keys[None, :] < K_LEN),
                 logits,
@@ -369,14 +372,14 @@ if triton is not None:
         )
 
 
-def triton_biased_attention(query, key, value, bias, block_m=16, block_n=128):
+def triton_biased_attention(query, key, value, bias, block_m=16, block_n=128, scale=1.0):
     """Fused Triton attention for hard-route compressed KV routing.
 
     query: [groups, query_tokens, dim]
     key/value: [groups, compressed_tokens, dim]
     bias: [groups, compressed_tokens]
 
-    The computed logits are query @ key.T - bias, matching biased_sdpa.
+    The computed logits are scale * query @ key.T - bias, matching biased_sdpa.
     """
     if triton is None:
         raise RuntimeError("hard_route_backend='triton' requires Triton.")
@@ -413,12 +416,13 @@ def triton_biased_attention(query, key, value, bias, block_m=16, block_n=128):
         BLOCK_M=block_m,
         BLOCK_N=block_n,
         BLOCK_D=block_d,
+        SCORE_SCALE=float(scale),
         num_warps=4,
     )
     return out
 
 
-def triton_hard_route_merge(seed_queries, key, value):
+def triton_hard_route_merge(seed_queries, key, value, scale=1.0):
     """Fuse hard assignment, per-cluster softmax, KV merge, and routing bias.
 
     seed_queries: [B, A, F, K, J, C, H, D]
@@ -500,12 +504,13 @@ def triton_hard_route_merge(seed_queries, key, value):
         BLOCK_J=block_j,
         BLOCK_L=block_l,
         BLOCK_D=block_d,
+        SCORE_SCALE=float(scale),
         num_warps=4,
     )
     return merged_key, merged_value, routing_bias, None
 
 
-def triton_hard_route_merge_c4(seed_queries, key, value, block_j_target=8):
+def triton_hard_route_merge_c4(seed_queries, key, value, scale=1.0, block_j_target=8):
     """C=4 specialized hard-route merge that reuses seed logits."""
     if triton is None:
         raise RuntimeError("hard_route_backend='triton_c4' requires Triton.")
@@ -575,6 +580,7 @@ def triton_hard_route_merge_c4(seed_queries, key, value, block_j_target=8):
         BLOCK_J=block_j,
         BLOCK_L=block_l,
         BLOCK_D=block_d,
+        SCORE_SCALE=float(scale),
         num_warps=4,
     )
     return merged_key, merged_value, routing_bias, None

@@ -2,7 +2,6 @@ import torch
 from einops import rearrange
 
 from .common import (
-    scale_qk,
     fast_seed_indices_with_include,
     seed_indices_from_base,
     validate_block_seed_mode,
@@ -54,8 +53,9 @@ def gather_shared_seed_queries(q, seed_rows):
     return rearrange(seed_queries, "b f k j c h d -> b 1 f k j c h d")
 
 
-def _torch_merge(seed_queries, k, v):
+def _torch_merge(seed_queries, k, v, scale):
     seed_logits = torch.einsum("bafkjchd,bfklhd->bhafkjcl", seed_queries, k).float()
+    seed_logits = seed_logits * float(scale)
     merge_weights, merge_logprob, cluster_has_keys = hard_route_merge_weights(seed_logits, k.dtype)
 
     merged_keys = torch.einsum("bhafkjcl,bfklhd->bafjkchd", merge_weights, k)
@@ -64,16 +64,16 @@ def _torch_merge(seed_queries, k, v):
     return merged_keys, merged_values, routing_bias, cluster_has_keys
 
 
-def _merge(seed_queries, k, v, backend):
+def _merge(seed_queries, k, v, backend, scale):
     backend = (backend or "sdpa").lower()
     if backend == "sdpa":
-        return _torch_merge(seed_queries, k, v)
+        return _torch_merge(seed_queries, k, v, scale)
     if backend == "triton":
-        return triton_hard_route_merge(seed_queries, k, v)
+        return triton_hard_route_merge(seed_queries, k, v, scale=scale)
     if backend == "triton_c4":
-        return triton_hard_route_merge_c4(seed_queries, k, v)
+        return triton_hard_route_merge_c4(seed_queries, k, v, scale=scale)
     if backend == "triton_c4_j16":
-        return triton_hard_route_merge_c4(seed_queries, k, v, block_j_target=16)
+        return triton_hard_route_merge_c4(seed_queries, k, v, scale=scale, block_j_target=16)
     raise ValueError(
         f"unsupported hard_route_backend={backend!r}; expected 'sdpa', 'triton', "
         "'triton_c4', or 'triton_c4_j16'."
@@ -105,7 +105,6 @@ def hard_route_shared_attention(
     if num_merge_tokens > k.size(3):
         raise ValueError("num_merge_tokens cannot exceed key columns per block.")
 
-    q, k = scale_qk(q, k, scale)
     key_outer = torch.arange(k.size(1), device=q.device)
     seed_rows = shared_seed_rows(
         key_outer,
@@ -123,6 +122,7 @@ def hard_route_shared_attention(
         k,
         v,
         hard_route_backend,
+        scale,
     )
 
     query = rearrange(q, "b a i j h d -> (b h j) (a i) d")
@@ -136,6 +136,7 @@ def hard_route_shared_attention(
         value,
         bias,
         hard_route_routing_backend,
+        scale,
     )
     return rearrange(
         out,

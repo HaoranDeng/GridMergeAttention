@@ -1,7 +1,6 @@
-import torch
 from einops import rearrange
 
-from .common import random_seed_rows, scale_qk, validate_block_seed_mode
+from .common import random_seed_rows, validate_block_seed_mode
 from .hard_route import hard_route_compressed_attention, _merge
 
 
@@ -45,7 +44,6 @@ def hard_route_group_shared_attention(
     if q.size(1) % group_size:
         raise ValueError("query_outer must be divisible by query_outer_group_size.")
 
-    q, k = scale_qk(q, k, scale)
     groups = q.size(1) // group_size
     local_anchor = torch.arange(groups, device=q.device) * group_size + group_size // 2
     key_outer = torch.arange(k.size(1), device=q.device)
@@ -67,6 +65,7 @@ def hard_route_group_shared_attention(
         k,
         v,
         hard_route_backend,
+        scale,
     )
 
     q_groups = rearrange(q, "b (g a) i j h d -> b g a i j h d", g=groups)
@@ -81,6 +80,7 @@ def hard_route_group_shared_attention(
         value,
         bias,
         hard_route_routing_backend,
+        scale,
     )
     return rearrange(
         out,

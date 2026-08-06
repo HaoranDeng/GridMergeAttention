@@ -251,11 +251,11 @@ def soft_merge_weights(merge_logits, dtype):
     return merge_weights, merge_logprob
 
 
-def biased_sdpa(query, key, value, bias, valid=None):
+def biased_sdpa(query, key, value, bias, valid=None, scale=1.0):
     """Attention over compressed tokens with a per-key additive bias.
 
     query: [G, Q, D], key/value: [G, K, D], bias: [G, K].
-    The attention logits are query @ key.T - bias.
+    The attention logits are scale * query @ key.T - bias.
     """
     attn_bias = -bias.float()
     if valid is not None:
@@ -268,6 +268,6 @@ def biased_sdpa(query, key, value, bias, valid=None):
         attn_mask=attn_bias.to(query.dtype).unsqueeze(1).unsqueeze(2),
         dropout_p=0.0,
         is_causal=False,
-        scale=1.0,
+        scale=scale,
     )
     return out.squeeze(1)
