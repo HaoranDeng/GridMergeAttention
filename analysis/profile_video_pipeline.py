@@ -84,6 +84,7 @@ def install_profiled_wan_forwards(timer):
                     self.token_merging_num_layers,
                     self.token_merging_denoise_idx,
                     self.token_merging_num_denoise_steps,
+                    self.token_merging_hard_route_r3_layers_by_step,
                 )
                 x = wan_model.token_merging_attn(
                     roped_query,

@@ -43,6 +43,17 @@ def maybe_save_first_attention_qkv(q, k, v, tag):
         raise SystemExit(0)
 
 
+def _normalize_layer_indices_by_step(value):
+    if not value:
+        return None
+    items = value.items() if hasattr(value, "items") else enumerate(value)
+    return {
+        int(step): frozenset(int(layer) for layer in layers)
+        for step, layers in items
+        if layers is not None
+    }
+
+
 def resolve_hard_route_routing_backend_policy(
     default_backend,
     policy,
@@ -50,6 +61,7 @@ def resolve_hard_route_routing_backend_policy(
     num_layers,
     denoise_idx=0,
     num_denoise_steps=1,
+    selected_r3_layers_by_step=None,
 ):
     policy = (policy or "").lower()
     if not policy:
@@ -82,6 +94,10 @@ def resolve_hard_route_routing_backend_policy(
         return r2 if denoise_idx == 0 else r4
     if policy == "r2_first_two_steps_r4_rest":
         return r2 if denoise_idx < min(2, num_denoise_steps) else r4
+    if policy == "selected_r3_layers_r4_rest":
+        if selected_r3_layers_by_step is None:
+            raise ValueError("selected_r3_layers_r4_rest requires hard_route_r3_layer_indices_by_step.")
+        return r3 if int(layer_idx) in selected_r3_layers_by_step.get(denoise_idx, ()) else r4
 
     raise ValueError(f"unsupported hard_route_routing_backend_policy={policy!r}")
 
@@ -289,6 +305,7 @@ class WanSelfAttention(nn.Module):
         self.token_merging_hard_route_backend = "sdpa"
         self.token_merging_hard_route_routing_backend = "sdpa"
         self.token_merging_hard_route_routing_backend_policy = None
+        self.token_merging_hard_route_r3_layers_by_step = None
         self.token_merging_layer_idx = 0
         self.token_merging_num_layers = 1
         self.token_merging_denoise_idx = 0
@@ -339,6 +356,7 @@ class WanSelfAttention(nn.Module):
                 self.token_merging_num_layers,
                 self.token_merging_denoise_idx,
                 self.token_merging_num_denoise_steps,
+                self.token_merging_hard_route_r3_layers_by_step,
             )
             x = token_merging_attn(
                 roped_query,
@@ -848,6 +866,9 @@ class WanModel(ModelMixin, ConfigMixin):
         hard_route_backend = args.get("hard_route_backend", "sdpa")
         hard_route_routing_backend = args.get("hard_route_routing_backend", "sdpa")
         hard_route_routing_backend_policy = args.get("hard_route_routing_backend_policy", None)
+        hard_route_r3_layers_by_step = _normalize_layer_indices_by_step(
+            args.get("hard_route_r3_layer_indices_by_step", None)
+        )
 
         num_layers = len(self.blocks)
         for idx, block in enumerate(self.blocks):
@@ -864,6 +885,7 @@ class WanModel(ModelMixin, ConfigMixin):
             block.self_attn.token_merging_hard_route_backend = hard_route_backend
             block.self_attn.token_merging_hard_route_routing_backend = hard_route_routing_backend
             block.self_attn.token_merging_hard_route_routing_backend_policy = hard_route_routing_backend_policy
+            block.self_attn.token_merging_hard_route_r3_layers_by_step = hard_route_r3_layers_by_step
             block.self_attn.token_merging_layer_idx = idx
             block.self_attn.token_merging_num_layers = num_layers
             block.self_attn.token_merging_denoise_idx = 0

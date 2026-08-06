@@ -1,0 +1,32 @@
+image_or_video_shape:
+  - 1
+  - 21
+  - 16
+  - 60
+  - 104
+denoising_step_list:
+  - 1000
+  - 750
+  - 500
+  - 250
+warp_denoising_step: true
+model_kwargs:
+  model_name: Wan2.1-T2V-1.3B
+  timestep_shift: 5.0
+token_merging_args:
+  enable: true
+  f_tied: 1
+  h_reduce: 1
+  w_reduce: 1
+  layout: hard_route_shared
+  q_init: ith
+  num_merge_tokens: 4
+  seed_mode: fast_random_with_ith
+  seed: 0
+  hard_route_backend: triton_c4_direct_route_j32_w2_forcekeys_exp2merge_bf16bias_cached
+  hard_route_routing_backend: triton_grid_outer_exact_r4_m128_n64_s1_exp2
+  hard_route_routing_backend_policy: selected_r3_layers_r4_rest
+  hard_route_r3_layer_indices_by_step:
+    0: [0, 8, 12, 20, 26, 27, 28, 29]
+    1: [0, 3, 5, 8, 12, 20, 26, 27, 28, 29]
+    2: [0, 1, 2, 3, 5, 8, 12, 20, 26, 27, 28, 29]
