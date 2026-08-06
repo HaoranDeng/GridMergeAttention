@@ -130,7 +130,8 @@ def _merge(seed_queries, k, v, backend, scale):
         f"unsupported hard_route_backend={backend!r}; expected 'sdpa', 'triton', "
         "'triton_c4', 'triton_c4_j16', 'triton_c4_direct', 'triton_c4_direct_j16', "
         "'triton_c4_direct_route', 'triton_c4_direct_route_j16', "
-        "'triton_c4_direct_route_j32_w2', or 'triton_c4_direct_route_j64'."
+        "'triton_c4_direct_route_j32_w2', 'triton_c4_direct_route_j32_w2_nobias', "
+        "or 'triton_c4_direct_route_j64'."
     )
 
 
