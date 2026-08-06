@@ -322,10 +322,15 @@ def backend_variants(variant_set):
     raise ValueError(f"unknown variant_set={variant_set!r}")
 
 
-def install_backend_probe(stats, max_calls, variant_set):
+def install_backend_probe(stats, max_calls, variant_set, selected_variants=None):
     import wan.modules.model as wan_model
 
     variants = backend_variants(variant_set)
+    if selected_variants:
+        missing = [name for name in selected_variants if name not in variants]
+        if missing:
+            raise ValueError(f"unknown variants for {variant_set}: {', '.join(missing)}")
+        variants = {name: variants[name] for name in selected_variants}
     call_index = {"value": 0}
     warmed = {"value": False}
 
@@ -431,6 +436,11 @@ def parse_args():
     parser.add_argument("--use_ema", action="store_true")
     parser.add_argument("--max_calls", type=int, default=0)
     parser.add_argument("--variant_set", choices=["baseline", "tuning"], default="baseline")
+    parser.add_argument(
+        "--variants",
+        default="",
+        help="Comma-separated subset of variants from --variant_set. Empty runs the full set.",
+    )
     parser.add_argument("--output_json", required=True)
     return parser.parse_args()
 
@@ -447,7 +457,8 @@ def main():
     prompt = prompts[args.prompt_index]
 
     stats = defaultdict(BackendStats)
-    install_backend_probe(stats, args.max_calls, args.variant_set)
+    selected_variants = [name.strip() for name in args.variants.split(",") if name.strip()]
+    install_backend_probe(stats, args.max_calls, args.variant_set, selected_variants or None)
 
     sync()
     start = time.perf_counter()
@@ -466,6 +477,7 @@ def main():
         "wall_seconds": wall_seconds,
         "max_calls": args.max_calls,
         "variant_set": args.variant_set,
+        "selected_variants": selected_variants,
         "variants": {
             name: value.summary(dense_seconds=dense_seconds if name != "dense" else None)
             for name, value in sorted(stats.items())
