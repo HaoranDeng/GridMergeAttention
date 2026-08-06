@@ -77,6 +77,14 @@ def install_profiled_wan_forwards(timer):
                 assert f % self.token_merging_f_tied == 0
                 assert h % self.token_merging_h_reduce == 0
                 assert w % self.token_merging_w_reduce == 0
+                hard_route_routing_backend = wan_model.resolve_hard_route_routing_backend_policy(
+                    self.token_merging_hard_route_routing_backend,
+                    self.token_merging_hard_route_routing_backend_policy,
+                    self.token_merging_layer_idx,
+                    self.token_merging_num_layers,
+                    self.token_merging_denoise_idx,
+                    self.token_merging_num_denoise_steps,
+                )
                 x = wan_model.token_merging_attn(
                     roped_query,
                     roped_key,
@@ -93,7 +101,7 @@ def install_profiled_wan_forwards(timer):
                     seed_mode=self.token_merging_seed_mode,
                     seed=self.token_merging_seed,
                     hard_route_backend=self.token_merging_hard_route_backend,
-                    hard_route_routing_backend=self.token_merging_hard_route_routing_backend,
+                    hard_route_routing_backend=hard_route_routing_backend,
                 )
             else:
                 x = wan_model.flash_attention(
@@ -223,6 +231,7 @@ def run_one_video(pipeline, config, prompt, seed, dtype, fps, output_path, timer
 
     with ctx("pipeline.denoise_loop_total"):
         for index, current_timestep in enumerate(pipeline.denoising_step_list[:-1]):
+            pipeline.generator.model.set_token_merging_denoise_step(index, denoise_steps)
             with ctx("pipeline.generator_forward_total"):
                 _, pred_image_or_video = pipeline.generator(
                     noisy_image_or_video=noisy_image_or_video,
