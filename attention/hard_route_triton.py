@@ -532,6 +532,98 @@ if triton is not None:
             mask=(query_offsets[:, None] < Q_LEN) & (dim_offsets[None, :] < D_HEAD),
         )
 
+    @triton.jit
+    def _grid_query_biased_attention_kernel(
+        query_ptr,
+        key_ptr,
+        value_ptr,
+        bias_ptr,
+        out_ptr,
+        A_OUTER: tl.constexpr,
+        Q_ROWS: tl.constexpr,
+        J_COLS: tl.constexpr,
+        H_HEADS: tl.constexpr,
+        Q_LEN: tl.constexpr,
+        K_LEN: tl.constexpr,
+        D_HEAD: tl.constexpr,
+        BLOCK_M: tl.constexpr,
+        BLOCK_N: tl.constexpr,
+        BLOCK_D: tl.constexpr,
+        SCORE_SCALE: tl.constexpr,
+    ):
+        group_id = tl.program_id(0)
+        query_block_id = tl.program_id(1)
+
+        query_col = group_id % J_COLS
+        tmp = group_id // J_COLS
+        head = tmp % H_HEADS
+        batch = tmp // H_HEADS
+
+        query_offsets = query_block_id * BLOCK_M + tl.arange(0, BLOCK_M)
+        query_outer = query_offsets // Q_ROWS
+        query_row = query_offsets - query_outer * Q_ROWS
+        key_offsets = tl.arange(0, BLOCK_N)
+        dim_offsets = tl.arange(0, BLOCK_D)
+
+        query_base = query_ptr + batch * A_OUTER * Q_ROWS * J_COLS * H_HEADS * D_HEAD
+        key_base = key_ptr + group_id * K_LEN * D_HEAD
+        value_base = value_ptr + group_id * K_LEN * D_HEAD
+        bias_base = bias_ptr + group_id * K_LEN
+        out_base = out_ptr + batch * A_OUTER * Q_ROWS * J_COLS * H_HEADS * D_HEAD
+
+        q = tl.load(
+            query_base
+            + (((query_outer[:, None] * Q_ROWS + query_row[:, None]) * J_COLS + query_col)
+               * H_HEADS + head) * D_HEAD
+            + dim_offsets[None, :],
+            mask=(query_offsets[:, None] < Q_LEN) & (dim_offsets[None, :] < D_HEAD),
+            other=0.0,
+        )
+
+        max_score = tl.full((BLOCK_M,), -float("inf"), tl.float32)
+        normalizer = tl.zeros((BLOCK_M,), tl.float32)
+        acc = tl.zeros((BLOCK_M, BLOCK_D), tl.float32)
+
+        for key_start in range(0, K_LEN, BLOCK_N):
+            keys = key_start + key_offsets
+            k = tl.load(
+                key_base + keys[:, None] * D_HEAD + dim_offsets[None, :],
+                mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
+                other=0.0,
+            )
+            v = tl.load(
+                value_base + keys[:, None] * D_HEAD + dim_offsets[None, :],
+                mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
+                other=0.0,
+            )
+            bias = tl.load(bias_base + keys, mask=keys < K_LEN, other=float("inf"))
+
+            logits = tl.dot(q, tl.trans(k)) * SCORE_SCALE - bias[None, :]
+            logits = tl.where(
+                (query_offsets[:, None] < Q_LEN) & (keys[None, :] < K_LEN),
+                logits,
+                -float("inf"),
+            )
+
+            block_max = tl.max(logits, axis=1)
+            next_max = tl.maximum(max_score, block_max)
+            p = tl.exp(logits - next_max[:, None])
+            alpha = tl.exp(max_score - next_max)
+
+            acc = acc * alpha[:, None] + tl.dot(p.to(v.dtype), v)
+            normalizer = normalizer * alpha + tl.sum(p, axis=1)
+            max_score = next_max
+
+        out = acc / normalizer[:, None]
+        tl.store(
+            out_base
+            + (((query_outer[:, None] * Q_ROWS + query_row[:, None]) * J_COLS + query_col)
+               * H_HEADS + head) * D_HEAD
+            + dim_offsets[None, :],
+            out,
+            mask=(query_offsets[:, None] < Q_LEN) & (dim_offsets[None, :] < D_HEAD),
+        )
+
 
 def triton_biased_attention(query, key, value, bias, block_m=16, block_n=128, scale=1.0, num_stages=None):
     """Fused Triton attention for hard-route compressed KV routing.
@@ -574,6 +666,77 @@ def triton_biased_attention(query, key, value, bias, block_m=16, block_n=128, sc
         value,
         bias,
         out,
+        Q_LEN=query_len,
+        K_LEN=key_len,
+        D_HEAD=dim,
+        BLOCK_M=block_m,
+        BLOCK_N=block_n,
+        BLOCK_D=block_d,
+        SCORE_SCALE=float(scale),
+        **meta,
+    )
+    return out
+
+
+def triton_grid_biased_attention(
+    query,
+    key,
+    value,
+    bias,
+    block_m=128,
+    block_n=32,
+    scale=1.0,
+    num_stages=1,
+):
+    """Fused hard-route routing that reads/writes query block layout directly.
+
+    query: [B, query_outer, query_rows, query_columns, heads, dim]
+    key/value: [B * heads * query_columns, compressed_tokens, dim]
+    bias: [B * heads * query_columns, compressed_tokens]
+    """
+    if triton is None:
+        raise RuntimeError("hard_route_routing_backend='triton_grid_*' requires Triton.")
+    if not query.is_cuda:
+        raise RuntimeError("hard_route_routing_backend='triton_grid_*' requires CUDA/ROCm tensors.")
+    if query.dtype not in (torch.float16, torch.bfloat16):
+        raise RuntimeError("hard_route_routing_backend='triton_grid_*' requires fp16 or bf16 query tensors.")
+
+    query = query.contiguous()
+    key = key.contiguous()
+    value = value.contiguous()
+    bias = bias.contiguous()
+
+    batch, query_outer, query_rows, query_columns, heads, dim = query.shape
+    groups, key_len, key_dim = key.shape
+    expected_groups = batch * heads * query_columns
+    if groups != expected_groups:
+        raise ValueError(
+            "grid hard-route attention expects route-layout KV with "
+            f"{expected_groups} groups, got {groups}."
+        )
+    if key_dim != dim or value.shape != key.shape or bias.shape != (groups, key_len):
+        raise ValueError("query/key/value/bias shapes are inconsistent for grid Triton hard-route attention.")
+
+    block_d = triton.next_power_of_2(dim)
+    if block_d > 128:
+        raise ValueError(f"Triton hard-route attention supports head dim <= 128, got {dim}.")
+
+    query_len = query_outer * query_rows
+    out = torch.empty_like(query)
+    grid = (groups, triton.cdiv(query_len, block_m))
+    meta = {"num_warps": 4}
+    if num_stages is not None:
+        meta["num_stages"] = int(num_stages)
+    _grid_query_biased_attention_kernel[grid](
+        query,
+        key,
+        value,
+        bias,
+        out,
+        A_OUTER=query_outer,
+        Q_ROWS=query_rows,
+        J_COLS=query_columns,
+        H_HEADS=heads,
         Q_LEN=query_len,
         K_LEN=key_len,
         D_HEAD=dim,
@@ -921,6 +1084,7 @@ def triton_hard_route_shared_merge_c4_route_layout(
 
 __all__ = [
     "triton_biased_attention",
+    "triton_grid_biased_attention",
     "triton_hard_route_merge",
     "triton_hard_route_merge_c4",
     "triton_hard_route_shared_merge_c4",

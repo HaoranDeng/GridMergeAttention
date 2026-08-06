@@ -9,6 +9,7 @@ from .common import (
 )
 from .hard_route_triton import (
     triton_biased_attention,
+    triton_grid_biased_attention,
     triton_hard_route_merge,
     triton_hard_route_merge_c4,
 )
@@ -118,6 +119,25 @@ def hard_route_compressed_attention(query, key, value, bias, backend, scale):
     )
 
 
+def hard_route_grid_compressed_attention(query, key, value, bias, backend, scale):
+    backend = (backend or "sdpa").lower()
+    if backend == "triton_grid_m128_n32_s1":
+        return triton_grid_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=128,
+            block_n=32,
+            scale=scale,
+            num_stages=1,
+        )
+    raise ValueError(
+        f"unsupported grid hard_route_routing_backend={backend!r}; expected "
+        "'triton_grid_m128_n32_s1'."
+    )
+
+
 def hard_route_attention(
     q,
     k,
@@ -193,5 +213,6 @@ __all__ = [
     "assign_keys_to_seeds",
     "hard_route_attention",
     "hard_route_compressed_attention",
+    "hard_route_grid_compressed_attention",
     "hard_route_merge_weights",
 ]
