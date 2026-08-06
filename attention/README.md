@@ -91,7 +91,8 @@ deterministic hash instead of ranking every candidate query row.
 - `triton_c4_direct_route_j32_w2_forcekeys_exp2merge`: the same force-key
   merge backend, but computes the merge softmax with base-2 exponentials. It
   is kept separate from `triton_c4_direct_route_j32_w2_forcekeys` so the
-  original fp32-exp path remains available.
+  original fp32-exp path remains available. This is the fastest measured
+  low-error C=4 merge backend on MI300X.
 - `triton_c4_direct_route_j32_w2_nobias`: aggressive faster variant that skips
   routing-bias computation and storage. This changes the approximation, so it
   is kept as an explicit experiment rather than the default best path.
@@ -112,7 +113,8 @@ deterministic hash instead of ranking every candidate query row.
   the fastest current routing backend for the default route-layout C=4 setup.
 - `triton_grid_m128_n32_s1_exp2`: same direct grid-query routing backend, but
   computes softmax with base-2 exponentials. On MI300X this preserves the
-  measured bf16 output while reducing routing latency.
+  measured bf16 output while reducing routing latency. This is the fastest
+  measured low-error C=4 routing backend on MI300X.
 - `triton_grid_m128_n32_s1_nobias`: matching aggressive routing backend for the
   no-bias merge path. It skips loading/subtracting routing bias.
 

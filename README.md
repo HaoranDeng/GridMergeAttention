@@ -97,6 +97,9 @@ indices without recomputing them.
   assigns the first four keys in each block to the four seeds before the
   remaining hard routing. This removes the empty-cluster fallback reductions and
   can be slightly faster, but it changes the merge rule and is not the default.
+- `triton_c4_direct_route_j32_w2_forcekeys_exp2merge`: same force-key variant,
+  with the merge softmax computed using base-2 exponentials. This is the
+  current fastest measured low-error C=4 merge backend on MI300X.
 - `triton_c4_direct_route_j32_w2_nobias`: aggressive `j32_w2` variant that
   skips routing-bias computation and storage. It is faster, but changes the
   approximation and is not the default best path.
@@ -115,6 +118,9 @@ step:
 - `triton_grid_m128_n32_s1`: same routing tile, but reads query blocks directly
   and writes the block-layout output directly. This is the current fastest
   routing backend for the default route-layout C=4 shared setup.
+- `triton_grid_m128_n32_s1_exp2`: same direct grid-query routing backend, with
+  the routing softmax computed using base-2 exponentials. This is the current
+  fastest measured low-error routing backend on MI300X.
 - `triton_grid_m128_n32_s1_nobias`: matching aggressive routing backend for
   `triton_c4_direct_route_j32_w2_nobias`; it skips loading/subtracting the
   routing bias.
@@ -123,6 +129,9 @@ step:
 
 Useful configs:
 
+- `configs/token_merging_wan_hard_route_c4_best_fewstep.yaml`: current
+  fastest measured low-error C=4 config, using force-key exp2 merge and direct
+  grid-query exp2 routing.
 - `configs/token_merging_wan_fewstep.yaml`: one-token MonarchRT-style baseline.
 - `configs/token_merging_wan_hard_route_c2_fewstep.yaml`: hard-route C=2.
 - `configs/token_merging_wan_hard_route_c2_triton_fewstep.yaml`: hard-route C=2 with fused Triton KV compression.
@@ -142,7 +151,8 @@ Useful configs:
 - `configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j16_routing_triton_m256_fewstep.yaml`: direct route-layout shared-compression C=4 backend with `triton_m256_n32` routing.
 - `configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j32_w2_routing_triton_m128_fewstep.yaml`: `j32_w2` route-layout merge kernel with `triton_m128_n32` routing.
 - `configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j32_w2_routing_triton_m128_s1_fewstep.yaml`: previous fastest shared-compression C=4 config, using the `j32_w2` route-layout merge kernel and `triton_m128_n32_s1` routing.
-- `configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j32_w2_routing_triton_grid_m128_s1_fewstep.yaml`: current fastest shared-compression C=4 config, using the `j32_w2` route-layout merge kernel and direct grid-query `triton_grid_m128_n32_s1` routing.
+- `configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j32_w2_routing_triton_grid_m128_s1_fewstep.yaml`: previous fastest shared-compression C=4 config, using the `j32_w2` route-layout merge kernel and direct grid-query `triton_grid_m128_n32_s1` routing.
+- `configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j32_w2_forcekeys_exp2merge_routing_triton_grid_m128_s1_exp2_fewstep.yaml`: explicit long-name version of the current fastest measured low-error C=4 config.
 - `configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j32_w2_nobias_routing_triton_grid_m128_s1_nobias_fewstep.yaml`: aggressive faster C=4 config that removes routing bias; useful for speed/quality tradeoff experiments, not the default best config.
 - `configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j64_routing_triton_m256_fewstep.yaml`: wider `j64` route-layout merge tile with `triton_m256_n32` routing.
 - `configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j64_routing_triton_m128_fewstep.yaml`: wider `j64` route-layout merge tile with `triton_m128_n32` routing.
