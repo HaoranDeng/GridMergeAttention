@@ -352,6 +352,30 @@ def hard_route_grid_compressed_attention(query, key, value, bias, backend, scale
             scale=scale,
             num_stages=2,
         )
+    if backend == "triton_grid_outer_exact_r4_m128_n64_s1_exp2_nobias":
+        return triton_grid_outer_exact_local_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            local_radius=4,
+            block_m=128,
+            block_n=64,
+            scale=scale,
+            use_bias=False,
+        )
+    if backend == "triton_grid_outer_exact_r4_m128_n32_s1_exp2_nobias":
+        return triton_grid_outer_exact_local_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            local_radius=4,
+            block_m=128,
+            block_n=32,
+            scale=scale,
+            use_bias=False,
+        )
     if backend == "triton_grid_outer_exact_r4_m64_n64_s1_exp2":
         return triton_grid_outer_exact_local_biased_attention(
             query,
@@ -649,6 +673,7 @@ def hard_route_grid_compressed_attention(query, key, value, bias, backend, scale
         "'triton_grid_outer_exact_r4_m128_n32_w4_s2_exp2', "
         "'triton_grid_outer_exact_r4_m128_n64_w{2,8}_s1_exp2', "
         "'triton_grid_outer_exact_r4_m128_n64_w4_s2_exp2', "
+        "'triton_grid_outer_exact_r4_m128_n{32,64}_s1_exp2_nobias', "
         "'triton_grid_outer_exact_r5_m128_n32_s1_exp2', "
         "'triton_grid_outer_exact_r5_m128_n32_w4_s2_exp2', "
         "'triton_grid_outer_exact_r{4,5,6}_m64_n64_s1_exp2', "

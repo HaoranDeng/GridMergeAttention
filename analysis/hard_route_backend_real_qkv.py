@@ -419,6 +419,16 @@ def backend_variants(variant_set):
             "hard_route_routing_backend": "triton_grid_outer_local_r4_m128_n32_s1_exp2_nobias",
             "seed_mode": "fast_random_with_ith",
         },
+        "nobias_outer_r4_exact": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_nobias_cached",
+            "hard_route_routing_backend": "triton_grid_outer_exact_r4_m128_n64_s1_exp2_nobias",
+            "seed_mode": "fast_random_with_ith",
+        },
+        "nobias_outer_r4_exact_n32": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_nobias_cached",
+            "hard_route_routing_backend": "triton_grid_outer_exact_r4_m128_n32_s1_exp2_nobias",
+            "seed_mode": "fast_random_with_ith",
+        },
     }
     if variant_set == "baseline":
         return baseline
