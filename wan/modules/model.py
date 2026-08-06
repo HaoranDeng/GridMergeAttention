@@ -288,10 +288,6 @@ class WanSelfAttention(nn.Module):
         self.token_merging_num_layers = 1
         self.token_merging_denoise_idx = 0
         self.token_merging_num_denoise_steps = 1
-        self.fuse_qkv_inference = False
-        self._fused_qkv_cache_key = None
-        self._fused_qkv_weight = None
-        self._fused_qkv_bias = None
 
         # layers
         self.q = nn.Linear(dim, dim)
@@ -301,62 +297,6 @@ class WanSelfAttention(nn.Module):
         self.norm_q = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
         self.norm_k = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
 
-    def _fused_qkv_signature(self):
-        tensors = (
-            self.q.weight,
-            self.k.weight,
-            self.v.weight,
-            self.q.bias,
-            self.k.bias,
-            self.v.bias,
-        )
-        return tuple(
-            None if tensor is None else (tensor.data_ptr(), tensor.device, tensor.dtype, tensor._version)
-            for tensor in tensors
-        )
-
-    def _fused_qkv_params(self):
-        signature = self._fused_qkv_signature()
-        if signature != self._fused_qkv_cache_key:
-            self._fused_qkv_weight = torch.cat(
-                (self.q.weight.detach(), self.k.weight.detach(), self.v.weight.detach()),
-                dim=0,
-            ).contiguous()
-            if self.q.bias is None:
-                self._fused_qkv_bias = None
-            else:
-                self._fused_qkv_bias = torch.cat(
-                    (self.q.bias.detach(), self.k.bias.detach(), self.v.bias.detach()),
-                    dim=0,
-                ).contiguous()
-            self._fused_qkv_cache_key = signature
-        return self._fused_qkv_weight, self._fused_qkv_bias
-
-    def project_qkv(self, x, b, s, n, d):
-        use_fused_qkv = (
-            self.fuse_qkv_inference
-            and not torch.is_grad_enabled()
-            and not x.requires_grad
-            and isinstance(self.norm_q, WanRMSNorm)
-            and isinstance(self.norm_k, WanRMSNorm)
-        )
-
-        if use_fused_qkv:
-            weight, bias = self._fused_qkv_params()
-            q_raw, k_raw, v = torch.nn.functional.linear(x, weight, bias).chunk(3, dim=-1)
-            q = rmsnorm(q_raw, self.norm_q.weight, eps=self.norm_q.eps).view(b, s, n, d)
-            k = rmsnorm(k_raw, self.norm_k.weight, eps=self.norm_k.eps).view(b, s, n, d)
-            return q, k, v.view(b, s, n, d)
-
-        if torch.is_grad_enabled() or x.requires_grad:
-            q = self.norm_q(self.q(x)).view(b, s, n, d)
-            k = self.norm_k(self.k(x)).view(b, s, n, d)
-        else:
-            q = rmsnorm(self.q(x), self.norm_q.weight, eps=self.norm_q.eps).view(b, s, n, d)
-            k = rmsnorm(self.k(x), self.norm_k.weight, eps=self.norm_k.eps).view(b, s, n, d)
-        v = self.v(x).view(b, s, n, d)
-        return q, k, v
-
     def forward(self, x, grid_size, rope_cache):
         r"""
         Args:
@@ -365,7 +305,18 @@ class WanSelfAttention(nn.Module):
         """
         b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
 
-        q, k, v = self.project_qkv(x, b, s, n, d)
+        # query, key, value function
+        def qkv_fn(x):
+            if torch.is_grad_enabled() or x.requires_grad:
+                q = self.norm_q(self.q(x)).view(b, s, n, d)
+                k = self.norm_k(self.k(x)).view(b, s, n, d)
+            else:
+                q = rmsnorm(self.q(x), self.norm_q.weight, eps=self.norm_q.eps).view(b, s, n, d)
+                k = rmsnorm(self.k(x), self.norm_k.weight, eps=self.norm_k.eps).view(b, s, n, d)
+            v = self.v(x).view(b, s, n, d)
+            return q, k, v
+
+        q, k, v = qkv_fn(x)
         # q/k/v: [batch, sequence, head, head_dim].
         # Default 480p/81-frame Wan: [B, 21 * 30 * 52, H, D].
         roped_query, roped_key = apply_rope_video_tokens(q, k, rope_cache)
@@ -892,7 +843,6 @@ class WanModel(ModelMixin, ConfigMixin):
         hard_route_backend = args.get("hard_route_backend", "sdpa")
         hard_route_routing_backend = args.get("hard_route_routing_backend", "sdpa")
         hard_route_routing_backend_policy = args.get("hard_route_routing_backend_policy", None)
-        fuse_qkv_inference = args.get("fuse_qkv_inference", False)
 
         num_layers = len(self.blocks)
         for idx, block in enumerate(self.blocks):
@@ -913,7 +863,6 @@ class WanModel(ModelMixin, ConfigMixin):
             block.self_attn.token_merging_num_layers = num_layers
             block.self_attn.token_merging_denoise_idx = 0
             block.self_attn.token_merging_num_denoise_steps = 1
-            block.self_attn.fuse_qkv_inference = fuse_qkv_inference
 
     def set_token_merging_denoise_step(self, denoise_idx: int, num_denoise_steps: int):
         for block in self.blocks:
