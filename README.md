@@ -154,6 +154,10 @@ Useful configs:
   with R3 routing on the first denoise step and R4 for the rest. In the latest
   90-call MI300X real-QKV probe it ran at 2.32 ms/attention call versus 2.57 ms
   for all-R4, with rel-L2 0.264 versus 0.259.
+- `configs/token_merging_wan_hard_route_c4_fastseed_bf16bias_r3firsttwo_r4rest_fewstep.yaml`:
+  more aggressive speed candidate. It uses R3 routing for the first two denoise
+  steps and R4 for the rest. In the same probe it ran at 2.27 ms/attention call,
+  with rel-L2 0.270.
 - `configs/token_merging_wan_hard_route_c4_fastseed_outer_exact_r5_fewstep.yaml`:
   balanced exact-window C=4 shared hard-route config. It is slightly slower
   than R4 but lower-error, about 2.83 ms/call with rel-L2 0.256.
