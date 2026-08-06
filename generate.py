@@ -131,7 +131,7 @@ def main():
                 batch_text_prompts.extend([prompt] * args.num_samples)
             noise = torch.cat(batch_noises, dim=0)
             video, _ = pipeline.inference(noise=noise, text_prompts=batch_text_prompts, return_latents=True)
-            video = (255.0 * video.permute(0, 1, 3, 4, 2)).clamp(0, 255).to(torch.uint8).cpu()
+            video = (255.0 * video.permute(0, 1, 3, 4, 2)).cpu()
             pipeline.vae.model.clear_cache()
 
             for batch_idx, (idx, prompt) in enumerate(batch):
