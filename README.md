@@ -93,6 +93,10 @@ indices without recomputing them.
 - `triton_c4_direct_route_j32_w2`: route-layout direct shared C=4 kernel with
   `block_j=32` and `num_warps=2`. This is the default stable
   `hard_route_shared` merge backend in the 480p C=4 benchmark.
+- `triton_c4_direct_route_j32_w2_forcekeys`: approximate `j32_w2` variant that
+  assigns the first four keys in each block to the four seeds before the
+  remaining hard routing. This removes the empty-cluster fallback reductions and
+  can be slightly faster, but it changes the merge rule and is not the default.
 - `triton_c4_direct_route_j32_w2_nobias`: aggressive `j32_w2` variant that
   skips routing-bias computation and storage. It is faster, but changes the
   approximation and is not the default best path.
