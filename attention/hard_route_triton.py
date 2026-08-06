@@ -411,25 +411,16 @@ if triton is not None:
                 key_offsets[None, :],
                 assignments,
             )
-            selected_logits = best_logits
-            selected_logits = tl.where(valid_logits & (key_offsets[None, :] == 0), logits0, selected_logits)
-            selected_logits = tl.where(valid_logits & (key_offsets[None, :] == 1), logits1, selected_logits)
-            selected_logits = tl.where(valid_logits & (key_offsets[None, :] == 2), logits2, selected_logits)
-            if C_SEEDS == 4:
-                selected_logits = tl.where(valid_logits & (key_offsets[None, :] == 3), logits3, selected_logits)
 
         for seed_idx in tl.static_range(0, 4):
             if seed_idx < C_SEEDS:
-                if FORCE_SEED_KEYS:
-                    logits = selected_logits
-                else:
-                    logits = logits0
-                    if seed_idx == 1:
-                        logits = logits1
-                    if seed_idx == 2:
-                        logits = logits2
-                    if seed_idx == 3:
-                        logits = logits3
+                logits = logits0
+                if seed_idx == 1:
+                    logits = logits1
+                if seed_idx == 2:
+                    logits = logits2
+                if seed_idx == 3:
+                    logits = logits3
 
                 assigned_to_seed = assignments == seed_idx
                 if FORCE_SEED_KEYS:
