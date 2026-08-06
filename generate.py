@@ -1,6 +1,5 @@
 import argparse
 import os
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import torch
@@ -27,12 +26,6 @@ def parse_args():
     parser.add_argument("--video_preset", default="ultrafast")
     parser.add_argument("--video_crf", type=int, default=23)
     parser.add_argument("--video_quality", type=int, default=None)
-    parser.add_argument(
-        "--save_workers",
-        type=int,
-        default=1,
-        help="Number of CPU worker threads used to save videos. 1 keeps the original synchronous path.",
-    )
     parser.add_argument(
         "--vae_batch_decode",
         action="store_true",
@@ -104,8 +97,6 @@ def main():
 
     if args.batch_size < 1:
         raise ValueError("--batch_size must be at least 1")
-    if args.save_workers < 1:
-        raise ValueError("--save_workers must be at least 1")
 
     indexed_prompts = list(enumerate(prompts))
     if args.vbench_filenames:
@@ -120,58 +111,39 @@ def main():
             unique_indexed_prompts.append((idx, prompt))
         indexed_prompts = unique_indexed_prompts
 
-    save_executor = ThreadPoolExecutor(max_workers=args.save_workers) if args.save_workers > 1 else None
-    save_futures = []
+    for start in tqdm(range(0, len(indexed_prompts), args.batch_size), desc="Generating"):
+        batch = indexed_prompts[start:start + args.batch_size]
+        noise_pieces = []
+        text_prompts = []
+        for idx, prompt in batch:
+            set_seed(args.seed + idx)
+            latent_shape = list(config.image_or_video_shape)
+            latent_shape[0] = args.num_samples
+            noise_pieces.append(torch.randn(latent_shape, device=device, dtype=dtype))
+            text_prompts.extend([prompt] * args.num_samples)
 
-    def save_one(path, frames):
-        save_video(
-            str(path),
-            frames,
-            fps=args.fps,
-            preset=args.video_preset,
-            crf=args.video_crf,
-            quality=args.video_quality,
-        )
-        return path
+        noise = torch.cat(noise_pieces, dim=0)
+        video, _ = pipeline.inference(noise=noise, text_prompts=text_prompts, return_latents=True)
+        with torch.inference_mode():
+            video = video.permute(0, 1, 3, 4, 2).mul_(255.0).clamp_(0, 255).to(torch.uint8).cpu()
 
-    try:
-        for start in tqdm(range(0, len(indexed_prompts), args.batch_size), desc="Generating"):
-            batch = indexed_prompts[start:start + args.batch_size]
-            noise_pieces = []
-            text_prompts = []
-            for idx, prompt in batch:
-                set_seed(args.seed + idx)
-                latent_shape = list(config.image_or_video_shape)
-                latent_shape[0] = args.num_samples
-                noise_pieces.append(torch.randn(latent_shape, device=device, dtype=dtype))
-                text_prompts.extend([prompt] * args.num_samples)
-
-            noise = torch.cat(noise_pieces, dim=0)
-            video, _ = pipeline.inference(noise=noise, text_prompts=text_prompts, return_latents=True)
-            with torch.inference_mode():
-                video = video.permute(0, 1, 3, 4, 2).mul_(255.0).clamp_(0, 255).to(torch.uint8).cpu()
-
-            video_offset = 0
-            for idx, prompt in batch:
-                for sample_idx in range(args.num_samples):
-                    if args.vbench_filenames:
-                        output_path = output_dir / f"{prompt}-{sample_idx}.mp4"
-                    else:
-                        output_path = output_dir / f"{idx:03d}-{sample_idx:02d}.mp4"
-
-                    if save_executor is None:
-                        save_one(output_path, video[video_offset])
-                        print(f"Saved {output_path}")
-                    else:
-                        frames = video[video_offset].contiguous().numpy().copy()
-                        save_futures.append(save_executor.submit(save_one, output_path, frames))
-                    video_offset += 1
-
-        for future in save_futures:
-            print(f"Saved {future.result()}")
-    finally:
-        if save_executor is not None:
-            save_executor.shutdown(wait=True)
+        video_offset = 0
+        for idx, prompt in batch:
+            for sample_idx in range(args.num_samples):
+                if args.vbench_filenames:
+                    output_path = output_dir / f"{prompt}-{sample_idx}.mp4"
+                else:
+                    output_path = output_dir / f"{idx:03d}-{sample_idx:02d}.mp4"
+                save_video(
+                    str(output_path),
+                    video[video_offset],
+                    fps=args.fps,
+                    preset=args.video_preset,
+                    crf=args.video_crf,
+                    quality=args.video_quality,
+                )
+                print(f"Saved {output_path}")
+                video_offset += 1
 
     print(f"Done. Generated {len(indexed_prompts) * args.num_samples} videos in {output_dir}.")
 

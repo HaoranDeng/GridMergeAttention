@@ -246,15 +246,12 @@ python generate.py \
   --num_videos 20 \
   --batch_size 2 \
   --vae_batch_decode \
-  --save_workers 2 \
   --use_ema
 ```
 
 `--vae_batch_decode` may trigger one-time MIOpen tuning for a new batch shape.
 In the MI300X runs, `batch_size=2` was useful after warmup; `batch_size=4` had
 too much startup cost for 20-video batches.
-`--save_workers 2` overlaps CPU video encoding with the next GPU generation
-batch. It does not change the generated frames.
 
 On `amdhpc`, the helper script uses the configured conda environment and expects
 repo-local `wan_models/` and `checkpoints/` links or directories:
