@@ -828,7 +828,15 @@ def triton_hard_route_shared_merge_c4(query, seed_rows, key, value, scale=1.0, b
     return merged_key, merged_value, routing_bias, None
 
 
-def triton_hard_route_shared_merge_c4_route_layout(query, seed_rows, key, value, scale=1.0, block_j_target=16):
+def triton_hard_route_shared_merge_c4_route_layout(
+    query,
+    seed_rows,
+    key,
+    value,
+    scale=1.0,
+    block_j_target=16,
+    num_warps=4,
+):
     """C=4 shared hard-route merge with routing-ready K/V/bias layout.
 
     Returns:
@@ -903,7 +911,7 @@ def triton_hard_route_shared_merge_c4_route_layout(query, seed_rows, key, value,
         BLOCK_D=block_d,
         SCORE_SCALE=float(scale),
         ROUTE_LAYOUT=True,
-        num_warps=4,
+        num_warps=int(num_warps),
     )
     return merged_key, merged_value, routing_bias, None
 
