@@ -93,6 +93,10 @@ deterministic hash instead of ranking every candidate query row.
   is kept separate from `triton_c4_direct_route_j32_w2_forcekeys` so the
   original fp32-exp path remains available. This is the fastest measured
   low-error C=4 merge backend on MI300X.
+- `triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached`: same math as the
+  backend above, but reuses no-grad intermediate K/V/bias workspace tensors to
+  reduce allocator overhead during inference. Outputs should match the
+  non-cached backend exactly.
 - `triton_c4_direct_route_j32_w2_nobias`: aggressive faster variant that skips
   routing-bias computation and storage. This changes the approximation, so it
   is kept as an explicit experiment rather than the default best path.

@@ -9,6 +9,20 @@ except Exception:  # pragma: no cover - exercised only when Triton is missing.
 
 
 if triton is not None:
+    _WORKSPACE_CACHE = {}
+
+
+    def _cached_empty(name, shape, device, dtype):
+        """Reuse no-grad intermediate buffers for inference-only fast paths."""
+        if torch.is_grad_enabled():
+            return torch.empty(shape, device=device, dtype=dtype)
+        cache_key = (name, tuple(int(x) for x in shape), str(device), str(dtype))
+        out = _WORKSPACE_CACHE.get(cache_key)
+        if out is None:
+            out = torch.empty(shape, device=device, dtype=dtype)
+            _WORKSPACE_CACHE[cache_key] = out
+        return out
+
 
     @triton.jit
     def _hard_route_merge_kernel(
@@ -1051,6 +1065,7 @@ def triton_hard_route_shared_merge_c4_route_layout(
     write_bias=True,
     force_seed_keys=False,
     use_exp2=False,
+    workspace_cache=False,
 ):
     """C=4 shared hard-route merge with routing-ready K/V/bias layout.
 
@@ -1090,19 +1105,27 @@ def triton_hard_route_shared_merge_c4_route_layout(
 
     route_groups = batch * heads * query_columns
     route_tokens = query_outer * key_rows * 4
-    merged_key = torch.empty(
-        (route_groups, route_tokens, dim),
-        device=key.device,
-        dtype=key.dtype,
-    )
-    merged_value = torch.empty_like(merged_key)
+    alloc = _cached_empty if workspace_cache else None
+    if alloc is None:
+        merged_key = torch.empty(
+            (route_groups, route_tokens, dim),
+            device=key.device,
+            dtype=key.dtype,
+        )
+        merged_value = torch.empty_like(merged_key)
+    else:
+        merged_key = alloc("shared_c4_route_key", (route_groups, route_tokens, dim), key.device, key.dtype)
+        merged_value = alloc("shared_c4_route_value", (route_groups, route_tokens, dim), key.device, key.dtype)
     routing_bias = None
     if write_bias:
-        routing_bias = torch.empty(
-            (route_groups, route_tokens),
-            device=key.device,
-            dtype=torch.float32,
-        )
+        if alloc is None:
+            routing_bias = torch.empty(
+                (route_groups, route_tokens),
+                device=key.device,
+                dtype=torch.float32,
+            )
+        else:
+            routing_bias = alloc("shared_c4_route_bias", (route_groups, route_tokens), key.device, torch.float32)
     routing_bias_arg = routing_bias
     if routing_bias_arg is None:
         routing_bias_arg = torch.empty((1,), device=key.device, dtype=torch.float32)
