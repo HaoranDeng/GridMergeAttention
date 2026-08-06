@@ -15,6 +15,9 @@ from .hard_route_triton import (
 )
 
 
+_SHARED_SEED_ROWS_CACHE = {}
+
+
 def shared_seed_rows(
     key_outer,
     key_rows,
@@ -45,6 +48,46 @@ def shared_seed_rows(
         if fast_with_include:
             return fast_seed_indices_with_include(base, query_rows, num_seeds, ith_seed)
     return seed_indices_from_base(base, query_rows, num_seeds, include_seed=ith_seed)
+
+
+def cached_shared_seed_rows(
+    device,
+    key_outers,
+    key_rows,
+    query_columns,
+    query_rows,
+    num_seeds,
+    seed,
+    include_ith=False,
+    fast_with_include=False,
+):
+    """Reuse deterministic shared seed rows across layers and denoise steps."""
+    cache_key = (
+        str(device),
+        int(key_outers),
+        int(key_rows),
+        int(query_columns),
+        int(query_rows),
+        int(num_seeds),
+        int(seed),
+        bool(include_ith),
+        bool(fast_with_include),
+    )
+    seed_rows = _SHARED_SEED_ROWS_CACHE.get(cache_key)
+    if seed_rows is None:
+        key_outer = torch.arange(key_outers, device=device)
+        seed_rows = shared_seed_rows(
+            key_outer,
+            key_rows,
+            query_columns,
+            query_rows,
+            num_seeds,
+            seed,
+            include_ith=include_ith,
+            fast_with_include=fast_with_include,
+        )
+        _SHARED_SEED_ROWS_CACHE[cache_key] = seed_rows
+    return seed_rows
 
 
 def gather_shared_seed_queries(q, seed_rows):
@@ -126,9 +169,9 @@ def hard_route_shared_attention(
     if num_merge_tokens > k.size(3):
         raise ValueError("num_merge_tokens cannot exceed key columns per block.")
 
-    key_outer = torch.arange(k.size(1), device=q.device)
-    seed_rows = shared_seed_rows(
-        key_outer,
+    seed_rows = cached_shared_seed_rows(
+        q.device,
+        k.size(1),
         k.size(2),
         q.size(3),
         q.size(2),
