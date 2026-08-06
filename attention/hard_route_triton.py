@@ -319,6 +319,7 @@ if triton is not None:
         SCORE_SCALE: tl.constexpr,
         ROUTE_LAYOUT: tl.constexpr,
         WRITE_BIAS: tl.constexpr,
+        UNIFORM_BIAS: tl.constexpr,
         FORCE_SEED_KEYS: tl.constexpr,
         USE_EXP2: tl.constexpr,
     ):
@@ -443,13 +444,18 @@ if triton is not None:
                 merged_key = tl.dot(weights.to(key_block.dtype), key_block)
                 merged_value = tl.dot(weights.to(value_block.dtype), value_block)
                 if WRITE_BIAS:
-                    has_keys = tl.sum(tl.where(active, 1, 0), axis=1) > 0
-                    log_denom = row_max + tl.log(safe_denom)
-                    routing_bias = tl.sum(
-                        tl.where(active, weights * (logits - log_denom[:, None]), 0.0),
-                        axis=1,
-                    )
+                    active_count = tl.sum(tl.where(active, 1.0, 0.0), axis=1)
+                    if UNIFORM_BIAS:
+                        safe_count = tl.where(active_count > 0.0, active_count, 1.0)
+                        routing_bias = -tl.log(safe_count)
+                    else:
+                        log_denom = row_max + tl.log(safe_denom)
+                        routing_bias = tl.sum(
+                            tl.where(active, weights * (logits - log_denom[:, None]), 0.0),
+                            axis=1,
+                        )
                     if not FORCE_SEED_KEYS:
+                        has_keys = active_count > 0.0
                         routing_bias = tl.where(has_keys, routing_bias, 0.0)
 
                 if ROUTE_LAYOUT:
@@ -1034,6 +1040,7 @@ def triton_hard_route_shared_merge_c4(query, seed_rows, key, value, scale=1.0, b
         SCORE_SCALE=float(scale),
         ROUTE_LAYOUT=False,
         WRITE_BIAS=True,
+        UNIFORM_BIAS=False,
         FORCE_SEED_KEYS=False,
         USE_EXP2=False,
         num_warps=4,
@@ -1050,6 +1057,7 @@ def triton_hard_route_shared_merge_c4_route_layout(
     block_j_target=16,
     num_warps=4,
     write_bias=True,
+    uniform_bias=False,
     force_seed_keys=False,
     use_exp2=False,
 ):
@@ -1134,6 +1142,7 @@ def triton_hard_route_shared_merge_c4_route_layout(
         SCORE_SCALE=float(scale),
         ROUTE_LAYOUT=True,
         WRITE_BIAS=bool(write_bias),
+        UNIFORM_BIAS=bool(uniform_bias),
         FORCE_SEED_KEYS=bool(force_seed_keys),
         USE_EXP2=bool(use_exp2),
         num_warps=int(num_warps),
@@ -1223,6 +1232,7 @@ def triton_hard_route_shared_merge_c3_route_layout(
         SCORE_SCALE=float(scale),
         ROUTE_LAYOUT=True,
         WRITE_BIAS=True,
+        UNIFORM_BIAS=False,
         FORCE_SEED_KEYS=bool(force_seed_keys),
         USE_EXP2=bool(use_exp2),
         num_warps=int(num_warps),
