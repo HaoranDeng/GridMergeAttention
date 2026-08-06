@@ -119,6 +119,11 @@ deterministic hash instead of ranking every candidate query row.
   computes softmax with base-2 exponentials. On MI300X this preserves the
   measured bf16 output while reducing routing latency. This is the fastest
   measured low-error C=4 routing backend on MI300X.
+- `triton_grid_outer_local_r4_m128_n32_s1_exp2` /
+  `triton_grid_outer_local_r6_m128_n32_s1_exp2`: experimental faster C=4
+  routing backends. They keep the C4 compressed K/V tokens unchanged, but each
+  query block routes only to a local union window of key outers. `r4` is faster
+  with higher error; `r6` is more conservative.
 - `triton_grid_m128_n32_s1_nobias`: matching aggressive routing backend for the
   no-bias merge path. It skips loading/subtracting routing bias.
 
