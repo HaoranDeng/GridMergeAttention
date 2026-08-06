@@ -18,6 +18,7 @@ def parse_args():
     parser.add_argument("--output_dir", default="videos/token_merging_wan")
     parser.add_argument("--num_videos", type=int, default=20)
     parser.add_argument("--num_samples", type=int, default=1)
+    parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--use_ema", action="store_true")
     parser.add_argument("--fps", type=int, default=16)
@@ -87,8 +88,8 @@ def main():
     pipeline.vae.to(device=device)
     pipeline.eval()
 
-    latent_shape = list(config.image_or_video_shape)
-    latent_shape[0] = args.num_samples
+    if args.batch_size < 1:
+        raise ValueError("--batch_size must be at least 1")
 
     indexed_prompts = list(enumerate(prompts))
     if args.vbench_filenames:
@@ -103,28 +104,39 @@ def main():
             unique_indexed_prompts.append((idx, prompt))
         indexed_prompts = unique_indexed_prompts
 
-    for idx, prompt in tqdm(indexed_prompts, desc="Generating"):
-        set_seed(args.seed + idx)
-        noise = torch.randn(latent_shape, device=device, dtype=dtype)
-        text_prompts = [prompt] * args.num_samples
+    for start in tqdm(range(0, len(indexed_prompts), args.batch_size), desc="Generating"):
+        batch = indexed_prompts[start:start + args.batch_size]
+        noise_pieces = []
+        text_prompts = []
+        for idx, prompt in batch:
+            set_seed(args.seed + idx)
+            latent_shape = list(config.image_or_video_shape)
+            latent_shape[0] = args.num_samples
+            noise_pieces.append(torch.randn(latent_shape, device=device, dtype=dtype))
+            text_prompts.extend([prompt] * args.num_samples)
+
+        noise = torch.cat(noise_pieces, dim=0)
         video, _ = pipeline.inference(noise=noise, text_prompts=text_prompts, return_latents=True)
         with torch.inference_mode():
             video = video.permute(0, 1, 3, 4, 2).mul_(255.0).clamp_(0, 255).to(torch.uint8).cpu()
 
-        for sample_idx in range(args.num_samples):
-            if args.vbench_filenames:
-                output_path = output_dir / f"{prompt}-{sample_idx}.mp4"
-            else:
-                output_path = output_dir / f"{idx:03d}-{sample_idx:02d}.mp4"
-            save_video(
-                str(output_path),
-                video[sample_idx],
-                fps=args.fps,
-                preset=args.video_preset,
-                crf=args.video_crf,
-                quality=args.video_quality,
-            )
-            print(f"Saved {output_path}")
+        video_offset = 0
+        for idx, prompt in batch:
+            for sample_idx in range(args.num_samples):
+                if args.vbench_filenames:
+                    output_path = output_dir / f"{prompt}-{sample_idx}.mp4"
+                else:
+                    output_path = output_dir / f"{idx:03d}-{sample_idx:02d}.mp4"
+                save_video(
+                    str(output_path),
+                    video[video_offset],
+                    fps=args.fps,
+                    preset=args.video_preset,
+                    crf=args.video_crf,
+                    quality=args.video_quality,
+                )
+                print(f"Saved {output_path}")
+                video_offset += 1
 
     print(f"Done. Generated {len(indexed_prompts) * args.num_samples} videos in {output_dir}.")
 
