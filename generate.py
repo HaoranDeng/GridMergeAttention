@@ -27,6 +27,11 @@ def parse_args():
     parser.add_argument("--video_crf", type=int, default=23)
     parser.add_argument("--video_quality", type=int, default=None)
     parser.add_argument(
+        "--vae_batch_decode",
+        action="store_true",
+        help="Decode all videos in a batch together. Faster after kernel warmup, but uses more memory.",
+    )
+    parser.add_argument(
         "--vbench_filenames",
         action="store_true",
         help=(
@@ -59,6 +64,8 @@ def main():
     args = parse_args()
     if not torch.cuda.is_available():
         raise RuntimeError("A CUDA/ROCm GPU is required for Wan2.1 generation.")
+    if args.vae_batch_decode:
+        os.environ["WAN_VAE_BATCH_DECODE"] = "1"
 
     set_seed(args.seed)
     device = torch.device("cuda")
