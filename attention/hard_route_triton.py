@@ -312,6 +312,7 @@ if triton is not None:
         H: tl.constexpr,
         L: tl.constexpr,
         D_HEAD: tl.constexpr,
+        C_SEEDS: tl.constexpr,
         BLOCK_J: tl.constexpr,
         BLOCK_L: tl.constexpr,
         BLOCK_D: tl.constexpr,
