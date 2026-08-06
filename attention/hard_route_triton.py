@@ -382,11 +382,11 @@ if triton is not None:
                 other=0.0,
             )
 
-        logits0 = tl.dot(seed0, tl.trans(key_block), input_precision="ieee") * SCORE_SCALE
-        logits1 = tl.dot(seed1, tl.trans(key_block), input_precision="ieee") * SCORE_SCALE
-        logits2 = tl.dot(seed2, tl.trans(key_block), input_precision="ieee") * SCORE_SCALE
+        logits0 = tl.dot(seed0, tl.trans(key_block)) * SCORE_SCALE
+        logits1 = tl.dot(seed1, tl.trans(key_block)) * SCORE_SCALE
+        logits2 = tl.dot(seed2, tl.trans(key_block)) * SCORE_SCALE
         if C_SEEDS == 4:
-            logits3 = tl.dot(seed3, tl.trans(key_block), input_precision="ieee") * SCORE_SCALE
+            logits3 = tl.dot(seed3, tl.trans(key_block)) * SCORE_SCALE
         valid_logits = valid_query[:, None] & valid_key[None, :]
         logits0 = tl.where(valid_logits, logits0, -float("inf"))
         logits1 = tl.where(valid_logits, logits1, -float("inf"))
