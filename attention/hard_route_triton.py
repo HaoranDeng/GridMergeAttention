@@ -1042,7 +1042,6 @@ def triton_hard_route_shared_merge_c4_route_layout(
     write_bias=True,
     force_seed_keys=False,
     use_exp2=False,
-    waves_per_eu=None,
 ):
     """C=4 shared hard-route merge with routing-ready K/V/bias layout.
 
@@ -1103,9 +1102,6 @@ def triton_hard_route_shared_merge_c4_route_layout(
         batch * query_outer * key_rows * heads,
         triton.cdiv(query_columns, block_j),
     )
-    meta = {"num_warps": int(num_warps)}
-    if waves_per_eu is not None:
-        meta["waves_per_eu"] = int(waves_per_eu)
     _hard_route_shared_merge_c4_kernel[grid](
         query,
         seed_rows,
@@ -1129,7 +1125,7 @@ def triton_hard_route_shared_merge_c4_route_layout(
         WRITE_BIAS=bool(write_bias),
         FORCE_SEED_KEYS=bool(force_seed_keys),
         USE_EXP2=bool(use_exp2),
-        **meta,
+        num_warps=int(num_warps),
     )
     return merged_key, merged_value, routing_bias, None
 
