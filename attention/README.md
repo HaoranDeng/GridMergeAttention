@@ -93,8 +93,12 @@ deterministic hash instead of ranking every candidate query row.
 - `triton`: fused Triton routing kernel for `q @ K_merged - bias`.
 - `triton_m128_n32` / `triton_m256_n32`: faster fused routing kernels for the
   shared C=4 compressed attention path.
-- `triton_m128_n32_s1`: `triton_m128_n32` with `num_stages=1`; fastest current
-  routing backend for the default 480p C=4 setup.
+- `triton_m128_n32_s1`: `triton_m128_n32` with `num_stages=1`; kept as a
+  stable comparison point.
+- `triton_grid_m128_n32_s1`: direct grid-query version of `triton_m128_n32_s1`.
+  It reads `[B, outer, row, col, head, dim]` query blocks and writes the same
+  block layout directly, avoiding the flattened query/output copies. This is
+  the fastest current routing backend for the default route-layout C=4 setup.
 
 The easiest experimental hook is `q_init` in `common.merge_query_row` and
 `common.merge_query_column`:

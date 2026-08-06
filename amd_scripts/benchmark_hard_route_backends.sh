@@ -61,7 +61,7 @@ CONFIGS=(
   "configs/token_merging_wan_hard_route_c2_triton_fewstep.yaml"
   "configs/token_merging_wan_hard_route_c4_triton_fewstep.yaml"
   "configs/token_merging_wan_hard_route_c6_triton_fewstep.yaml"
-  "configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j32_w2_routing_triton_m128_s1_fewstep.yaml"
+  "configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j32_w2_routing_triton_grid_m128_s1_fewstep.yaml"
 )
 
 cd "${REPO_DIR}"

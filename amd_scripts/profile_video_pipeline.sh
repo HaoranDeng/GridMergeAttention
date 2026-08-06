@@ -74,7 +74,7 @@ run_profile() {
 }
 
 run_profile "dense" "configs/dense_wan_fewstep.yaml"
-run_profile "hard_route_c4_best" "configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j32_w2_routing_triton_m128_s1_fewstep.yaml"
+run_profile "hard_route_c4_best" "configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j32_w2_routing_triton_grid_m128_s1_fewstep.yaml"
 
 python - "${RESULT_DIR}" <<'PY'
 import json
