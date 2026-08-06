@@ -258,7 +258,6 @@ if triton is not None:
             has_seed = tl.sum(tl.where(assigned_to_seed & valid_logits, 1, 0), axis=1) > 0
             forced_first_key = (~has_seed[:, None]) & (key_offsets[None, :] == 0)
             active = valid_logits & (assigned_to_seed | forced_first_key)
-            has_keys = tl.sum(tl.where(active, 1, 0), axis=1) > 0
 
             row_max = tl.max(tl.where(active, logits, -float("inf")), axis=1)
             probs = tl.where(active, tl.exp(logits - row_max[:, None]), 0.0)
@@ -317,6 +316,7 @@ if triton is not None:
         BLOCK_D: tl.constexpr,
         SCORE_SCALE: tl.constexpr,
         ROUTE_LAYOUT: tl.constexpr,
+        WRITE_BIAS: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -417,15 +417,17 @@ if triton is not None:
             denom = tl.sum(probs, axis=1)
             safe_denom = tl.where(denom > 0.0, denom, 1.0)
             weights = probs / safe_denom[:, None]
-            log_denom = row_max + tl.log(safe_denom)
 
             merged_key = tl.dot(weights.to(key_block.dtype), key_block)
             merged_value = tl.dot(weights.to(value_block.dtype), value_block)
-            routing_bias = tl.sum(
-                tl.where(active, weights * (logits - log_denom[:, None]), 0.0),
-                axis=1,
-            )
-            routing_bias = tl.where(has_keys, routing_bias, 0.0)
+            if WRITE_BIAS:
+                has_keys = tl.sum(tl.where(active, 1, 0), axis=1) > 0
+                log_denom = row_max + tl.log(safe_denom)
+                routing_bias = tl.sum(
+                    tl.where(active, weights * (logits - log_denom[:, None]), 0.0),
+                    axis=1,
+                )
+                routing_bias = tl.where(has_keys, routing_bias, 0.0)
 
             if ROUTE_LAYOUT:
                 group = (batch * H + head) * J + query_offsets
@@ -434,17 +436,19 @@ if triton is not None:
                     (group[:, None] * (F * K_ROWS * 4) + token) * D_HEAD
                     + dim_offsets[None, :]
                 )
-                bias_offset = group * (F * K_ROWS * 4) + token
+                if WRITE_BIAS:
+                    bias_offset = group * (F * K_ROWS * 4) + token
             else:
                 merged_offset = (
                     (((((batch * F + key_outer) * J + query_offsets[:, None])
                        * K_ROWS + key_row) * 4 + seed_idx) * H + head)
                     * D_HEAD + dim_offsets[None, :]
                 )
-                bias_offset = (
-                    (((((batch * H + head) * F + key_outer)
-                       * K_ROWS + key_row) * J + query_offsets) * 4 + seed_idx)
-                )
+                if WRITE_BIAS:
+                    bias_offset = (
+                        (((((batch * H + head) * F + key_outer)
+                           * K_ROWS + key_row) * J + query_offsets) * 4 + seed_idx)
+                    )
             tl.store(
                 merged_key_ptr + merged_offset,
                 merged_key,
@@ -455,7 +459,8 @@ if triton is not None:
                 merged_value,
                 mask=valid_query[:, None] & valid_dim[None, :],
             )
-            tl.store(routing_bias_ptr + bias_offset, routing_bias, mask=valid_query)
+            if WRITE_BIAS:
+                tl.store(routing_bias_ptr + bias_offset, routing_bias, mask=valid_query)
 
     @triton.jit
     def _biased_attention_kernel(
@@ -471,6 +476,7 @@ if triton is not None:
         BLOCK_N: tl.constexpr,
         BLOCK_D: tl.constexpr,
         SCORE_SCALE: tl.constexpr,
+        USE_BIAS: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_block_id = tl.program_id(1)
@@ -507,9 +513,10 @@ if triton is not None:
                 mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
                 other=0.0,
             )
-            bias = tl.load(bias_base + keys, mask=keys < K_LEN, other=float("inf"))
-
-            logits = tl.dot(q, tl.trans(k)) * SCORE_SCALE - bias[None, :]
+            logits = tl.dot(q, tl.trans(k)) * SCORE_SCALE
+            if USE_BIAS:
+                bias = tl.load(bias_base + keys, mask=keys < K_LEN, other=float("inf"))
+                logits = logits - bias[None, :]
             logits = tl.where(
                 (query_offsets[:, None] < Q_LEN) & (keys[None, :] < K_LEN),
                 logits,
@@ -687,6 +694,7 @@ def triton_grid_biased_attention(
     block_n=32,
     scale=1.0,
     num_stages=1,
+    use_bias=True,
 ):
     """Fused hard-route routing that reads/writes query block layout directly.
 
@@ -704,7 +712,10 @@ def triton_grid_biased_attention(
     query = query.contiguous()
     key = key.contiguous()
     value = value.contiguous()
-    bias = bias.contiguous()
+    if use_bias:
+        bias = bias.contiguous()
+    else:
+        bias = torch.empty((1,), device=query.device, dtype=torch.float32)
 
     batch, query_outer, query_rows, query_columns, heads, dim = query.shape
     groups, key_len, key_dim = key.shape
@@ -714,7 +725,8 @@ def triton_grid_biased_attention(
             "grid hard-route attention expects route-layout KV with "
             f"{expected_groups} groups, got {groups}."
         )
-    if key_dim != dim or value.shape != key.shape or bias.shape != (groups, key_len):
+    bias_shape_ok = (not use_bias) or bias.shape == (groups, key_len)
+    if key_dim != dim or value.shape != key.shape or not bias_shape_ok:
         raise ValueError("query/key/value/bias shapes are inconsistent for grid Triton hard-route attention.")
 
     block_d = triton.next_power_of_2(dim)
@@ -744,6 +756,7 @@ def triton_grid_biased_attention(
         BLOCK_N=block_n,
         BLOCK_D=block_d,
         SCORE_SCALE=float(scale),
+        USE_BIAS=bool(use_bias),
         **meta,
     )
     return out
@@ -989,6 +1002,7 @@ def triton_hard_route_shared_merge_c4(query, seed_rows, key, value, scale=1.0, b
         BLOCK_D=block_d,
         SCORE_SCALE=float(scale),
         ROUTE_LAYOUT=False,
+        WRITE_BIAS=True,
         num_warps=4,
     )
     return merged_key, merged_value, routing_bias, None
@@ -1002,6 +1016,7 @@ def triton_hard_route_shared_merge_c4_route_layout(
     scale=1.0,
     block_j_target=16,
     num_warps=4,
+    write_bias=True,
 ):
     """C=4 shared hard-route merge with routing-ready K/V/bias layout.
 
@@ -1047,11 +1062,16 @@ def triton_hard_route_shared_merge_c4_route_layout(
         dtype=key.dtype,
     )
     merged_value = torch.empty_like(merged_key)
-    routing_bias = torch.empty(
-        (route_groups, route_tokens),
-        device=key.device,
-        dtype=torch.float32,
-    )
+    routing_bias = None
+    if write_bias:
+        routing_bias = torch.empty(
+            (route_groups, route_tokens),
+            device=key.device,
+            dtype=torch.float32,
+        )
+    routing_bias_arg = routing_bias
+    if routing_bias_arg is None:
+        routing_bias_arg = torch.empty((1,), device=key.device, dtype=torch.float32)
 
     grid = (
         batch * query_outer * key_rows * heads,
@@ -1064,7 +1084,7 @@ def triton_hard_route_shared_merge_c4_route_layout(
         value,
         merged_key,
         merged_value,
-        routing_bias,
+        routing_bias_arg,
         F=query_outer,
         Q_ROWS=query_rows,
         K_ROWS=key_rows,
@@ -1077,6 +1097,7 @@ def triton_hard_route_shared_merge_c4_route_layout(
         BLOCK_D=block_d,
         SCORE_SCALE=float(scale),
         ROUTE_LAYOUT=True,
+        WRITE_BIAS=bool(write_bias),
         num_warps=int(num_warps),
     )
     return merged_key, merged_value, routing_bias, None

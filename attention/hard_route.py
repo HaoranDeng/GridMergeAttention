@@ -132,9 +132,21 @@ def hard_route_grid_compressed_attention(query, key, value, bias, backend, scale
             scale=scale,
             num_stages=1,
         )
+    if backend == "triton_grid_m128_n32_s1_nobias":
+        return triton_grid_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=128,
+            block_n=32,
+            scale=scale,
+            num_stages=1,
+            use_bias=False,
+        )
     raise ValueError(
         f"unsupported grid hard_route_routing_backend={backend!r}; expected "
-        "'triton_grid_m128_n32_s1'."
+        "'triton_grid_m128_n32_s1' or 'triton_grid_m128_n32_s1_nobias'."
     )
 
 
