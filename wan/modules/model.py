@@ -239,13 +239,12 @@ class WanSelfAttention(nn.Module):
         self.token_merging_f_tied = 1
         self.token_merging_q_init = None
         self.token_merging_query_outer_chunk = None
-        self.token_merging_layout = "query_column_key_row"
+        self.token_merging_layout = "hard_route"
         self.token_merging_num_merge_tokens = 1
         self.token_merging_seed_mode = "random"
         self.token_merging_seed = 0
-        self.token_merging_global_seed_ratio = 0.1
-        self.token_merging_global_assign_chunk = None
-        self.token_merging_global_query_chunk = None
+        self.token_merging_hard_route_backend = "sdpa"
+        self.token_merging_hard_route_routing_backend = "sdpa"
 
         # layers
         self.q = nn.Linear(dim, dim)
@@ -300,9 +299,8 @@ class WanSelfAttention(nn.Module):
                 num_merge_tokens=self.token_merging_num_merge_tokens,
                 seed_mode=self.token_merging_seed_mode,
                 seed=self.token_merging_seed,
-                global_seed_ratio=self.token_merging_global_seed_ratio,
-                global_assign_chunk=self.token_merging_global_assign_chunk,
-                global_query_chunk=self.token_merging_global_query_chunk,
+                hard_route_backend=self.token_merging_hard_route_backend,
+                hard_route_routing_backend=self.token_merging_hard_route_routing_backend,
             )
         else:
             x = flash_attention(
@@ -787,13 +785,12 @@ class WanModel(ModelMixin, ConfigMixin):
         w_reduce = args.get("w_reduce", 1)
         q_init = args.get("q_init", None)
         query_outer_chunk = args.get("query_outer_chunk", None)
-        layout = args.get("layout", "query_column_key_row")
+        layout = args.get("layout", "hard_route")
         num_merge_tokens = args.get("num_merge_tokens", 1)
         seed_mode = args.get("seed_mode", "random")
         seed = args.get("seed", 0)
-        global_seed_ratio = args.get("global_seed_ratio", 0.1)
-        global_assign_chunk = args.get("global_assign_chunk", None)
-        global_query_chunk = args.get("global_query_chunk", None)
+        hard_route_backend = args.get("hard_route_backend", "sdpa")
+        hard_route_routing_backend = args.get("hard_route_routing_backend", "sdpa")
 
         for block in self.blocks:
             block.self_attn.enable_token_merging = enable
@@ -806,9 +803,8 @@ class WanModel(ModelMixin, ConfigMixin):
             block.self_attn.token_merging_num_merge_tokens = num_merge_tokens
             block.self_attn.token_merging_seed_mode = seed_mode
             block.self_attn.token_merging_seed = seed
-            block.self_attn.token_merging_global_seed_ratio = global_seed_ratio
-            block.self_attn.token_merging_global_assign_chunk = global_assign_chunk
-            block.self_attn.token_merging_global_query_chunk = global_query_chunk
+            block.self_attn.token_merging_hard_route_backend = hard_route_backend
+            block.self_attn.token_merging_hard_route_routing_backend = hard_route_routing_backend
 
     def _set_gradient_checkpointing(self, module, value=False):
         self.gradient_checkpointing = value

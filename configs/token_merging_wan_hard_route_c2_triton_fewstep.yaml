@@ -15,9 +15,12 @@ model_kwargs:
   timestep_shift: 5.0
 token_merging_args:
   enable: true
-  layout: global
-  global_seed_ratio: 0.1
-  global_assign_chunk: 512
-  global_query_chunk: 512
-  seed_mode: random
+  f_tied: 1
+  h_reduce: 1
+  w_reduce: 1
+  layout: hard_route
+  q_init: ith
+  num_merge_tokens: 2
+  seed_mode: random_with_ith
   seed: 0
+  hard_route_backend: triton

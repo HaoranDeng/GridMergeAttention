@@ -18,8 +18,11 @@ token_merging_args:
   f_tied: 1
   h_reduce: 1
   w_reduce: 1
-  layout: query_row_key_column
+  layout: hard_route
   q_init: ith
-  num_merge_tokens: 6
+  query_outer_chunk: 7
+  num_merge_tokens: 4
   seed_mode: random_with_ith
   seed: 0
+  hard_route_backend: triton
+  hard_route_routing_backend: triton
