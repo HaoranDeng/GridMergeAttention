@@ -90,10 +90,8 @@ def load_pipeline(config_path, checkpoint, dtype, device, use_ema=False):
     return config, pipeline
 
 
-def install_backend_probe(stats, max_calls):
-    import wan.modules.model as wan_model
-
-    variants = {
+def backend_variants(variant_set):
+    baseline = {
         "best": {
             "hard_route_backend": "triton_c4_direct_route_j32_w2",
             "hard_route_routing_backend": "triton_grid_m128_n32_s1",
@@ -115,6 +113,69 @@ def install_backend_probe(stats, max_calls):
             "hard_route_routing_backend": "triton_grid_m128_n32_s1_exp2",
         },
     }
+    tuning = {
+        "full_c4_cached": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached",
+            "hard_route_routing_backend": "triton_grid_m128_n32_s1_exp2",
+            "seed_mode": "fast_random_with_ith",
+        },
+        "full_c4_n64_cached": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached",
+            "hard_route_routing_backend": "triton_grid_m128_n64_s1_exp2",
+            "seed_mode": "fast_random_with_ith",
+        },
+        "outer_r2": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached",
+            "hard_route_routing_backend": "triton_grid_outer_local_r2_m128_n32_s1_exp2",
+            "seed_mode": "fast_random_with_ith",
+        },
+        "outer_r3": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached",
+            "hard_route_routing_backend": "triton_grid_outer_local_r3_m128_n32_s1_exp2",
+            "seed_mode": "fast_random_with_ith",
+        },
+        "outer_r4": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached",
+            "hard_route_routing_backend": "triton_grid_outer_local_r4_m128_n32_s1_exp2",
+            "seed_mode": "fast_random_with_ith",
+        },
+        "outer_r4_n64": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached",
+            "hard_route_routing_backend": "triton_grid_outer_local_r4_m128_n64_s1_exp2",
+            "seed_mode": "fast_random_with_ith",
+        },
+        "outer_r5": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached",
+            "hard_route_routing_backend": "triton_grid_outer_local_r5_m128_n32_s1_exp2",
+            "seed_mode": "fast_random_with_ith",
+        },
+        "outer_r6": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached",
+            "hard_route_routing_backend": "triton_grid_outer_local_r6_m128_n32_s1_exp2",
+            "seed_mode": "fast_random_with_ith",
+        },
+        "nobias_full_c4": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_nobias_cached",
+            "hard_route_routing_backend": "triton_grid_m128_n32_s1_exp2_nobias",
+            "seed_mode": "fast_random_with_ith",
+        },
+        "nobias_outer_r4": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_nobias_cached",
+            "hard_route_routing_backend": "triton_grid_outer_local_r4_m128_n32_s1_exp2_nobias",
+            "seed_mode": "fast_random_with_ith",
+        },
+    }
+    if variant_set == "baseline":
+        return baseline
+    if variant_set == "tuning":
+        return tuning
+    raise ValueError(f"unknown variant_set={variant_set!r}")
+
+
+def install_backend_probe(stats, max_calls, variant_set):
+    import wan.modules.model as wan_model
+
+    variants = backend_variants(variant_set)
     call_index = {"value": 0}
     warmed = {"value": False}
 
@@ -135,7 +196,7 @@ def install_backend_probe(stats, max_calls):
             q_init="ith",
             layout="hard_route_shared",
             num_merge_tokens=4,
-            seed_mode="random_with_ith",
+            seed_mode=kwargs.get("seed_mode", "random_with_ith"),
             seed=0,
             hard_route_backend=kwargs["hard_route_backend"],
             hard_route_routing_backend=kwargs["hard_route_routing_backend"],
@@ -219,6 +280,7 @@ def parse_args():
     parser.add_argument("--dtype", choices=["bf16", "fp16"], default="bf16")
     parser.add_argument("--use_ema", action="store_true")
     parser.add_argument("--max_calls", type=int, default=0)
+    parser.add_argument("--variant_set", choices=["baseline", "tuning"], default="baseline")
     parser.add_argument("--output_json", required=True)
     return parser.parse_args()
 
@@ -235,7 +297,7 @@ def main():
     prompt = prompts[args.prompt_index]
 
     stats = defaultdict(BackendStats)
-    install_backend_probe(stats, args.max_calls)
+    install_backend_probe(stats, args.max_calls, args.variant_set)
 
     sync()
     start = time.perf_counter()
@@ -253,6 +315,7 @@ def main():
         "denoise_steps": denoise_steps,
         "wall_seconds": wall_seconds,
         "max_calls": args.max_calls,
+        "variant_set": args.variant_set,
         "variants": {
             name: value.summary(dense_seconds=dense_seconds if name != "dense" else None)
             for name, value in sorted(stats.items())
