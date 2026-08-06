@@ -404,6 +404,7 @@ if triton is not None:
         assignments = tl.where(update, 2, assignments)
         if C_SEEDS == 4:
             update = logits3 > best_logits
+            best_logits = tl.where(update, logits3, best_logits)
             assignments = tl.where(update, 3, assignments)
         if FORCE_SEED_KEYS:
             assignments = tl.where(
