@@ -101,10 +101,10 @@ step:
 - `sdpa`: default PyTorch routing over compressed KV tokens.
 - `triton`: experimental fused Triton routing kernel for `q @ K_merged - bias`.
 - `triton_m128_n32`: faster fused Triton routing kernel using `block_m=128`
-  and `block_n=32`. It is slightly numerically different from PyTorch SDPA but
-  has very small output drift in the current C=4 shared setup.
-- `triton_m256_n32`: current fastest fused Triton routing kernel for the
-  default C=4 shared setup, using `block_m=256` and `block_n=32`.
+  and `block_n=32`. This is the current fastest routing backend for the
+  default C=4 shared setup.
+- `triton_m256_n32`: fused Triton routing kernel using `block_m=256` and
+  `block_n=32`; kept as a stable comparison point.
 
 Useful configs:
 
@@ -125,7 +125,8 @@ Useful configs:
 - `configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j16_fewstep.yaml`: explicit direct route-layout shared-compression C=4 backend.
 - `configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j16_routing_triton_fewstep.yaml`: direct route-layout shared-compression C=4 backend with fast Triton routing.
 - `configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j16_routing_triton_m256_fewstep.yaml`: direct route-layout shared-compression C=4 backend with `triton_m256_n32` routing.
-- `configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j64_routing_triton_m256_fewstep.yaml`: current fastest shared-compression C=4 config, using the wider `j64` route-layout merge tile and `triton_m256_n32` routing.
+- `configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j64_routing_triton_m256_fewstep.yaml`: wider `j64` route-layout merge tile with `triton_m256_n32` routing.
+- `configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j64_routing_triton_m128_fewstep.yaml`: current fastest shared-compression C=4 config, using the wider `j64` route-layout merge tile and `triton_m128_n32` routing.
 - `configs/token_merging_wan_hard_route_c4_shared_triton_route_triton_fewstep.yaml`: experimental shared-compression hard-route C=4 with fused Triton routing.
 - `configs/token_merging_wan_hard_route_c4_shared_fastseed_triton_route_triton_fewstep.yaml`: shared-compression hard-route C=4 with lightweight deterministic seed selection.
 - `configs/token_merging_wan_hard_route_c6_fewstep.yaml`: hard-route C=6.
