@@ -81,6 +81,9 @@ candidate row.
 - `triton_c4`: C=4-only Triton KV-compression kernel that reuses the seed-key
   dot products between hard assignment and merge.
 - `triton_c4_j16`: same C=4-specialized kernel with a wider query-column tile.
+- `triton_c4_direct_j16`: shared-compression C=4 kernel that gathers seed
+  queries inside Triton instead of materializing the seed-query tensor. This is
+  the fastest current `hard_route_shared` backend.
 
 `hard_route_routing_backend` separately switches the second compressed-attention
 step:
@@ -102,7 +105,8 @@ Useful configs:
 - `configs/token_merging_wan_hard_route_c4_fastseed_triton_chunk7_route_triton_fewstep.yaml`: same as above, with lightweight deterministic seed selection.
 - `configs/token_merging_wan_hard_route_c4_shared_triton_fewstep.yaml`: experimental shared-compression hard-route C=4.
 - `configs/token_merging_wan_hard_route_c4_shared_triton_c4_fewstep.yaml`: shared-compression C=4 with the C=4-specialized Triton kernel.
-- `configs/token_merging_wan_hard_route_c4_shared_triton_c4_j16_fewstep.yaml`: shared-compression C=4 with the wider-tile C=4-specialized Triton kernel.
+- `configs/token_merging_wan_hard_route_c4_shared_triton_c4_j16_fewstep.yaml`: current fastest shared-compression C=4 config, using the direct wider-tile Triton kernel.
+- `configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_j16_fewstep.yaml`: explicit alias for the same direct shared-compression C=4 backend.
 - `configs/token_merging_wan_hard_route_c4_shared_triton_route_triton_fewstep.yaml`: experimental shared-compression hard-route C=4 with fused Triton routing.
 - `configs/token_merging_wan_hard_route_c4_shared_fastseed_triton_route_triton_fewstep.yaml`: shared-compression hard-route C=4 with lightweight deterministic seed selection.
 - `configs/token_merging_wan_hard_route_c6_fewstep.yaml`: hard-route C=6.

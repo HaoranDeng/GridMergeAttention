@@ -80,7 +80,7 @@ def _merge(seed_queries, k, v, backend, scale):
         return triton_hard_route_merge_c4(seed_queries, k, v, scale=scale, block_j_target=16)
     raise ValueError(
         f"unsupported hard_route_backend={backend!r}; expected 'sdpa', 'triton', "
-        "'triton_c4', or 'triton_c4_j16'."
+        "'triton_c4', 'triton_c4_j16', 'triton_c4_direct', or 'triton_c4_direct_j16'."
     )
 
 
