@@ -110,6 +110,10 @@ def install_backend_probe(stats, max_calls):
             "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys",
             "hard_route_routing_backend": "triton_grid_m128_n32_s1_exp2",
         },
+        "forcekeys_exp2merge_exp2route": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge",
+            "hard_route_routing_backend": "triton_grid_m128_n32_s1_exp2",
+        },
     }
     call_index = {"value": 0}
     warmed = {"value": False}
