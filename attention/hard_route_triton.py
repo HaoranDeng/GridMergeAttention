@@ -318,6 +318,7 @@ if triton is not None:
         ROUTE_LAYOUT: tl.constexpr,
         WRITE_BIAS: tl.constexpr,
         FORCE_SEED_KEYS: tl.constexpr,
+        USE_EXP2: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -423,7 +424,10 @@ if triton is not None:
                 has_keys = tl.sum(tl.where(active, 1, 0), axis=1) > 0
 
             row_max = tl.max(tl.where(active, logits, -float("inf")), axis=1)
-            probs = tl.where(active, tl.exp(logits - row_max[:, None]), 0.0)
+            if USE_EXP2:
+                probs = tl.where(active, tl.exp2((logits - row_max[:, None]) * 1.4426950408889634), 0.0)
+            else:
+                probs = tl.where(active, tl.exp(logits - row_max[:, None]), 0.0)
             denom = tl.sum(probs, axis=1)
             safe_denom = tl.where(denom > 0.0, denom, 1.0)
             weights = probs / safe_denom[:, None]
@@ -1021,6 +1025,7 @@ def triton_hard_route_shared_merge_c4(query, seed_rows, key, value, scale=1.0, b
         ROUTE_LAYOUT=False,
         WRITE_BIAS=True,
         FORCE_SEED_KEYS=False,
+        USE_EXP2=False,
         num_warps=4,
     )
     return merged_key, merged_value, routing_bias, None
@@ -1036,6 +1041,7 @@ def triton_hard_route_shared_merge_c4_route_layout(
     num_warps=4,
     write_bias=True,
     force_seed_keys=False,
+    use_exp2=False,
 ):
     """C=4 shared hard-route merge with routing-ready K/V/bias layout.
 
@@ -1118,6 +1124,7 @@ def triton_hard_route_shared_merge_c4_route_layout(
         ROUTE_LAYOUT=True,
         WRITE_BIAS=bool(write_bias),
         FORCE_SEED_KEYS=bool(force_seed_keys),
+        USE_EXP2=bool(use_exp2),
         num_warps=int(num_warps),
     )
     return merged_key, merged_value, routing_bias, None

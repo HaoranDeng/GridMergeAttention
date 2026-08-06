@@ -88,6 +88,10 @@ deterministic hash instead of ranking every candidate query row.
   kernel, but directly assigns the first four key columns to the four seeds.
   This removes the empty-cluster fallback reductions and is an explicit
   low-overhead C=4 experiment.
+- `triton_c4_direct_route_j32_w2_forcekeys_exp2merge`: the same force-key
+  merge backend, but computes the merge softmax with base-2 exponentials. It
+  is kept separate from `triton_c4_direct_route_j32_w2_forcekeys` so the
+  original fp32-exp path remains available.
 - `triton_c4_direct_route_j32_w2_nobias`: aggressive faster variant that skips
   routing-bias computation and storage. This changes the approximation, so it
   is kept as an explicit experiment rather than the default best path.
