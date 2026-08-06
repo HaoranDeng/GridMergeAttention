@@ -158,6 +158,14 @@ Useful configs:
   more aggressive speed candidate. It uses R3 routing for the first two denoise
   steps and R4 for the rest. In the same probe it ran at 2.27 ms/attention call,
   with rel-L2 0.270.
+- `configs/token_merging_wan_hard_route_c4_fastseed_bf16bias_r3lowdelta33_r4rest_fewstep.yaml`:
+  selected-layer R3/R4 policy from the per-call real-QKV probe. It uses R3 for
+  the 30 lowest incremental-error layer/step calls and R4 elsewhere; this keeps
+  lower attention error than `r3_first_step_r4_rest` in that probe.
+- `configs/token_merging_wan_hard_route_c4_fastseed_bf16bias_r3lowdelta50_r4rest_fewstep.yaml`:
+  selected-layer variant with 45 R3 calls. This is a more aggressive policy that
+  still measured lower attention error than `r3_first_step_r4_rest` in the
+  per-call probe, but should be checked visually for each prompt set.
 - `configs/token_merging_wan_hard_route_c4_fastseed_outer_exact_r5_fewstep.yaml`:
   balanced exact-window C=4 shared hard-route config. It is slightly slower
   than R4 but lower-error, about 2.83 ms/call with rel-L2 0.256.
@@ -225,6 +233,25 @@ python generate.py \
   --num_videos 20 \
   --use_ema
 ```
+
+For better throughput on large-memory GPUs, generate two prompts per batch and
+decode the VAE batch together:
+
+```bash
+python generate.py \
+  --config configs/token_merging_wan_hard_route_c4_fastseed_bf16bias_r3firststep_r4rest_fewstep.yaml \
+  --checkpoint /path/to/self_forcing_dmd.pt \
+  --prompt_path prompts/MovieGenVideoBench_extended.txt \
+  --output_dir videos/hard_c4_fast \
+  --num_videos 20 \
+  --batch_size 2 \
+  --vae_batch_decode \
+  --use_ema
+```
+
+`--vae_batch_decode` may trigger one-time MIOpen tuning for a new batch shape.
+In the MI300X runs, `batch_size=2` was useful after warmup; `batch_size=4` had
+too much startup cost for 20-video batches.
 
 On `amdhpc`, the helper script uses the configured conda environment and expects
 repo-local `wan_models/` and `checkpoints/` links or directories:
