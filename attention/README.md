@@ -158,6 +158,17 @@ deterministic hash instead of ranking every candidate query row.
   `triton_grid_outer_exact_r6_m128_n64_s1_exp2`: dynamic-window local routing.
   Each query tile scans only the exact key-outer window implied by the query
   outers it contains, instead of the conservative max-length union window.
+  In the 90-call MI300X component profile, using the same C=4 merge backend:
+
+  | backend | attention ms/call | speedup vs dense | rel-L2 vs dense output | output MSE |
+  | --- | ---: | ---: | ---: | ---: |
+  | exact R3 | 2.55 | 9.16x | 0.282 | 0.0247 |
+  | exact R4 | 2.60 | 8.77x | 0.265 | 0.0218 |
+  | exact R5 | 2.83 | 8.08x | 0.256 | 0.0204 |
+  | exact R6 | 2.83 | 8.01x | 0.249 | 0.0192 |
+
+  R4 is the current faster speed/quality tradeoff; R5 is the more conservative
+  balanced point.
 - `triton_grid_outer_exact_r5_m128_n128_s1_exp2`,
   `triton_grid_outer_exact_r5_m256_n64_s1_exp2`,
   `triton_grid_outer_exact_r5_m256_n128_s1_exp2`, and the corresponding R6

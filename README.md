@@ -136,6 +136,18 @@ Useful configs:
   C=4 backend as `c4_best`, but uses lightweight deterministic seed selection.
   This is the fastest measured low-error C=4 config in the latest MI300X
   real-QKV probe.
+- `configs/token_merging_wan_hard_route_c4_fastseed_outer_exact_r4_fewstep.yaml`:
+  faster exact-window C=4 shared hard-route config. In the 90-call MI300X
+  component profile it used about 2.60 ms/token-merging attention call with
+  rel-L2 0.265 against dense attention output.
+- `configs/token_merging_wan_hard_route_c4_fastseed_outer_exact_r5_fewstep.yaml`:
+  balanced exact-window C=4 shared hard-route config. It is slightly slower
+  than R4 but lower-error, about 2.83 ms/call with rel-L2 0.256.
+- `configs/token_merging_wan_hard_route_c4_fastseed_outer_exact_r3_fewstep.yaml`:
+  more aggressive exact-window C=4 config; faster than R4/R5 but higher-error.
+- `configs/token_merging_wan_hard_route_c4_fastseed_outer_exact_r6_fewstep.yaml`:
+  conservative exact-window C=4 config; similar runtime to R5 with lower
+  attention-output error.
 - `configs/token_merging_wan_fewstep.yaml`: one-token MonarchRT-style baseline.
 - `configs/token_merging_wan_hard_route_c2_fewstep.yaml`: hard-route C=2.
 - `configs/token_merging_wan_hard_route_c2_triton_fewstep.yaml`: hard-route C=2 with fused Triton KV compression.
