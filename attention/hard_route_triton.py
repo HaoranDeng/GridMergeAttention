@@ -631,107 +631,6 @@ if triton is not None:
             mask=(query_offsets[:, None] < Q_LEN) & (dim_offsets[None, :] < D_HEAD),
         )
 
-    @triton.jit
-    def _grid_temporal_biased_attention_kernel(
-        query_ptr,
-        key_ptr,
-        value_ptr,
-        bias_ptr,
-        out_ptr,
-        A_OUTER: tl.constexpr,
-        Q_ROWS: tl.constexpr,
-        J_COLS: tl.constexpr,
-        H_HEADS: tl.constexpr,
-        KEY_ROWS: tl.constexpr,
-        C_SEEDS: tl.constexpr,
-        D_HEAD: tl.constexpr,
-        RADIUS: tl.constexpr,
-        BLOCK_M: tl.constexpr,
-        BLOCK_N: tl.constexpr,
-        BLOCK_D: tl.constexpr,
-        SCORE_SCALE: tl.constexpr,
-    ):
-        group_id = tl.program_id(0)
-        query_outer = tl.program_id(1)
-
-        query_col = group_id % J_COLS
-        tmp = group_id // J_COLS
-        head = tmp % H_HEADS
-        batch = tmp // H_HEADS
-
-        query_rows = tl.arange(0, BLOCK_M)
-        local_offsets = tl.arange(0, BLOCK_N)
-        dim_offsets = tl.arange(0, BLOCK_D)
-        tokens_per_frame: tl.constexpr = KEY_ROWS * C_SEEDS
-        local_tokens: tl.constexpr = (2 * RADIUS + 1) * KEY_ROWS * C_SEEDS
-
-        query_base = query_ptr + batch * A_OUTER * Q_ROWS * J_COLS * H_HEADS * D_HEAD
-        key_base = key_ptr + group_id * (A_OUTER * KEY_ROWS * C_SEEDS) * D_HEAD
-        value_base = value_ptr + group_id * (A_OUTER * KEY_ROWS * C_SEEDS) * D_HEAD
-        bias_base = bias_ptr + group_id * (A_OUTER * KEY_ROWS * C_SEEDS)
-        out_base = out_ptr + batch * A_OUTER * Q_ROWS * J_COLS * H_HEADS * D_HEAD
-
-        q = tl.load(
-            query_base
-            + (((query_outer * Q_ROWS + query_rows[:, None]) * J_COLS + query_col)
-               * H_HEADS + head) * D_HEAD
-            + dim_offsets[None, :],
-            mask=(query_rows[:, None] < Q_ROWS) & (dim_offsets[None, :] < D_HEAD),
-            other=0.0,
-        )
-
-        max_score = tl.full((BLOCK_M,), -float("inf"), tl.float32)
-        normalizer = tl.zeros((BLOCK_M,), tl.float32)
-        acc = tl.zeros((BLOCK_M, BLOCK_D), tl.float32)
-
-        for local_start in range(0, local_tokens, BLOCK_N):
-            local_keys = local_start + local_offsets
-            frame_slot = local_keys // tokens_per_frame
-            frame_inner = local_keys - frame_slot * tokens_per_frame
-            key_frame = query_outer + frame_slot - RADIUS
-            route_token = key_frame * tokens_per_frame + frame_inner
-            valid_key = (local_keys < local_tokens) & (key_frame >= 0) & (key_frame < A_OUTER)
-            safe_route_token = tl.where(valid_key, route_token, 0)
-
-            k = tl.load(
-                key_base + safe_route_token[:, None] * D_HEAD + dim_offsets[None, :],
-                mask=valid_key[:, None] & (dim_offsets[None, :] < D_HEAD),
-                other=0.0,
-            )
-            v = tl.load(
-                value_base + safe_route_token[:, None] * D_HEAD + dim_offsets[None, :],
-                mask=valid_key[:, None] & (dim_offsets[None, :] < D_HEAD),
-                other=0.0,
-            )
-            bias = tl.load(bias_base + safe_route_token, mask=valid_key, other=float("inf"))
-
-            logits = tl.dot(q, tl.trans(k)) * SCORE_SCALE - bias[None, :]
-            logits = tl.where(
-                (query_rows[:, None] < Q_ROWS) & valid_key[None, :],
-                logits,
-                -float("inf"),
-            )
-
-            block_max = tl.max(logits, axis=1)
-            next_max = tl.maximum(max_score, block_max)
-            p = tl.exp(logits - next_max[:, None])
-            alpha = tl.exp(max_score - next_max)
-
-            acc = acc * alpha[:, None] + tl.dot(p.to(v.dtype), v)
-            normalizer = normalizer * alpha + tl.sum(p, axis=1)
-            max_score = next_max
-
-        out = acc / normalizer[:, None]
-        tl.store(
-            out_base
-            + (((query_outer * Q_ROWS + query_rows[:, None]) * J_COLS + query_col)
-               * H_HEADS + head) * D_HEAD
-            + dim_offsets[None, :],
-            out,
-            mask=(query_rows[:, None] < Q_ROWS) & (dim_offsets[None, :] < D_HEAD),
-        )
-
-
 def triton_biased_attention(query, key, value, bias, block_m=16, block_n=128, scale=1.0, num_stages=None):
     """Fused Triton attention for hard-route compressed KV routing.
 
@@ -857,82 +756,6 @@ def triton_grid_biased_attention(
         BLOCK_D=block_d,
         SCORE_SCALE=float(scale),
         USE_BIAS=bool(use_bias),
-        **meta,
-    )
-    return out
-
-
-def triton_grid_temporal_biased_attention(
-    query,
-    key,
-    value,
-    bias,
-    radius,
-    block_m=32,
-    block_n=32,
-    scale=1.0,
-    num_stages=1,
-):
-    """Temporal-local hard-route routing over route-layout compressed KV.
-
-    query: [B, query_outer, query_rows, query_columns, heads, dim]
-    key/value: [B * heads * query_columns, query_outer * query_rows * 4, dim]
-    bias: [B * heads * query_columns, query_outer * query_rows * 4]
-    """
-    if triton is None:
-        raise RuntimeError("hard_route_routing_backend='triton_grid_temporal_*' requires Triton.")
-    if not query.is_cuda:
-        raise RuntimeError("hard_route_routing_backend='triton_grid_temporal_*' requires CUDA/ROCm tensors.")
-    if query.dtype not in (torch.float16, torch.bfloat16):
-        raise RuntimeError("hard_route_routing_backend='triton_grid_temporal_*' requires fp16 or bf16 query tensors.")
-
-    query = query.contiguous()
-    key = key.contiguous()
-    value = value.contiguous()
-    bias = bias.contiguous()
-
-    batch, query_outer, query_rows, query_columns, heads, dim = query.shape
-    groups, key_len, key_dim = key.shape
-    expected_groups = batch * heads * query_columns
-    expected_key_len = query_outer * query_rows * 4
-    if groups != expected_groups or key_len != expected_key_len:
-        raise ValueError(
-            "temporal grid hard-route attention expects route-layout C=4 KV with "
-            f"shape [{expected_groups}, {expected_key_len}, dim], got {tuple(key.shape)}."
-        )
-    if key_dim != dim or value.shape != key.shape or bias.shape != (groups, key_len):
-        raise ValueError("query/key/value/bias shapes are inconsistent for temporal grid Triton routing.")
-
-    block_d = triton.next_power_of_2(dim)
-    if block_d > 128:
-        raise ValueError(f"Triton hard-route attention supports head dim <= 128, got {dim}.")
-    radius = int(radius)
-    if radius < 0:
-        raise ValueError(f"radius must be non-negative, got {radius}.")
-
-    out = torch.empty_like(query)
-    grid = (groups, query_outer)
-    meta = {"num_warps": 4}
-    if num_stages is not None:
-        meta["num_stages"] = int(num_stages)
-    _grid_temporal_biased_attention_kernel[grid](
-        query,
-        key,
-        value,
-        bias,
-        out,
-        A_OUTER=query_outer,
-        Q_ROWS=query_rows,
-        J_COLS=query_columns,
-        H_HEADS=heads,
-        KEY_ROWS=query_rows,
-        C_SEEDS=4,
-        D_HEAD=dim,
-        RADIUS=radius,
-        BLOCK_M=block_m,
-        BLOCK_N=block_n,
-        BLOCK_D=block_d,
-        SCORE_SCALE=float(scale),
         **meta,
     )
     return out
@@ -1282,7 +1105,6 @@ def triton_hard_route_shared_merge_c4_route_layout(
 __all__ = [
     "triton_biased_attention",
     "triton_grid_biased_attention",
-    "triton_grid_temporal_biased_attention",
     "triton_hard_route_merge",
     "triton_hard_route_merge_c4",
     "triton_hard_route_shared_merge_c4",

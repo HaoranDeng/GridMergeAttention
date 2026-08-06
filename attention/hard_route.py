@@ -10,7 +10,6 @@ from .common import (
 from .hard_route_triton import (
     triton_biased_attention,
     triton_grid_biased_attention,
-    triton_grid_temporal_biased_attention,
     triton_hard_route_merge,
     triton_hard_route_merge_c4,
 )
@@ -145,22 +144,9 @@ def hard_route_grid_compressed_attention(query, key, value, bias, backend, scale
             num_stages=1,
             use_bias=False,
         )
-    if backend == "triton_grid_temporal_r8_m32_n32_s1":
-        return triton_grid_temporal_biased_attention(
-            query,
-            key,
-            value,
-            bias,
-            radius=8,
-            block_m=32,
-            block_n=32,
-            scale=scale,
-            num_stages=1,
-        )
     raise ValueError(
         f"unsupported grid hard_route_routing_backend={backend!r}; expected "
-        "'triton_grid_m128_n32_s1', 'triton_grid_m128_n32_s1_nobias', "
-        "or 'triton_grid_temporal_r8_m32_n32_s1'."
+        "'triton_grid_m128_n32_s1' or 'triton_grid_m128_n32_s1_nobias'."
     )
 
 
