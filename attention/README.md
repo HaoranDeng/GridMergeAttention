@@ -84,6 +84,9 @@ deterministic hash instead of ranking every candidate query row.
 - `triton_c4_direct_route_j32_w2`: route-layout shared C=4 kernel using
   `block_j=32` and `num_warps=2`; fastest current merge backend for the
   default 480p C=4 setup.
+- `triton_c4_direct_route_j32_w2_nobias`: aggressive faster variant that skips
+  routing-bias computation and storage. This changes the approximation, so it
+  is kept as an explicit experiment rather than the default best path.
 - `triton_c4_direct_route_j64`: wider-tile version of the route-layout shared
   C=4 kernel; kept as a stable comparison point.
 
@@ -99,6 +102,8 @@ deterministic hash instead of ranking every candidate query row.
   It reads `[B, outer, row, col, head, dim]` query blocks and writes the same
   block layout directly, avoiding the flattened query/output copies. This is
   the fastest current routing backend for the default route-layout C=4 setup.
+- `triton_grid_m128_n32_s1_nobias`: matching aggressive routing backend for the
+  no-bias merge path. It skips loading/subtracting routing bias.
 
 The easiest experimental hook is `q_init` in `common.merge_query_row` and
 `common.merge_query_column`:
