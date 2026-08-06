@@ -7,7 +7,11 @@ from .common import (
     validate_block_seed_mode,
 )
 from .hard_route import hard_route_compressed_attention, hard_route_merge_weights
-from .hard_route_triton import triton_hard_route_merge, triton_hard_route_merge_c4
+from .hard_route_triton import (
+    triton_hard_route_merge,
+    triton_hard_route_merge_c4,
+    triton_hard_route_shared_merge_c4,
+)
 
 
 def shared_seed_rows(
@@ -80,6 +84,17 @@ def _merge(seed_queries, k, v, backend, scale):
     )
 
 
+def _merge_shared(q, seed_rows, k, v, backend, scale):
+    backend = (backend or "sdpa").lower()
+    if backend == "triton_c4_direct":
+        return triton_hard_route_shared_merge_c4(q, seed_rows, k, v, scale=scale)
+    if backend == "triton_c4_direct_j16":
+        return triton_hard_route_shared_merge_c4(q, seed_rows, k, v, scale=scale, block_j_target=16)
+
+    seed_queries = gather_shared_seed_queries(q, seed_rows)
+    return _merge(seed_queries, k, v, backend, scale)
+
+
 def hard_route_shared_attention(
     q,
     k,
@@ -116,9 +131,9 @@ def hard_route_shared_attention(
         include_ith=include_ith,
         fast_with_include=fast_with_include,
     )
-    seed_queries = gather_shared_seed_queries(q, seed_rows)
-    merged_keys, merged_values, routing_bias, cluster_has_keys = _merge(
-        seed_queries,
+    merged_keys, merged_values, routing_bias, cluster_has_keys = _merge_shared(
+        q,
+        seed_rows,
         k,
         v,
         hard_route_backend,
