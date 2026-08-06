@@ -22,6 +22,9 @@ def parse_args():
     parser.add_argument("--use_ema", action="store_true")
     parser.add_argument("--fps", type=int, default=16)
     parser.add_argument("--dtype", choices=["bf16", "fp16"], default="bf16")
+    parser.add_argument("--video_preset", default="ultrafast")
+    parser.add_argument("--video_crf", type=int, default=23)
+    parser.add_argument("--video_quality", type=int, default=None)
     parser.add_argument(
         "--vbench_filenames",
         action="store_true",
@@ -113,7 +116,14 @@ def main():
                 output_path = output_dir / f"{prompt}-{sample_idx}.mp4"
             else:
                 output_path = output_dir / f"{idx:03d}-{sample_idx:02d}.mp4"
-            save_video(str(output_path), video[sample_idx], fps=args.fps)
+            save_video(
+                str(output_path),
+                video[sample_idx],
+                fps=args.fps,
+                preset=args.video_preset,
+                crf=args.video_crf,
+                quality=args.video_quality,
+            )
             print(f"Saved {output_path}")
 
     print(f"Done. Generated {len(indexed_prompts) * args.num_samples} videos in {output_dir}.")
