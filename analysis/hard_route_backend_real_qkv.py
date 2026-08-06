@@ -194,6 +194,11 @@ def backend_variants(variant_set):
             "hard_route_routing_backend": "triton_grid_outer_exact_r4_m128_n64_s1_exp2",
             "seed_mode": "fast_random_with_ith",
         },
+        "outer_r4_exact_m64": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached",
+            "hard_route_routing_backend": "triton_grid_outer_exact_r4_m64_n64_s1_exp2",
+            "seed_mode": "fast_random_with_ith",
+        },
         "outer_r4_n64_j64_w2": {
             "hard_route_backend": "triton_c4_direct_route_j64_w2_forcekeys_exp2merge_cached",
             "hard_route_routing_backend": "triton_grid_outer_local_r4_m128_n64_s1_exp2",
@@ -232,6 +237,11 @@ def backend_variants(variant_set):
         "outer_r5_exact": {
             "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached",
             "hard_route_routing_backend": "triton_grid_outer_exact_r5_m128_n64_s1_exp2",
+            "seed_mode": "fast_random_with_ith",
+        },
+        "outer_r5_exact_m64": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached",
+            "hard_route_routing_backend": "triton_grid_outer_exact_r5_m64_n64_s1_exp2",
             "seed_mode": "fast_random_with_ith",
         },
         "outer_r5_exact_bf16bias": {
@@ -287,6 +297,11 @@ def backend_variants(variant_set):
         "outer_r6_exact": {
             "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached",
             "hard_route_routing_backend": "triton_grid_outer_exact_r6_m128_n64_s1_exp2",
+            "seed_mode": "fast_random_with_ith",
+        },
+        "outer_r6_exact_m64": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached",
+            "hard_route_routing_backend": "triton_grid_outer_exact_r6_m64_n64_s1_exp2",
             "seed_mode": "fast_random_with_ith",
         },
         "outer_r6_exact_bf16bias": {
