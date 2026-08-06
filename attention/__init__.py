@@ -8,6 +8,7 @@ from .hard_route_transpose import hard_route_attention_transpose
 from .hard_route_triton import (
     triton_biased_attention,
     triton_grid_biased_attention,
+    triton_grid_outer_exact_local_biased_attention,
     triton_grid_outer_local_biased_attention,
     triton_hard_route_merge,
     triton_hard_route_shared_merge_c4,
@@ -28,6 +29,7 @@ __all__ = [
     "hard_route_attention_transpose",
     "triton_biased_attention",
     "triton_grid_biased_attention",
+    "triton_grid_outer_exact_local_biased_attention",
     "triton_grid_outer_local_biased_attention",
     "triton_hard_route_merge",
     "triton_hard_route_shared_merge_c4",
