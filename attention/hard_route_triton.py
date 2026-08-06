@@ -693,6 +693,7 @@ if triton is not None:
         BLOCK_N: tl.constexpr,
         BLOCK_D: tl.constexpr,
         SCORE_SCALE: tl.constexpr,
+        USE_BIAS: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_block_id = tl.program_id(1)
@@ -744,8 +745,10 @@ if triton is not None:
                 mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
                 other=0.0,
             )
-            bias = tl.load(bias_base + keys, mask=keys < K_LEN, other=float("inf"))
-            logits = tl.dot(q, tl.trans(k)) * SCORE_SCALE - bias[None, :]
+            logits = tl.dot(q, tl.trans(k)) * SCORE_SCALE
+            if USE_BIAS:
+                bias = tl.load(bias_base + keys, mask=keys < K_LEN, other=float("inf"))
+                logits = logits - bias[None, :]
             logits = tl.where(valid, logits, -float("inf"))
 
             has_block = tl.max(tl.where(valid, 1, 0), axis=1) > 0
@@ -914,6 +917,7 @@ def triton_grid_outer_local_biased_attention(
     block_m=128,
     block_n=32,
     scale=1.0,
+    use_bias=True,
 ):
     """Grid routing over a local union of key outers for each query block.
 
@@ -932,7 +936,10 @@ def triton_grid_outer_local_biased_attention(
     query = query.contiguous()
     key = key.contiguous()
     value = value.contiguous()
-    bias = bias.contiguous()
+    if use_bias:
+        bias = bias.contiguous()
+    else:
+        bias = torch.empty((1,), device=query.device, dtype=torch.float32)
 
     batch, query_outer, query_rows, query_columns, heads, dim = query.shape
     groups, key_len, key_dim = key.shape
@@ -942,7 +949,8 @@ def triton_grid_outer_local_biased_attention(
             "outer-local grid routing expects route-layout KV with "
             f"{expected_groups} groups, got {groups}."
         )
-    if key_dim != dim or value.shape != key.shape or bias.shape != (groups, key_len):
+    bias_shape_ok = (not use_bias) or bias.shape == (groups, key_len)
+    if key_dim != dim or value.shape != key.shape or not bias_shape_ok:
         raise ValueError("query/key/value/bias shapes are inconsistent for outer-local grid routing.")
     if key_len % query_outer:
         raise ValueError("outer-local grid routing expects compressed tokens grouped evenly by key outer.")
@@ -982,6 +990,7 @@ def triton_grid_outer_local_biased_attention(
         BLOCK_N=block_n,
         BLOCK_D=block_d,
         SCORE_SCALE=float(scale),
+        USE_BIAS=bool(use_bias),
         num_warps=4,
         num_stages=1,
     )

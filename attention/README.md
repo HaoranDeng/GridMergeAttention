@@ -97,6 +97,10 @@ deterministic hash instead of ranking every candidate query row.
   backend above, but reuses no-grad intermediate K/V/bias workspace tensors to
   reduce allocator overhead during inference. Outputs should match the
   non-cached backend exactly.
+- `triton_c4_direct_route_j32_w2_forcekeys_exp2merge_nobias_cached`: same
+  force-key/base-2/cached merge path, but skips routing-bias allocation and
+  storage. Use only with a `*_nobias` routing backend; this changes the
+  approximation.
 - `triton_c4_direct_route_j32_w2_nobias`: aggressive faster variant that skips
   routing-bias computation and storage. This changes the approximation, so it
   is kept as an explicit experiment rather than the default best path.
@@ -119,13 +123,17 @@ deterministic hash instead of ranking every candidate query row.
   computes softmax with base-2 exponentials. On MI300X this preserves the
   measured bf16 output while reducing routing latency. This is the fastest
   measured low-error C=4 routing backend on MI300X.
-- `triton_grid_outer_local_r4_m128_n32_s1_exp2` /
+- `triton_grid_outer_local_r2_m128_n32_s1_exp2` through
   `triton_grid_outer_local_r6_m128_n32_s1_exp2`: experimental faster C=4
   routing backends. They keep the C4 compressed K/V tokens unchanged, but each
-  query block routes only to a local union window of key outers. `r4` is faster
-  with higher error; `r6` is more conservative.
+  query block routes only to a local union window of key outers. Smaller
+  radii are faster and more approximate; larger radii are more conservative.
+- `triton_grid_outer_local_r4_m128_n64_s1_exp2`: same `r4` local-window rule,
+  but uses wider key tiles for routing-kernel tuning.
 - `triton_grid_m128_n32_s1_nobias`: matching aggressive routing backend for the
   no-bias merge path. It skips loading/subtracting routing bias.
+- `triton_grid_outer_local_r4_m128_n32_s1_exp2_nobias`: no-bias variant of the
+  `r4` local-window routing path.
 
 The easiest experimental hook is `q_init` in `common.merge_query_row` and
 `common.merge_query_column`:

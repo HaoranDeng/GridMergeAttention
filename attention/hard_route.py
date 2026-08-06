@@ -157,6 +157,53 @@ def hard_route_grid_compressed_attention(query, key, value, bias, backend, scale
             num_stages=1,
             use_exp2=True,
         )
+    if backend == "triton_grid_m128_n64_s1_exp2":
+        return triton_grid_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=128,
+            block_n=64,
+            scale=scale,
+            num_stages=1,
+            use_exp2=True,
+        )
+    if backend == "triton_grid_m128_n32_s1_exp2_nobias":
+        return triton_grid_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=128,
+            block_n=32,
+            scale=scale,
+            num_stages=1,
+            use_bias=False,
+            use_exp2=True,
+        )
+    if backend == "triton_grid_outer_local_r2_m128_n32_s1_exp2":
+        return triton_grid_outer_local_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            local_radius=2,
+            block_m=128,
+            block_n=32,
+            scale=scale,
+        )
+    if backend == "triton_grid_outer_local_r3_m128_n32_s1_exp2":
+        return triton_grid_outer_local_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            local_radius=3,
+            block_m=128,
+            block_n=32,
+            scale=scale,
+        )
     if backend == "triton_grid_outer_local_r4_m128_n32_s1_exp2":
         return triton_grid_outer_local_biased_attention(
             query,
@@ -164,6 +211,40 @@ def hard_route_grid_compressed_attention(query, key, value, bias, backend, scale
             value,
             bias,
             local_radius=4,
+            block_m=128,
+            block_n=32,
+            scale=scale,
+        )
+    if backend == "triton_grid_outer_local_r4_m128_n64_s1_exp2":
+        return triton_grid_outer_local_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            local_radius=4,
+            block_m=128,
+            block_n=64,
+            scale=scale,
+        )
+    if backend == "triton_grid_outer_local_r4_m128_n32_s1_exp2_nobias":
+        return triton_grid_outer_local_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            local_radius=4,
+            block_m=128,
+            block_n=32,
+            scale=scale,
+            use_bias=False,
+        )
+    if backend == "triton_grid_outer_local_r5_m128_n32_s1_exp2":
+        return triton_grid_outer_local_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            local_radius=5,
             block_m=128,
             block_n=32,
             scale=scale,
@@ -182,8 +263,11 @@ def hard_route_grid_compressed_attention(query, key, value, bias, backend, scale
     raise ValueError(
         f"unsupported grid hard_route_routing_backend={backend!r}; expected "
         "'triton_grid_m128_n32_s1', 'triton_grid_m128_n32_s1_nobias', "
-        "'triton_grid_m128_n32_s1_exp2', "
-        "'triton_grid_outer_local_r4_m128_n32_s1_exp2', "
+        "'triton_grid_m128_n32_s1_exp2', 'triton_grid_m128_n64_s1_exp2', "
+        "'triton_grid_m128_n32_s1_exp2_nobias', "
+        "'triton_grid_outer_local_r{2,3,4,5,6}_m128_n32_s1_exp2', "
+        "'triton_grid_outer_local_r4_m128_n64_s1_exp2', "
+        "'triton_grid_outer_local_r4_m128_n32_s1_exp2_nobias', "
         "or 'triton_grid_outer_local_r6_m128_n32_s1_exp2'."
     )
 

@@ -1,3 +1,4 @@
+import torch
 from einops import rearrange
 
 from .common import random_seed_rows, validate_block_seed_mode
