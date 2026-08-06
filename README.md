@@ -143,6 +143,11 @@ Useful configs:
 - `configs/token_merging_wan_hard_route_c4_fastseed_outer_exact_r5_fewstep.yaml`:
   balanced exact-window C=4 shared hard-route config. It is slightly slower
   than R4 but lower-error, about 2.83 ms/call with rel-L2 0.256.
+- `configs/token_merging_wan_hard_route_c4_fastseed_outer_exact_r3first_r4second_fewstep.yaml`:
+  experimental layer-policy config. The first half of self-attention layers use
+  exact R3 routing and the second half use exact R4 routing. In the real-QKV
+  layer-policy probe, this was faster than all-R4 with a small output-error
+  increase.
 - `configs/token_merging_wan_hard_route_c4_fastseed_outer_exact_r3_fewstep.yaml`:
   more aggressive exact-window C=4 config; faster than R4/R5 but higher-error.
 - `configs/token_merging_wan_hard_route_c4_fastseed_outer_exact_r6_fewstep.yaml`:

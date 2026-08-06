@@ -169,6 +169,11 @@ deterministic hash instead of ranking every candidate query row.
 
   R4 is the current faster speed/quality tradeoff; R5 is the more conservative
   balanced point.
+- `hard_route_routing_backend_policy: r3_first_half_r4_second_half`: optional
+  layer policy for C=4 shared hard-route configs. It keeps the configured
+  routing backend as the default fallback, but uses exact R3 routing for the
+  first half of self-attention layers and exact R4 routing for the second half.
+  This is an explicit speed/quality tradeoff hook, not the default behavior.
 - `triton_grid_outer_exact_r5_m128_n128_s1_exp2`,
   `triton_grid_outer_exact_r5_m256_n64_s1_exp2`,
   `triton_grid_outer_exact_r5_m256_n128_s1_exp2`, and the corresponding R6

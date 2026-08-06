@@ -43,6 +43,25 @@ def maybe_save_first_attention_qkv(q, k, v, tag):
         raise SystemExit(0)
 
 
+def resolve_hard_route_routing_backend_policy(default_backend, policy, layer_idx, num_layers):
+    policy = (policy or "").lower()
+    if not policy:
+        return default_backend
+
+    r3 = "triton_grid_outer_exact_r3_m128_n64_s1_exp2"
+    r4 = "triton_grid_outer_exact_r4_m128_n64_s1_exp2"
+    if policy == "r3_first_half_r4_second_half":
+        return r3 if int(layer_idx) < int(num_layers) // 2 else r4
+    if policy == "r4_first_half_r3_second_half":
+        return r4 if int(layer_idx) < int(num_layers) // 2 else r3
+    if policy == "r3_even_r4_odd":
+        return r3 if int(layer_idx) % 2 == 0 else r4
+    if policy == "r4_even_r3_odd":
+        return r4 if int(layer_idx) % 2 == 0 else r3
+
+    raise ValueError(f"unsupported hard_route_routing_backend_policy={policy!r}")
+
+
 def sinusoidal_embedding_1d(dim, position):
     # preprocess
     assert dim % 2 == 0
@@ -245,6 +264,9 @@ class WanSelfAttention(nn.Module):
         self.token_merging_seed = 0
         self.token_merging_hard_route_backend = "sdpa"
         self.token_merging_hard_route_routing_backend = "sdpa"
+        self.token_merging_hard_route_routing_backend_policy = None
+        self.token_merging_layer_idx = 0
+        self.token_merging_num_layers = 1
 
         # layers
         self.q = nn.Linear(dim, dim)
@@ -284,6 +306,12 @@ class WanSelfAttention(nn.Module):
             f, h, w = grid_size
             b, s, _, d = q.shape
             assert f % self.token_merging_f_tied == 0 and h % self.token_merging_h_reduce == 0 and w % self.token_merging_w_reduce == 0
+            hard_route_routing_backend = resolve_hard_route_routing_backend_policy(
+                self.token_merging_hard_route_routing_backend,
+                self.token_merging_hard_route_routing_backend_policy,
+                self.token_merging_layer_idx,
+                self.token_merging_num_layers,
+            )
             x = token_merging_attn(
                 roped_query,
                 roped_key,
@@ -300,7 +328,7 @@ class WanSelfAttention(nn.Module):
                 seed_mode=self.token_merging_seed_mode,
                 seed=self.token_merging_seed,
                 hard_route_backend=self.token_merging_hard_route_backend,
-                hard_route_routing_backend=self.token_merging_hard_route_routing_backend,
+                hard_route_routing_backend=hard_route_routing_backend,
             )
         else:
             x = flash_attention(
@@ -791,8 +819,10 @@ class WanModel(ModelMixin, ConfigMixin):
         seed = args.get("seed", 0)
         hard_route_backend = args.get("hard_route_backend", "sdpa")
         hard_route_routing_backend = args.get("hard_route_routing_backend", "sdpa")
+        hard_route_routing_backend_policy = args.get("hard_route_routing_backend_policy", None)
 
-        for block in self.blocks:
+        num_layers = len(self.blocks)
+        for idx, block in enumerate(self.blocks):
             block.self_attn.enable_token_merging = enable
             block.self_attn.token_merging_f_tied = f_tied
             block.self_attn.token_merging_h_reduce = h_reduce
@@ -805,6 +835,9 @@ class WanModel(ModelMixin, ConfigMixin):
             block.self_attn.token_merging_seed = seed
             block.self_attn.token_merging_hard_route_backend = hard_route_backend
             block.self_attn.token_merging_hard_route_routing_backend = hard_route_routing_backend
+            block.self_attn.token_merging_hard_route_routing_backend_policy = hard_route_routing_backend_policy
+            block.self_attn.token_merging_layer_idx = idx
+            block.self_attn.token_merging_num_layers = num_layers
 
     def _set_gradient_checkpointing(self, module, value=False):
         self.gradient_checkpointing = value
