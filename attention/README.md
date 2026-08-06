@@ -128,8 +128,9 @@ deterministic hash instead of ranking every candidate query row.
   routing backends. They keep the C4 compressed K/V tokens unchanged, but each
   query block routes only to a local union window of key outers. Smaller
   radii are faster and more approximate; larger radii are more conservative.
-- `triton_grid_outer_local_r4_m128_n64_s1_exp2`: same `r4` local-window rule,
-  but uses wider key tiles for routing-kernel tuning.
+- `triton_grid_outer_local_r2_m128_n64_s1_exp2` through
+  `triton_grid_outer_local_r6_m128_n64_s1_exp2`: same local-window rules, but
+  use wider key tiles for routing-kernel tuning.
 - `triton_grid_m128_n32_s1_nobias`: matching aggressive routing backend for the
   no-bias merge path. It skips loading/subtracting routing bias.
 - `triton_grid_outer_local_r4_m128_n32_s1_exp2_nobias`: no-bias variant of the

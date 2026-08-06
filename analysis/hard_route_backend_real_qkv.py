@@ -129,9 +129,19 @@ def backend_variants(variant_set):
             "hard_route_routing_backend": "triton_grid_outer_local_r2_m128_n32_s1_exp2",
             "seed_mode": "fast_random_with_ith",
         },
+        "outer_r2_n64": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached",
+            "hard_route_routing_backend": "triton_grid_outer_local_r2_m128_n64_s1_exp2",
+            "seed_mode": "fast_random_with_ith",
+        },
         "outer_r3": {
             "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached",
             "hard_route_routing_backend": "triton_grid_outer_local_r3_m128_n32_s1_exp2",
+            "seed_mode": "fast_random_with_ith",
+        },
+        "outer_r3_n64": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached",
+            "hard_route_routing_backend": "triton_grid_outer_local_r3_m128_n64_s1_exp2",
             "seed_mode": "fast_random_with_ith",
         },
         "outer_r4": {
@@ -149,9 +159,19 @@ def backend_variants(variant_set):
             "hard_route_routing_backend": "triton_grid_outer_local_r5_m128_n32_s1_exp2",
             "seed_mode": "fast_random_with_ith",
         },
+        "outer_r5_n64": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached",
+            "hard_route_routing_backend": "triton_grid_outer_local_r5_m128_n64_s1_exp2",
+            "seed_mode": "fast_random_with_ith",
+        },
         "outer_r6": {
             "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached",
             "hard_route_routing_backend": "triton_grid_outer_local_r6_m128_n32_s1_exp2",
+            "seed_mode": "fast_random_with_ith",
+        },
+        "outer_r6_n64": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached",
+            "hard_route_routing_backend": "triton_grid_outer_local_r6_m128_n64_s1_exp2",
             "seed_mode": "fast_random_with_ith",
         },
         "nobias_full_c4": {
