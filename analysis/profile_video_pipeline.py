@@ -230,19 +230,17 @@ def run_one_video(pipeline, config, prompt, seed, dtype, fps, output_path, timer
     denoise_steps = int(len(pipeline.denoising_step_list) - 1)
 
     with ctx("pipeline.denoise_loop_total"):
-        for index, current_timestep in enumerate(pipeline.denoising_step_list[:-1]):
+        timesteps = pipeline.denoising_step_list.to(device=noise.device)
+        timestep_shape = noise.shape[:2]
+        for index, current_timestep in enumerate(timesteps[:-1]):
             pipeline.generator.model.set_token_merging_denoise_step(index, denoise_steps)
             with ctx("pipeline.generator_forward_total"):
                 _, pred_image_or_video = pipeline.generator(
                     noisy_image_or_video=noisy_image_or_video,
                     conditional_dict=conditional_dict,
-                    timestep=torch.ones(noise.shape[:2], dtype=torch.long, device=noise.device) * current_timestep,
+                    timestep=current_timestep.expand(timestep_shape),
                 )
-            next_timestep = pipeline.denoising_step_list[index + 1] * torch.ones(
-                noise.shape[:2],
-                dtype=torch.long,
-                device=noise.device,
-            )
+            next_timestep = timesteps[index + 1].expand(timestep_shape)
             with ctx("pipeline.scheduler_add_noise"):
                 noisy_image_or_video = pipeline.scheduler.add_noise(
                     pred_image_or_video.flatten(0, 1),
@@ -255,16 +253,15 @@ def run_one_video(pipeline, config, prompt, seed, dtype, fps, output_path, timer
 
     with ctx("pipeline.vae_decode"):
         video = pipeline.vae.decoder(pred_image_or_video)
-        video = (video * 0.5 + 0.5).clamp(0, 1)
+        video.mul_(0.5).add_(0.5).clamp_(0, 1)
 
     with ctx("pipeline.postprocess_cpu_transfer"):
-        video_cpu = (255.0 * video.permute(0, 1, 3, 4, 2)).clamp_(0, 255).to(torch.uint8).cpu()
+        video_cpu = video.permute(0, 1, 3, 4, 2).mul_(255.0).clamp_(0, 255).to(torch.uint8).cpu()
 
     if output_path is not None:
         with ctx("pipeline.save_video"):
             save_video(str(output_path), video_cpu[0], fps=fps)
 
-    pipeline.vae.model.clear_cache()
     return {"denoise_steps": denoise_steps, "output_path": str(output_path) if output_path else None}
 
 
