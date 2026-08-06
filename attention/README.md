@@ -142,6 +142,10 @@ deterministic hash instead of ranking every candidate query row.
 - `triton_grid_outer_local_r2_m128_n64_s1_exp2` through
   `triton_grid_outer_local_r6_m128_n64_s1_exp2`: same local-window rules, but
   use wider key tiles for routing-kernel tuning.
+- `triton_grid_outer_local_r3_m64_n64_s1_exp2` through
+  `triton_grid_outer_local_r6_m64_n64_s1_exp2`: smaller query tiles for the
+  local-window rule. They reduce the number of key outers read per routing
+  tile but launch more tiles.
 - `triton_grid_m128_n32_s1_nobias`: matching aggressive routing backend for the
   no-bias merge path. It skips loading/subtracting routing bias.
 - `triton_grid_outer_local_r4_m128_n32_s1_exp2_nobias`: no-bias variant of the
