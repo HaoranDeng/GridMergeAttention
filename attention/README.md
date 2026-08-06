@@ -79,11 +79,17 @@ deterministic hash instead of ranking every candidate query row.
   same SDPA routing path.
 - `triton_c4`: C=4-only Triton kernel that reuses seed-key dot products between
   hard assignment and KV merge.
+- `triton_c4_direct_route_j16`: shared C=4 kernel that writes compressed K/V
+  directly in routing layout.
+- `triton_c4_direct_route_j64`: wider-tile version of the route-layout shared
+  C=4 kernel; fastest current merge backend for the default 480p C=4 setup.
 
 `hard_route_routing_backend` controls the second compressed-attention step:
 
 - `sdpa`: PyTorch SDPA with the routing bias.
 - `triton`: fused Triton routing kernel for `q @ K_merged - bias`.
+- `triton_m128_n32` / `triton_m256_n32`: faster fused routing kernels for the
+  shared C=4 compressed attention path.
 
 The easiest experimental hook is `q_init` in `common.merge_query_row` and
 `common.merge_query_column`:
