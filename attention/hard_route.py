@@ -372,6 +372,19 @@ def hard_route_grid_compressed_attention(query, key, value, bias, backend, scale
             scale=scale,
             num_warps=2,
         )
+    if backend == "triton_grid_outer_exact_r5_m128_n64_w2_s2_exp2":
+        return triton_grid_outer_exact_local_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            local_radius=5,
+            block_m=128,
+            block_n=64,
+            scale=scale,
+            num_warps=2,
+            num_stages=2,
+        )
     if backend == "triton_grid_outer_exact_r5_m128_n64_w8_s1_exp2":
         return triton_grid_outer_exact_local_biased_attention(
             query,
@@ -395,6 +408,30 @@ def hard_route_grid_compressed_attention(query, key, value, bias, backend, scale
             block_n=64,
             scale=scale,
             num_stages=2,
+        )
+    if backend == "triton_grid_outer_exact_r5_m128_n64_w4_s3_exp2":
+        return triton_grid_outer_exact_local_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            local_radius=5,
+            block_m=128,
+            block_n=64,
+            scale=scale,
+            num_stages=3,
+        )
+    if backend == "triton_grid_outer_exact_r5_m128_n64_w4_s4_exp2":
+        return triton_grid_outer_exact_local_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            local_radius=5,
+            block_m=128,
+            block_n=64,
+            scale=scale,
+            num_stages=4,
         )
     if backend == "triton_grid_outer_exact_r5_m64_n64_s1_exp2":
         return triton_grid_outer_exact_local_biased_attention(
@@ -531,7 +568,8 @@ def hard_route_grid_compressed_attention(query, key, value, bias, backend, scale
         "'triton_grid_outer_exact_r{5,6}_m256_n64_s1_exp2', "
         "'triton_grid_outer_exact_r5_m256_n128_s1_exp2', "
         "'triton_grid_outer_exact_r5_m128_n64_w{2,8}_s1_exp2', "
-        "'triton_grid_outer_exact_r5_m128_n64_w4_s2_exp2', "
+        "'triton_grid_outer_exact_r5_m128_n64_w2_s2_exp2', "
+        "'triton_grid_outer_exact_r5_m128_n64_w4_s{2,3,4}_exp2', "
         "'triton_grid_outer_local_r4_m128_n32_s1_exp2_nobias', "
         "or 'triton_grid_outer_local_r6_m128_n32_s1_exp2'."
     )

@@ -167,7 +167,10 @@ deterministic hash instead of ranking every candidate query row.
   for the exact-window backend.
 - `triton_grid_outer_exact_r5_m128_n64_w2_s1_exp2`,
   `triton_grid_outer_exact_r5_m128_n64_w8_s1_exp2`, and
-  `triton_grid_outer_exact_r5_m128_n64_w4_s2_exp2`: launch-parameter tuning
+  `triton_grid_outer_exact_r5_m128_n64_w2_s2_exp2`: warp-count tuning hooks
+  for the current R5 exact-window backend.
+- `triton_grid_outer_exact_r5_m128_n64_w4_s2_exp2` through
+  `triton_grid_outer_exact_r5_m128_n64_w4_s4_exp2`: pipeline-stage tuning
   hooks for the current R5 exact-window backend.
 - `triton_grid_m128_n32_s1_nobias`: matching aggressive routing backend for the
   no-bias merge path. It skips loading/subtracting routing bias.
