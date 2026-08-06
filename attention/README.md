@@ -112,6 +112,10 @@ deterministic hash instead of ranking every candidate query row.
   softmax normalizer as a cheap entropy proxy; `countbias` uses only the routed
   cluster size. Both change the approximation and are kept as explicit tuning
   hooks.
+- `triton_c4_direct_route_j32_w2_forcekeys_exp2merge_bf16bias_cached`: same
+  exact routing-bias math as the cached force-key/base-2 backend, but stores
+  the intermediate routing bias in the K/V dtype to reduce routing-bias memory
+  traffic.
 - `triton_c4_direct_route_j32_w2_nobias`: aggressive faster variant that skips
   routing-bias computation and storage. This changes the approximation, so it
   is kept as an explicit experiment rather than the default best path.

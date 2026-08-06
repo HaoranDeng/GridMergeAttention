@@ -1457,6 +1457,7 @@ def triton_hard_route_shared_merge_c4_route_layout(
     num_warps=4,
     write_bias=True,
     bias_mode="exact",
+    bias_dtype=None,
     force_seed_keys=False,
     use_exp2=False,
     workspace_cache=False,
@@ -1500,6 +1501,7 @@ def triton_hard_route_shared_merge_c4_route_layout(
     bias_mode_id = {"exact": 0, "maxprob": 1, "count": 2}.get(bias_mode)
     if bias_mode_id is None:
         raise ValueError(f"unsupported hard-route routing bias mode: {bias_mode!r}.")
+    bias_dtype = bias_dtype or torch.float32
 
     route_groups = batch * heads * query_columns
     route_tokens = query_outer * key_rows * 4
@@ -1520,10 +1522,10 @@ def triton_hard_route_shared_merge_c4_route_layout(
             routing_bias = torch.empty(
                 (route_groups, route_tokens),
                 device=key.device,
-                dtype=torch.float32,
+                dtype=bias_dtype,
             )
         else:
-            routing_bias = alloc("shared_c4_route_bias", (route_groups, route_tokens), key.device, torch.float32)
+            routing_bias = alloc("shared_c4_route_bias", (route_groups, route_tokens), key.device, bias_dtype)
     routing_bias_arg = routing_bias
     if routing_bias_arg is None:
         routing_bias_arg = torch.empty((1,), device=key.device, dtype=torch.float32)
