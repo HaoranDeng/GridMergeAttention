@@ -567,6 +567,7 @@ if triton is not None:
         BLOCK_D: tl.constexpr,
         SCORE_SCALE: tl.constexpr,
         USE_BIAS: tl.constexpr,
+        USE_EXP2: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_block_id = tl.program_id(1)
@@ -625,8 +626,12 @@ if triton is not None:
 
             block_max = tl.max(logits, axis=1)
             next_max = tl.maximum(max_score, block_max)
-            p = tl.exp(logits - next_max[:, None])
-            alpha = tl.exp(max_score - next_max)
+            if USE_EXP2:
+                p = tl.exp2((logits - next_max[:, None]) * 1.4426950408889634)
+                alpha = tl.exp2((max_score - next_max) * 1.4426950408889634)
+            else:
+                p = tl.exp(logits - next_max[:, None])
+                alpha = tl.exp(max_score - next_max)
 
             acc = acc * alpha[:, None] + tl.dot(p.to(v.dtype), v)
             normalizer = normalizer * alpha + tl.sum(p, axis=1)
@@ -705,6 +710,7 @@ def triton_grid_biased_attention(
     scale=1.0,
     num_stages=1,
     use_bias=True,
+    use_exp2=False,
 ):
     """Fused hard-route routing that reads/writes query block layout directly.
 
@@ -767,6 +773,7 @@ def triton_grid_biased_attention(
         BLOCK_D=block_d,
         SCORE_SCALE=float(scale),
         USE_BIAS=bool(use_bias),
+        USE_EXP2=bool(use_exp2),
         **meta,
     )
     return out
