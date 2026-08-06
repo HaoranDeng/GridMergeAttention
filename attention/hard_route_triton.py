@@ -317,7 +317,6 @@ if triton is not None:
         SCORE_SCALE: tl.constexpr,
         ROUTE_LAYOUT: tl.constexpr,
         WRITE_BIAS: tl.constexpr,
-        FAST_DOT: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -377,16 +376,10 @@ if triton is not None:
             other=0.0,
         )
 
-        if FAST_DOT:
-            logits0 = tl.dot(seed0, tl.trans(key_block)) * SCORE_SCALE
-            logits1 = tl.dot(seed1, tl.trans(key_block)) * SCORE_SCALE
-            logits2 = tl.dot(seed2, tl.trans(key_block)) * SCORE_SCALE
-            logits3 = tl.dot(seed3, tl.trans(key_block)) * SCORE_SCALE
-        else:
-            logits0 = tl.dot(seed0, tl.trans(key_block), input_precision="ieee") * SCORE_SCALE
-            logits1 = tl.dot(seed1, tl.trans(key_block), input_precision="ieee") * SCORE_SCALE
-            logits2 = tl.dot(seed2, tl.trans(key_block), input_precision="ieee") * SCORE_SCALE
-            logits3 = tl.dot(seed3, tl.trans(key_block), input_precision="ieee") * SCORE_SCALE
+        logits0 = tl.dot(seed0, tl.trans(key_block), input_precision="ieee") * SCORE_SCALE
+        logits1 = tl.dot(seed1, tl.trans(key_block), input_precision="ieee") * SCORE_SCALE
+        logits2 = tl.dot(seed2, tl.trans(key_block), input_precision="ieee") * SCORE_SCALE
+        logits3 = tl.dot(seed3, tl.trans(key_block), input_precision="ieee") * SCORE_SCALE
         valid_logits = valid_query[:, None] & valid_key[None, :]
         logits0 = tl.where(valid_logits, logits0, -float("inf"))
         logits1 = tl.where(valid_logits, logits1, -float("inf"))
@@ -1009,7 +1002,6 @@ def triton_hard_route_shared_merge_c4(query, seed_rows, key, value, scale=1.0, b
         SCORE_SCALE=float(scale),
         ROUTE_LAYOUT=False,
         WRITE_BIAS=True,
-        FAST_DOT=False,
         num_warps=4,
     )
     return merged_key, merged_value, routing_bias, None
@@ -1024,7 +1016,6 @@ def triton_hard_route_shared_merge_c4_route_layout(
     block_j_target=16,
     num_warps=4,
     write_bias=True,
-    fast_dot=False,
 ):
     """C=4 shared hard-route merge with routing-ready K/V/bias layout.
 
@@ -1106,7 +1097,6 @@ def triton_hard_route_shared_merge_c4_route_layout(
         SCORE_SCALE=float(scale),
         ROUTE_LAYOUT=True,
         WRITE_BIAS=bool(write_bias),
-        FAST_DOT=bool(fast_dot),
         num_warps=int(num_warps),
     )
     return merged_key, merged_value, routing_bias, None
