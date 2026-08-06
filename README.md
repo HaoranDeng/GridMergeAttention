@@ -132,6 +132,10 @@ Useful configs:
 - `configs/token_merging_wan_hard_route_c4_best_fewstep.yaml`: current
   fastest measured low-error C=4 config, using force-key exp2 merge and direct
   grid-query exp2 routing.
+- `configs/token_merging_wan_hard_route_c4_best_fastseed_fewstep.yaml`: same
+  C=4 backend as `c4_best`, but uses lightweight deterministic seed selection.
+  This is the fastest measured low-error C=4 config in the latest MI300X
+  real-QKV probe.
 - `configs/token_merging_wan_fewstep.yaml`: one-token MonarchRT-style baseline.
 - `configs/token_merging_wan_hard_route_c2_fewstep.yaml`: hard-route C=2.
 - `configs/token_merging_wan_hard_route_c2_triton_fewstep.yaml`: hard-route C=2 with fused Triton KV compression.
