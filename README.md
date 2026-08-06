@@ -100,6 +100,10 @@ indices without recomputing them.
 - `triton_c4_direct_route_j32_w2_forcekeys_exp2merge`: same force-key variant,
   with the merge softmax computed using base-2 exponentials. This is the
   current fastest measured low-error C=4 merge backend on MI300X.
+- `triton_c4_direct_route_j32_w2_forcekeys_exp2merge_bf16bias_cached`: same
+  C=4 merge path, but stores routing bias in bf16. In the real-QKV probe this
+  kept nearly identical output error while shaving a small amount of attention
+  time.
 - `triton_c4_direct_route_j32_w2_nobias`: aggressive `j32_w2` variant that
   skips routing-bias computation and storage. It is faster, but changes the
   approximation and is not the default best path.
@@ -127,6 +131,11 @@ step:
 - `triton_m256_n32`: fused Triton routing kernel using `block_m=256` and
   `block_n=32`; kept as a stable comparison point.
 
+`hard_route_routing_backend_policy` can switch routing radius by denoise step.
+For example, `r3_first_step_r4_rest` uses exact R3 routing for the first
+denoise step and exact R4 routing afterwards. This is a small speed/quality
+tradeoff for C=4 shared hard-route.
+
 Useful configs:
 
 - `configs/token_merging_wan_hard_route_c4_best_fewstep.yaml`: current
@@ -140,6 +149,11 @@ Useful configs:
   faster exact-window C=4 shared hard-route config. In the 90-call MI300X
   component profile it used about 2.60 ms/token-merging attention call with
   rel-L2 0.265 against dense attention output.
+- `configs/token_merging_wan_hard_route_c4_fastseed_bf16bias_r3firststep_r4rest_fewstep.yaml`:
+  faster C=4 shared hard-route candidate. It combines bf16 routing-bias storage
+  with R3 routing on the first denoise step and R4 for the rest. In the latest
+  90-call MI300X real-QKV probe it ran at 2.32 ms/attention call versus 2.57 ms
+  for all-R4, with rel-L2 0.264 versus 0.259.
 - `configs/token_merging_wan_hard_route_c4_fastseed_outer_exact_r5_fewstep.yaml`:
   balanced exact-window C=4 shared hard-route config. It is slightly slower
   than R4 but lower-error, about 2.83 ms/call with rel-L2 0.256.
