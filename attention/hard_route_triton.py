@@ -316,6 +316,7 @@ if triton is not None:
         BLOCK_L: tl.constexpr,
         BLOCK_D: tl.constexpr,
         SCORE_SCALE: tl.constexpr,
+        ROUTE_LAYOUT: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -426,11 +427,24 @@ if triton is not None:
             )
             routing_bias = tl.where(has_keys, routing_bias, 0.0)
 
-            merged_offset = (
-                (((((batch * F + key_outer) * J + query_offsets[:, None])
-                   * K_ROWS + key_row) * 4 + seed_idx) * H + head)
-                * D_HEAD + dim_offsets[None, :]
-            )
+            if ROUTE_LAYOUT:
+                group = (batch * H + head) * J + query_offsets
+                token = (key_outer * K_ROWS + key_row) * 4 + seed_idx
+                merged_offset = (
+                    (group[:, None] * (F * K_ROWS * 4) + token) * D_HEAD
+                    + dim_offsets[None, :]
+                )
+                bias_offset = group * (F * K_ROWS * 4) + token
+            else:
+                merged_offset = (
+                    (((((batch * F + key_outer) * J + query_offsets[:, None])
+                       * K_ROWS + key_row) * 4 + seed_idx) * H + head)
+                    * D_HEAD + dim_offsets[None, :]
+                )
+                bias_offset = (
+                    (((((batch * H + head) * F + key_outer)
+                       * K_ROWS + key_row) * J + query_offsets) * 4 + seed_idx)
+                )
             tl.store(
                 merged_key_ptr + merged_offset,
                 merged_key,
@@ -440,10 +454,6 @@ if triton is not None:
                 merged_value_ptr + merged_offset,
                 merged_value,
                 mask=valid_query[:, None] & valid_dim[None, :],
-            )
-            bias_offset = (
-                (((((batch * H + head) * F + key_outer)
-                   * K_ROWS + key_row) * J + query_offsets) * 4 + seed_idx)
             )
             tl.store(routing_bias_ptr + bias_offset, routing_bias, mask=valid_query)
 
@@ -812,6 +822,87 @@ def triton_hard_route_shared_merge_c4(query, seed_rows, key, value, scale=1.0, b
         BLOCK_L=block_l,
         BLOCK_D=block_d,
         SCORE_SCALE=float(scale),
+        ROUTE_LAYOUT=False,
+        num_warps=4,
+    )
+    return merged_key, merged_value, routing_bias, None
+
+
+def triton_hard_route_shared_merge_c4_route_layout(query, seed_rows, key, value, scale=1.0, block_j_target=16):
+    """C=4 shared hard-route merge with routing-ready K/V/bias layout.
+
+    Returns:
+        key/value: [B * H * J, F * key_rows * 4, D]
+        bias:      [B * H * J, F * key_rows * 4]
+    """
+    if triton is None:
+        raise RuntimeError("hard_route_backend='triton_c4_direct_route' requires Triton.")
+    if not query.is_cuda:
+        raise RuntimeError("hard_route_backend='triton_c4_direct_route' requires CUDA/ROCm tensors.")
+    if query.dtype not in (torch.float16, torch.bfloat16):
+        raise RuntimeError("hard_route_backend='triton_c4_direct_route' requires fp16 or bf16 tensors.")
+
+    query = query.contiguous()
+    seed_rows = seed_rows.contiguous()
+    key = key.contiguous()
+    value = value.contiguous()
+
+    batch, query_outer, query_rows, query_columns, heads, dim = query.shape
+    if key.shape[:2] != (batch, query_outer) or value.shape != key.shape:
+        raise ValueError("query/key/value shapes are inconsistent for shared C4 Triton merge.")
+    key_rows = key.size(2)
+    key_columns = key.size(3)
+    if seed_rows.shape != (query_outer, key_rows, query_columns, 4):
+        raise ValueError("seed_rows must have shape [query_outer, key_rows, query_columns, 4].")
+    if key.size(4) != heads or key.size(5) != dim:
+        raise ValueError("query/key head dimensions are inconsistent for shared C4 Triton merge.")
+
+    block_j = min(int(block_j_target), triton.next_power_of_2(query_columns))
+    block_l = triton.next_power_of_2(key_columns)
+    block_d = triton.next_power_of_2(dim)
+    if block_l > 128:
+        raise ValueError(f"Triton hard-route merge supports at most 128 key tokens per block, got {key_columns}.")
+    if block_d > 128:
+        raise ValueError(f"Triton hard-route merge supports head dim <= 128, got {dim}.")
+
+    route_groups = batch * heads * query_columns
+    route_tokens = query_outer * key_rows * 4
+    merged_key = torch.empty(
+        (route_groups, route_tokens, dim),
+        device=key.device,
+        dtype=key.dtype,
+    )
+    merged_value = torch.empty_like(merged_key)
+    routing_bias = torch.empty(
+        (route_groups, route_tokens),
+        device=key.device,
+        dtype=torch.float32,
+    )
+
+    grid = (
+        batch * query_outer * key_rows * heads,
+        triton.cdiv(query_columns, block_j),
+    )
+    _hard_route_shared_merge_c4_kernel[grid](
+        query,
+        seed_rows,
+        key,
+        value,
+        merged_key,
+        merged_value,
+        routing_bias,
+        F=query_outer,
+        Q_ROWS=query_rows,
+        K_ROWS=key_rows,
+        J=query_columns,
+        H=heads,
+        L=key_columns,
+        D_HEAD=dim,
+        BLOCK_J=block_j,
+        BLOCK_L=block_l,
+        BLOCK_D=block_d,
+        SCORE_SCALE=float(scale),
+        ROUTE_LAYOUT=True,
         num_warps=4,
     )
     return merged_key, merged_value, routing_bias, None
@@ -822,4 +913,5 @@ __all__ = [
     "triton_hard_route_merge",
     "triton_hard_route_merge_c4",
     "triton_hard_route_shared_merge_c4",
+    "triton_hard_route_shared_merge_c4_route_layout",
 ]

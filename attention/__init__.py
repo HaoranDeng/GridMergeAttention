@@ -9,6 +9,7 @@ from .hard_route_triton import (
     triton_biased_attention,
     triton_hard_route_merge,
     triton_hard_route_shared_merge_c4,
+    triton_hard_route_shared_merge_c4_route_layout,
 )
 from .select_route import select_route_attention
 from .select_route_transpose import select_route_attention_transpose
@@ -26,6 +27,7 @@ __all__ = [
     "triton_biased_attention",
     "triton_hard_route_merge",
     "triton_hard_route_shared_merge_c4",
+    "triton_hard_route_shared_merge_c4_route_layout",
     "select_route_attention",
     "select_route_attention_transpose",
     "token_merging_attn",

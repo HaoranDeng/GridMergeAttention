@@ -11,6 +11,7 @@ from .hard_route_triton import (
     triton_hard_route_merge,
     triton_hard_route_merge_c4,
     triton_hard_route_shared_merge_c4,
+    triton_hard_route_shared_merge_c4_route_layout,
 )
 
 
@@ -80,7 +81,8 @@ def _merge(seed_queries, k, v, backend, scale):
         return triton_hard_route_merge_c4(seed_queries, k, v, scale=scale, block_j_target=16)
     raise ValueError(
         f"unsupported hard_route_backend={backend!r}; expected 'sdpa', 'triton', "
-        "'triton_c4', 'triton_c4_j16', 'triton_c4_direct', or 'triton_c4_direct_j16'."
+        "'triton_c4', 'triton_c4_j16', 'triton_c4_direct', 'triton_c4_direct_j16', "
+        "'triton_c4_direct_route', or 'triton_c4_direct_route_j16'."
     )
 
 
@@ -90,6 +92,10 @@ def _merge_shared(q, seed_rows, k, v, backend, scale):
         return triton_hard_route_shared_merge_c4(q, seed_rows, k, v, scale=scale)
     if backend == "triton_c4_direct_j16":
         return triton_hard_route_shared_merge_c4(q, seed_rows, k, v, scale=scale, block_j_target=16)
+    if backend == "triton_c4_direct_route":
+        return triton_hard_route_shared_merge_c4_route_layout(q, seed_rows, k, v, scale=scale)
+    if backend == "triton_c4_direct_route_j16":
+        return triton_hard_route_shared_merge_c4_route_layout(q, seed_rows, k, v, scale=scale, block_j_target=16)
 
     seed_queries = gather_shared_seed_queries(q, seed_rows)
     return _merge(seed_queries, k, v, backend, scale)
@@ -141,9 +147,14 @@ def hard_route_shared_attention(
     )
 
     query = rearrange(q, "b a i j h d -> (b h j) (a i) d")
-    key = rearrange(merged_keys[:, 0], "b f j k c h d -> (b h j) (f k c) d")
-    value = rearrange(merged_values[:, 0], "b f j k c h d -> (b h j) (f k c) d")
-    bias = rearrange(routing_bias[:, :, 0], "b h f k j c -> (b h j) (f k c)")
+    if (hard_route_backend or "").lower() in {"triton_c4_direct_route", "triton_c4_direct_route_j16"}:
+        key = merged_keys
+        value = merged_values
+        bias = routing_bias
+    else:
+        key = rearrange(merged_keys[:, 0], "b f j k c h d -> (b h j) (f k c) d")
+        value = rearrange(merged_values[:, 0], "b f j k c h d -> (b h j) (f k c) d")
+        bias = rearrange(routing_bias[:, :, 0], "b h f k j c -> (b h j) (f k c)")
     del cluster_has_keys
     out = hard_route_compressed_attention(
         query,
