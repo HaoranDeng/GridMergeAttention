@@ -101,6 +101,11 @@ deterministic hash instead of ranking every candidate query row.
   force-key/base-2/cached merge path, but skips routing-bias allocation and
   storage. Use only with a `*_nobias` routing backend; this changes the
   approximation.
+- `triton_c4_direct_route_j64_w2_forcekeys_exp2merge_cached` /
+  `triton_c4_direct_route_j64_forcekeys_exp2merge_cached`: wider-column merge
+  tuning variants. They cover all 52 default query columns in one tile instead
+  of two `j32` tiles, trading less repeated K/V loading for a larger per-kernel
+  tile.
 - `triton_c4_direct_route_j32_w2_nobias`: aggressive faster variant that skips
   routing-bias computation and storage. This changes the approximation, so it
   is kept as an explicit experiment rather than the default best path.
