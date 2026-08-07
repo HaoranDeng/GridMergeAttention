@@ -133,7 +133,10 @@ if triton is not None:
             denom = tl.sum(probs, axis=1)
             safe_denom = tl.where(denom > 0.0, denom, 1.0)
             weights = probs / safe_denom[:, None]
-            log_denom = row_max + tl.log(safe_denom)
+            if USE_EXP2:
+                log_denom = row_max + tl.log2(safe_denom) * 0.6931471805599453
+            else:
+                log_denom = row_max + tl.log(safe_denom)
 
             merged_key = tl.dot(weights.to(key_block.dtype), key_block)
             merged_value = tl.dot(weights.to(value_block.dtype), value_block)
@@ -296,7 +299,10 @@ if triton is not None:
             denom = tl.sum(probs, axis=1)
             safe_denom = tl.where(denom > 0.0, denom, 1.0)
             weights = probs / safe_denom[:, None]
-            log_denom = row_max + tl.log(safe_denom)
+            if USE_EXP2:
+                log_denom = row_max + tl.log2(safe_denom) * 0.6931471805599453
+            else:
+                log_denom = row_max + tl.log(safe_denom)
 
             merged_key = tl.dot(weights.to(key_block.dtype), key_block)
             merged_value = tl.dot(weights.to(value_block.dtype), value_block)
@@ -482,7 +488,10 @@ if triton is not None:
             denom = tl.sum(probs, axis=1)
             safe_denom = tl.where(denom > 0.0, denom, 1.0)
             weights = probs / safe_denom[:, None]
-            log_denom = row_max + tl.log(safe_denom)
+            if USE_EXP2:
+                log_denom = row_max + tl.log2(safe_denom) * 0.6931471805599453
+            else:
+                log_denom = row_max + tl.log(safe_denom)
 
             merged_key = tl.dot(weights.to(key_block.dtype), key_block)
             merged_value = tl.dot(weights.to(value_block.dtype), value_block)
