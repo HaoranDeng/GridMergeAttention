@@ -847,6 +847,102 @@ if triton is not None:
         )
 
     @triton.jit
+    def _direct_route_biased_attention_kernel(
+        query_ptr,
+        key_ptr,
+        value_ptr,
+        bias_ptr,
+        out_ptr,
+        A_OUTER: tl.constexpr,
+        Q_ROWS: tl.constexpr,
+        J_COLS: tl.constexpr,
+        H_HEADS: tl.constexpr,
+        K_LEN: tl.constexpr,
+        D_HEAD: tl.constexpr,
+        BLOCK_M: tl.constexpr,
+        BLOCK_N: tl.constexpr,
+        BLOCK_D: tl.constexpr,
+        SCORE_SCALE: tl.constexpr,
+        USE_EXP2: tl.constexpr,
+    ):
+        group_id = tl.program_id(0)
+        query_block_id = tl.program_id(1)
+
+        query_col = group_id % J_COLS
+        tmp = group_id // J_COLS
+        query_outer = tmp % A_OUTER
+        tmp = tmp // A_OUTER
+        head = tmp % H_HEADS
+        batch = tmp // H_HEADS
+
+        query_offsets = query_block_id * BLOCK_M + tl.arange(0, BLOCK_M)
+        key_offsets = tl.arange(0, BLOCK_N)
+        dim_offsets = tl.arange(0, BLOCK_D)
+
+        query_base = query_ptr + batch * A_OUTER * Q_ROWS * J_COLS * H_HEADS * D_HEAD
+        key_base = key_ptr + group_id * K_LEN * D_HEAD
+        value_base = value_ptr + group_id * K_LEN * D_HEAD
+        bias_base = bias_ptr + group_id * K_LEN
+        out_base = out_ptr + batch * A_OUTER * Q_ROWS * J_COLS * H_HEADS * D_HEAD
+
+        q = tl.load(
+            query_base
+            + (((query_outer * Q_ROWS + query_offsets[:, None]) * J_COLS + query_col)
+               * H_HEADS + head) * D_HEAD
+            + dim_offsets[None, :],
+            mask=(query_offsets[:, None] < Q_ROWS) & (dim_offsets[None, :] < D_HEAD),
+            other=0.0,
+        )
+
+        max_score = tl.full((BLOCK_M,), -float("inf"), tl.float32)
+        normalizer = tl.zeros((BLOCK_M,), tl.float32)
+        acc = tl.zeros((BLOCK_M, BLOCK_D), tl.float32)
+
+        for key_start in range(0, K_LEN, BLOCK_N):
+            keys = key_start + key_offsets
+            k = tl.load(
+                key_base + keys[:, None] * D_HEAD + dim_offsets[None, :],
+                mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
+                other=0.0,
+            )
+            v = tl.load(
+                value_base + keys[:, None] * D_HEAD + dim_offsets[None, :],
+                mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
+                other=0.0,
+            )
+            bias = tl.load(bias_base + keys, mask=keys < K_LEN, other=float("inf"))
+
+            logits = tl.dot(q, tl.trans(k)) * SCORE_SCALE - bias[None, :]
+            logits = tl.where(
+                (query_offsets[:, None] < Q_ROWS) & (keys[None, :] < K_LEN),
+                logits,
+                -float("inf"),
+            )
+
+            block_max = tl.max(logits, axis=1)
+            next_max = tl.maximum(max_score, block_max)
+            if USE_EXP2:
+                p = tl.exp2((logits - next_max[:, None]) * 1.4426950408889634)
+                alpha = tl.exp2((max_score - next_max) * 1.4426950408889634)
+            else:
+                p = tl.exp(logits - next_max[:, None])
+                alpha = tl.exp(max_score - next_max)
+
+            acc = acc * alpha[:, None] + tl.dot(p.to(v.dtype), v)
+            normalizer = normalizer * alpha + tl.sum(p, axis=1)
+            max_score = next_max
+
+        out = acc / normalizer[:, None]
+        tl.store(
+            out_base
+            + (((query_outer * Q_ROWS + query_offsets[:, None]) * J_COLS + query_col)
+               * H_HEADS + head) * D_HEAD
+            + dim_offsets[None, :],
+            out,
+            mask=(query_offsets[:, None] < Q_ROWS) & (dim_offsets[None, :] < D_HEAD),
+        )
+
+    @triton.jit
     def _grid_outer_local_biased_attention_kernel(
         query_ptr,
         key_ptr,
@@ -1115,6 +1211,78 @@ def triton_biased_attention(
         bias,
         out,
         Q_LEN=query_len,
+        K_LEN=key_len,
+        D_HEAD=dim,
+        BLOCK_M=block_m,
+        BLOCK_N=block_n,
+        BLOCK_D=block_d,
+        SCORE_SCALE=float(scale),
+        USE_EXP2=bool(use_exp2),
+        **meta,
+    )
+    return out
+
+
+def triton_direct_route_biased_attention(
+    query,
+    key,
+    value,
+    bias,
+    block_m=32,
+    block_n=64,
+    scale=1.0,
+    num_warps=1,
+    num_stages=1,
+    use_exp2=True,
+):
+    """Fused routing attention that reads/writes hard-route block layout.
+
+    query/out: [B, A, query_rows, query_columns, heads, dim]
+    key/value: [B*heads*A*query_columns, compressed_tokens, dim]
+    bias:      [B*heads*A*query_columns, compressed_tokens]
+    """
+    if triton is None:
+        raise RuntimeError("hard_route_routing_backend='triton_direct_*' requires Triton.")
+    if not query.is_cuda:
+        raise RuntimeError("hard_route_routing_backend='triton_direct_*' requires CUDA/ROCm tensors.")
+    if query.dtype not in (torch.float16, torch.bfloat16):
+        raise RuntimeError("hard_route_routing_backend='triton_direct_*' requires fp16 or bf16 tensors.")
+
+    query = query.contiguous()
+    key = key.contiguous()
+    value = value.contiguous()
+    bias = bias.contiguous()
+
+    batch, query_outer, query_rows, query_columns, heads, dim = query.shape
+    groups, key_len, key_dim = key.shape
+    expected_groups = batch * heads * query_outer * query_columns
+    if groups != expected_groups:
+        raise ValueError(
+            "direct-route attention expects route-layout KV with "
+            f"{expected_groups} groups, got {groups}."
+        )
+    if key_dim != dim or value.shape != key.shape or bias.shape != (groups, key_len):
+        raise ValueError("query/key/value/bias shapes are inconsistent for direct-route attention.")
+
+    block_d = triton.next_power_of_2(dim)
+    if block_d > 128:
+        raise ValueError(f"Triton hard-route attention supports head dim <= 128, got {dim}.")
+
+    out = _cached_empty("direct_route_attention_out", query.shape, query.device, query.dtype)
+    grid = (groups, triton.cdiv(query_rows, block_m))
+    meta = {"num_warps": int(num_warps)}
+    if num_stages is not None:
+        meta["num_stages"] = int(num_stages)
+    _direct_route_biased_attention_kernel[grid](
+        query,
+        key,
+        value,
+        bias,
+        out,
+        A_OUTER=query_outer,
+        Q_ROWS=query_rows,
+        J_COLS=query_columns,
+        H_HEADS=heads,
         K_LEN=key_len,
         D_HEAD=dim,
         BLOCK_M=block_m,
@@ -1550,6 +1718,7 @@ def triton_hard_route_merge_c4_direct_route(
     scale=1.0,
     block_j_target=16,
     num_warps=2,
+    bias_dtype=torch.float32,
 ):
     """Exact non-shared C=4 merge that writes routing-ready K/V/bias.
 
@@ -1610,7 +1779,7 @@ def triton_hard_route_merge_c4_direct_route(
         "hard_route_c4_direct_route_bias",
         (route_groups, route_tokens),
         key.device,
-        torch.float32,
+        bias_dtype,
     )
 
     grid = (
@@ -1997,6 +2166,7 @@ def triton_hard_route_shared_merge_c3_route_layout(
 
 __all__ = [
     "triton_biased_attention",
+    "triton_direct_route_biased_attention",
     "triton_grid_biased_attention",
     "triton_grid_outer_exact_local_biased_attention",
     "triton_grid_outer_local_biased_attention",

@@ -9,6 +9,7 @@ from .common import (
 )
 from .hard_route_triton import (
     triton_biased_attention,
+    triton_direct_route_biased_attention,
     triton_grid_biased_attention,
     triton_grid_outer_exact_local_biased_attention,
     triton_grid_outer_local_biased_attention,
@@ -109,6 +110,17 @@ def _direct_route_merge(q, seed_rows, k, v, backend, scale):
             scale=scale,
             block_j_target=32,
             num_warps=2,
+        )
+    if backend == "triton_c4_direct_route_j32_w2_bf16bias":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=2,
+            bias_dtype=torch.bfloat16,
         )
     if backend == "triton_c4_direct_route_j32_w1":
         return triton_hard_route_merge_c4_direct_route(
@@ -346,6 +358,37 @@ def hard_route_compressed_attention(query, key, value, bias, backend, scale):
         "'sdpa', 'triton', 'triton_m128_n32', 'triton_m128_n32_s1', "
         "or 'triton_m256_n32'."
     )
+
+
+def hard_route_direct_compressed_attention(q, key, value, bias, backend, scale):
+    backend = (backend or "").lower()
+    if backend == "triton_direct_m32_n64_w1_s1_exp2":
+        return triton_direct_route_biased_attention(
+            q,
+            key,
+            value,
+            bias,
+            block_m=32,
+            block_n=64,
+            scale=scale,
+            num_warps=1,
+            num_stages=1,
+            use_exp2=True,
+        )
+    if backend == "triton_direct_m32_n128_w1_s1_exp2":
+        return triton_direct_route_biased_attention(
+            q,
+            key,
+            value,
+            bias,
+            block_m=32,
+            block_n=128,
+            scale=scale,
+            num_warps=1,
+            num_stages=1,
+            use_exp2=True,
+        )
+    return None
 
 
 def hard_route_grid_compressed_attention(query, key, value, bias, backend, scale):
@@ -1220,9 +1263,9 @@ def hard_route_attention(
         fast_with_include=fast_with_include,
     )
 
-    query = rearrange(q, "b a i j h d -> (b h a j) i d")
     direct_merge = _direct_route_merge(q, seed_rows, k, v, hard_route_backend, scale)
     if direct_merge is None:
+        query = rearrange(q, "b a i j h d -> (b h a j) i d")
         seed_queries = gather_seed_queries(q, seed_rows)
         merged_keys, merged_values, routing_bias, cluster_has_keys = _merge(
             seed_queries,
@@ -1238,6 +1281,17 @@ def hard_route_attention(
     else:
         key, value, bias, cluster_has_keys = direct_merge
         del cluster_has_keys
+        direct_out = hard_route_direct_compressed_attention(
+            q,
+            key,
+            value,
+            bias,
+            hard_route_routing_backend,
+            scale,
+        )
+        if direct_out is not None:
+            return direct_out
+        query = rearrange(q, "b a i j h d -> (b h a j) i d")
 
     out = hard_route_compressed_attention(
         query,
