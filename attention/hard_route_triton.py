@@ -469,7 +469,6 @@ if triton is not None:
                 has_seed = tl.sum(tl.where(assigned_to_seed & valid_logits, 1, 0), axis=1) > 0
                 forced_first_key = (~has_seed[:, None]) & (key_offsets[None, :] == 0)
                 active = valid_logits & (assigned_to_seed | forced_first_key)
-            has_keys = tl.sum(tl.where(active, 1, 0), axis=1) > 0
 
             row_max = tl.max(tl.where(active, logits, -float("inf")), axis=1)
             if USE_EXP2:
@@ -491,7 +490,9 @@ if triton is not None:
                 tl.where(active, weights * (logits - log_denom[:, None]), 0.0),
                 axis=1,
             )
-            routing_bias = tl.where(has_keys, routing_bias, 0.0)
+            if not FORCE_SEED_KEYS:
+                has_keys = tl.sum(tl.where(active, 1, 0), axis=1) > 0
+                routing_bias = tl.where(has_keys, routing_bias, 0.0)
 
             route_token = route_token_base + seed_idx
             route_offset = (
