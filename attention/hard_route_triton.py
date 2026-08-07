@@ -681,6 +681,7 @@ if triton is not None:
         BLOCK_N: tl.constexpr,
         BLOCK_D: tl.constexpr,
         SCORE_SCALE: tl.constexpr,
+        USE_EXP2: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_block_id = tl.program_id(1)
@@ -728,8 +729,12 @@ if triton is not None:
 
             block_max = tl.max(logits, axis=1)
             next_max = tl.maximum(max_score, block_max)
-            p = tl.exp(logits - next_max[:, None])
-            alpha = tl.exp(max_score - next_max)
+            if USE_EXP2:
+                p = tl.exp2((logits - next_max[:, None]) * 1.4426950408889634)
+                alpha = tl.exp2((max_score - next_max) * 1.4426950408889634)
+            else:
+                p = tl.exp(logits - next_max[:, None])
+                alpha = tl.exp(max_score - next_max)
 
             acc = acc * alpha[:, None] + tl.dot(p.to(v.dtype), v)
             normalizer = normalizer * alpha + tl.sum(p, axis=1)
@@ -1057,7 +1062,18 @@ if triton is not None:
             mask=(query_offsets[:, None] < Q_LEN) & (dim_offsets[None, :] < D_HEAD),
         )
 
-def triton_biased_attention(query, key, value, bias, block_m=16, block_n=128, scale=1.0, num_stages=None):
+def triton_biased_attention(
+    query,
+    key,
+    value,
+    bias,
+    block_m=16,
+    block_n=128,
+    scale=1.0,
+    num_warps=4,
+    num_stages=None,
+    use_exp2=False,
+):
     """Fused Triton attention for hard-route compressed KV routing.
 
     query: [groups, query_tokens, dim]
@@ -1089,7 +1105,7 @@ def triton_biased_attention(query, key, value, bias, block_m=16, block_n=128, sc
 
     out = _cached_empty("grid_biased_attention_out", query.shape, query.device, query.dtype)
     grid = (groups, triton.cdiv(query_len, block_m))
-    meta = {"num_warps": 4}
+    meta = {"num_warps": int(num_warps)}
     if num_stages is not None:
         meta["num_stages"] = int(num_stages)
     _biased_attention_kernel[grid](
@@ -1105,6 +1121,7 @@ def triton_biased_attention(query, key, value, bias, block_m=16, block_n=128, sc
         BLOCK_N=block_n,
         BLOCK_D=block_d,
         SCORE_SCALE=float(scale),
+        USE_EXP2=bool(use_exp2),
         **meta,
     )
     return out

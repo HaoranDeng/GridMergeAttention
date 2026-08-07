@@ -109,6 +109,17 @@ def hard_route_compressed_attention(query, key, value, bias, backend, scale):
         return biased_sdpa(query, key, value, bias, scale=scale)
     if backend == "triton":
         return triton_biased_attention(query, key, value, bias, scale=scale)
+    if backend == "triton_m32_n32_s1":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=32,
+            block_n=32,
+            scale=scale,
+            num_stages=1,
+        )
     if backend == "triton_m128_n32":
         return triton_biased_attention(
             query,
@@ -140,6 +151,18 @@ def hard_route_compressed_attention(query, key, value, bias, backend, scale):
             block_n=128,
             scale=scale,
         )
+    if backend == "triton_m32_n128_w2_s1":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=32,
+            block_n=128,
+            scale=scale,
+            num_warps=2,
+            num_stages=1,
+        )
     if backend == "triton_m32_n128_s1":
         return triton_biased_attention(
             query,
@@ -150,6 +173,19 @@ def hard_route_compressed_attention(query, key, value, bias, backend, scale):
             block_n=128,
             scale=scale,
             num_stages=1,
+        )
+    if backend == "triton_m32_n128_w2_s1_exp2":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=32,
+            block_n=128,
+            scale=scale,
+            num_warps=2,
+            num_stages=1,
+            use_exp2=True,
         )
     if backend == "triton_m32_n256_s1":
         return triton_biased_attention(
@@ -171,6 +207,68 @@ def hard_route_compressed_attention(query, key, value, bias, backend, scale):
             block_m=32,
             block_n=64,
             scale=scale,
+            num_stages=1,
+        )
+    if backend == "triton_m32_n64_w1_s1":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=32,
+            block_n=64,
+            scale=scale,
+            num_warps=1,
+            num_stages=1,
+        )
+    if backend == "triton_m32_n64_w2_s1":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=32,
+            block_n=64,
+            scale=scale,
+            num_warps=2,
+            num_stages=1,
+        )
+    if backend == "triton_m32_n64_w1_s1_exp2":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=32,
+            block_n=64,
+            scale=scale,
+            num_warps=1,
+            num_stages=1,
+            use_exp2=True,
+        )
+    if backend == "triton_m32_n64_w2_s1_exp2":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=32,
+            block_n=64,
+            scale=scale,
+            num_warps=2,
+            num_stages=1,
+            use_exp2=True,
+        )
+    if backend == "triton_m64_n64_w2_s1":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=64,
+            block_n=64,
+            scale=scale,
+            num_warps=2,
             num_stages=1,
         )
     if backend == "triton_m256_n32":
