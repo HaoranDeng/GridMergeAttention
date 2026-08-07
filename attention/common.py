@@ -258,6 +258,76 @@ def soft_merge_weights(merge_logits, dtype):
     return merge_weights, merge_logprob
 
 
+def masked_soft_merge_weights(merge_logits, valid, dtype):
+    """Softmax valid keys only; all-invalid rows produce zero merge weights."""
+    valid = valid.to(torch.bool)
+    merge_logits = merge_logits.float().masked_fill(~valid, torch.finfo(torch.float32).min)
+    has_valid = valid.any(dim=-1, keepdim=True)
+    merge_logits = torch.where(has_valid, merge_logits, torch.zeros_like(merge_logits))
+
+    merge_weights = torch.softmax(merge_logits, dim=-1) * valid.to(merge_logits.dtype)
+    merge_logprob = merge_logits - torch.logsumexp(merge_logits, dim=-1, keepdim=True)
+    merge_logprob = merge_logprob.masked_fill(~valid, 0.0)
+    merge_logprob = torch.where(has_valid, merge_logprob, torch.zeros_like(merge_logprob))
+    return merge_weights.to(dtype), merge_logprob
+
+
+def pad_video_tokens_to_multiples(x, height, width, h_reduce, w_reduce):
+    """Pad [B, F*H*W, heads, dim] so H/W are divisible by reduce factors."""
+    height = int(height)
+    width = int(width)
+    h_reduce = int(h_reduce)
+    w_reduce = int(w_reduce)
+    batch, seq_len, heads, dim = x.shape
+    if seq_len % (height * width):
+        raise ValueError("sequence length must be a multiple of height * width.")
+
+    frames = seq_len // (height * width)
+    padded_height = ((height + h_reduce - 1) // h_reduce) * h_reduce
+    padded_width = ((width + w_reduce - 1) // w_reduce) * w_reduce
+    if padded_height == height and padded_width == width:
+        return x, height, width, None
+
+    padded = x.new_zeros(batch, frames, padded_height, padded_width, heads, dim)
+    padded[:, :, :height, :width] = x.reshape(batch, frames, height, width, heads, dim)
+
+    valid = torch.zeros(
+        1,
+        frames,
+        padded_height,
+        padded_width,
+        1,
+        1,
+        dtype=torch.bool,
+        device=x.device,
+    )
+    valid[:, :, :height, :width] = True
+    return (
+        padded.reshape(batch, frames * padded_height * padded_width, heads, dim),
+        padded_height,
+        padded_width,
+        valid.reshape(1, frames * padded_height * padded_width, 1, 1),
+    )
+
+
+def crop_video_tokens_from_multiples(x, height, width, padded_height, padded_width):
+    """Crop padded [B, F*Hp*Wp, heads, dim] output back to [B, F*H*W, heads, dim]."""
+    height = int(height)
+    width = int(width)
+    padded_height = int(padded_height)
+    padded_width = int(padded_width)
+    if padded_height == height and padded_width == width:
+        return x
+
+    batch, seq_len, heads, dim = x.shape
+    if seq_len % (padded_height * padded_width):
+        raise ValueError("sequence length must be a multiple of padded_height * padded_width.")
+
+    frames = seq_len // (padded_height * padded_width)
+    x = x.reshape(batch, frames, padded_height, padded_width, heads, dim)
+    return x[:, :, :height, :width].contiguous().reshape(batch, frames * height * width, heads, dim)
+
+
 def biased_sdpa(query, key, value, bias, valid=None, scale=1.0):
     """Attention over compressed tokens with a per-key additive bias.
 

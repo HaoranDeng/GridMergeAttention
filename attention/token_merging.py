@@ -1,6 +1,11 @@
 import torch
 
-from .common import blocks_to_video, video_to_blocks
+from .common import (
+    blocks_to_video,
+    crop_video_tokens_from_multiples,
+    pad_video_tokens_to_multiples,
+    video_to_blocks,
+)
 from .gridmerge_one import gridmerge_one
 from .gridmerge_one_transpose import gridmerge_one_transpose
 from .hard_route import hard_route_attention
@@ -123,9 +128,26 @@ def token_merging_attn(
     if layout == LAYOUT_HARD_ROUTE_GROUP_SHARED and num_merge_tokens == 1:
         raise ValueError("layout='hard_route_group_shared' requires num_merge_tokens > 1.")
 
+    original_h = int(h)
+    original_w = int(w)
+    needs_padding = bool(original_h % h_reduce or original_w % w_reduce)
+    if needs_padding and num_merge_tokens > 1:
+        raise ValueError(
+            "non-divisible height/width padding currently supports only "
+            "one-token MonarchRT attention."
+        )
+
+    q, h, w, valid_tokens = pad_video_tokens_to_multiples(q, h, w, h_reduce, w_reduce)
+    k, _, _, _ = pad_video_tokens_to_multiples(k, original_h, original_w, h_reduce, w_reduce)
+    v, _, _, _ = pad_video_tokens_to_multiples(v, original_h, original_w, h_reduce, w_reduce)
+
     q_blocks = video_to_blocks(q, f_tied, h_reduce, w_reduce, h, w)
     k_blocks = video_to_blocks(k, f_tied, h_reduce, w_reduce, h, w)
     v_blocks = video_to_blocks(v, f_tied, h_reduce, w_reduce, h, w)
+    key_valid_blocks = None
+    if valid_tokens is not None:
+        key_valid_blocks = video_to_blocks(valid_tokens, f_tied, h_reduce, w_reduce, h, w)
+        key_valid_blocks = key_valid_blocks[..., 0, 0]
     attention_impl = _local_attention_impl(layout, num_merge_tokens)
 
     if layout == LAYOUT_HARD_ROUTE_SHARED:
@@ -180,7 +202,13 @@ def token_merging_attn(
             if layout in HARD_ROUTE_LAYOUTS:
                 args.append(hard_route_backend)
                 args.append(hard_route_routing_backend)
-            out[:, start:end] = attention_impl(*args)
+            out_slice = out[:, start:end]
+            if layout == LAYOUT_HARD_ROUTE and str(hard_route_routing_backend).startswith("triton_direct_"):
+                chunk = attention_impl(*args, output=out_slice)
+                if chunk is not out_slice:
+                    out_slice.copy_(chunk)
+            else:
+                out_slice.copy_(attention_impl(*args))
         else:
             out[:, start:end] = attention_impl(
                 q_blocks[:, start:end],
@@ -188,9 +216,11 @@ def token_merging_attn(
                 v_blocks,
                 sm_scale,
                 q_init,
+                key_valid=key_valid_blocks,
             )
 
-    return blocks_to_video(out, f_tied, h_reduce, w_reduce)
+    out = blocks_to_video(out, f_tied, h_reduce, w_reduce)
+    return crop_video_tokens_from_multiples(out, original_h, original_w, h, w)
 
 
 def token_merging_attn_with_kv_cache(

@@ -148,17 +148,17 @@ deterministic hash instead of ranking every candidate query row.
 - `sdpa`: PyTorch SDPA with the routing bias.
 - `triton`: fused Triton routing kernel for `q @ K_merged - bias`.
 - `triton_m128_n32` / `triton_m256_n32`: faster fused routing kernels for the
-  shared C=4 compressed attention path.
+  compressed attention path.
 - `triton_m128_n32_s1`: `triton_m128_n32` with `num_stages=1`; kept as a
   stable comparison point.
 - `triton_grid_m128_n32_s1`: direct grid-query version of `triton_m128_n32_s1`.
   It reads `[B, outer, row, col, head, dim]` query blocks and writes the same
   block layout directly, avoiding the flattened query/output copies. This is
-  the fastest current routing backend for the default route-layout C=4 setup.
+  the fastest current routing backend for route-layout shared C=4 experiments.
 - `triton_grid_m128_n32_s1_exp2`: same direct grid-query routing backend, but
   computes softmax with base-2 exponentials. On MI300X this preserves the
-  measured bf16 output while reducing routing latency. This is a fast
-  historical comparison point for the route-layout C=4 setup.
+  measured bf16 output while reducing routing latency. It is kept for
+  route-layout shared C=4 experiments, not the accuracy-preserving default.
 - `triton_grid_outer_local_r2_m128_n32_s1_exp2` through
   `triton_grid_outer_local_r6_m128_n32_s1_exp2`: experimental faster C=4
   routing backends. They keep the C4 compressed K/V tokens unchanged, but each
@@ -175,6 +175,8 @@ deterministic hash instead of ranking every candidate query row.
   `triton_grid_outer_exact_r6_m128_n64_s1_exp2`: dynamic-window local routing.
   Each query tile scans only the exact key-outer window implied by the query
   outers it contains, instead of the conservative max-length union window.
+  These backends change the second compressed-attention step into a local
+  routing approximation and are kept only for ablations, not as the default.
   In the 90-call MI300X component profile, using the same C=4 merge backend:
 
   | backend | attention ms/call | speedup vs dense | rel-L2 vs dense output | output MSE |
@@ -183,14 +185,12 @@ deterministic hash instead of ranking every candidate query row.
   | exact R4 | 2.60 | 8.77x | 0.265 | 0.0218 |
   | exact R5 | 2.83 | 8.08x | 0.256 | 0.0204 |
   | exact R6 | 2.83 | 8.01x | 0.249 | 0.0192 |
-
-  R4 is the current faster speed/quality tradeoff; R5 is the more conservative
-  balanced point.
 - `hard_route_routing_backend_policy: r3_first_half_r4_second_half`: optional
   layer policy for C=4 shared hard-route configs. It keeps the configured
   routing backend as the default fallback, but uses exact R3 routing for the
   first half of self-attention layers and exact R4 routing for the second half.
-  This is an explicit speed/quality tradeoff hook, not the default behavior.
+  This is an explicit speed/quality tradeoff hook, not the default behavior and
+  should not be used when preserving full core attention is required.
 - `triton_grid_outer_exact_r5_m128_n128_s1_exp2`,
   `triton_grid_outer_exact_r5_m256_n64_s1_exp2`,
   `triton_grid_outer_exact_r5_m256_n128_s1_exp2`, and the corresponding R6
@@ -207,8 +207,8 @@ deterministic hash instead of ranking every candidate query row.
   `triton_grid_outer_exact_r4_m128_n64_w8_s1_exp2`, and
   `triton_grid_outer_exact_r4_m128_n64_w4_s2_exp2` /
   `triton_grid_outer_exact_r4_m128_n64_w4_s3_exp2`: launch-parameter tuning
-  hooks for the R4 exact-window backend. The conservative C=4 default config
-  uses `triton_grid_outer_exact_r4_m128_n64_w4_s3_exp2`.
+  hooks for the R4 exact-window backend. They are ablations; the default C=4
+  full-core config uses `triton_grid_m128_n32_s1_exp2`.
 - `triton_grid_outer_exact_r4_m128_n64_s1_exp2_nobias` and
   `triton_grid_outer_exact_r4_m128_n32_s1_exp2_nobias`: exact-window R4
   routing variants that skip routing bias. Use only with a no-bias merge

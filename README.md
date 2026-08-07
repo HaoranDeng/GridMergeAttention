@@ -97,10 +97,11 @@ indices without recomputing them.
   `triton_c4_direct_route_j32_w2`, but reuses cached workspace buffers. This is
   the fp32-routing-bias conservative reference.
 - `triton_c4_direct_route_j32_w2_bf16bias_cached`: same C=4 merge rule and
-  exact R4 routing setup, but stores the intermediate routing bias in bf16.
+  full compressed routing setup, but stores the intermediate routing bias in
+  bf16.
 - `triton_c4_direct_route_j32_w2_exp2merge_bf16bias_cached`: same C=4 hard
-  assignment and exact R4 routing setup, with base-2 exponentials for the merge
-  softmax and bf16 routing-bias storage. This is the current default
+  assignment and full compressed routing setup, with base-2 exponentials for
+  the merge softmax and bf16 routing-bias storage. This is the current default
   merge backend for the conservative C=4 speed/error tradeoff.
 - `triton_c4_direct_route_j16_w2_cached`: same conservative C=4 merge rule,
   using `block_j=16` and `num_warps=2`; kept as a merge-tile tuning variant.
@@ -133,31 +134,31 @@ step:
   `num_stages=1`. Kept as a stable comparison point.
 - `triton_grid_m128_n32_s1`: same routing tile, but reads query blocks directly
   and writes the block-layout output directly. This is the current fastest
-  routing backend for the default route-layout C=4 shared setup.
+  routing backend for route-layout C=4 shared experiments.
 - `triton_grid_m128_n32_s1_exp2`: same direct grid-query routing backend, with
   the routing softmax computed using base-2 exponentials. This is a fast
-  historical comparison point for the route-layout C=4 setup.
+  historical comparison point for route-layout shared C=4 experiments.
 - `triton_grid_m128_n32_s1_nobias`: matching aggressive routing backend for
   `triton_c4_direct_route_j32_w2_nobias`; it skips loading/subtracting the
   routing bias.
 - `triton_m256_n32`: fused Triton routing kernel using `block_m=256` and
   `block_n=32`; kept as a stable comparison point.
 
-`hard_route_routing_backend_policy` can switch routing radius by denoise step.
-For example, `r3_first_step_r4_rest` uses exact R3 routing for the first
-denoise step and exact R4 routing afterwards. This is a small speed/quality
-tradeoff for C=4 shared hard-route.
+`hard_route_routing_backend_policy` can switch routing radius by denoise step
+for ablations. Do not use those policies when the second compressed-attention
+step should preserve full core attention.
 
 Useful configs:
 
+- `configs/token_merging_wan_hard_route_c4_fastseed_full_core_fewstep.yaml`:
+  recommended accuracy-preserving C=4 config. It keeps non-shared hard-route
+  KV compression, so each `(query outer, key outer, key row, query column)`
+  attention grid gets its own C=4 compression. The second step runs full
+  compressed core attention with `hard_route_routing_backend: triton`, avoiding
+  both shared compression and exact/local R* sliding-window routing.
 - `configs/token_merging_wan_hard_route_c4_fastseed_outer_exact_r4_fewstep.yaml`:
-  recommended C=4 config when preserving the original two-stage hard-route
-  algorithm. It keeps exact routing bias and exact R4 compressed-attention
-  routing, while storing the intermediate routing-bias tensor in bf16 for lower
-  memory traffic and using base-2 exponentials for the merge softmax. In the
-  90-call MI300X component profile it used about 2.39 ms/token-merging
-  attention call with rel-L2 0.261 against dense attention output. The default
-  routing launch is `triton_grid_outer_exact_r4_m128_n64_w4_s3_exp2`.
+  backward-compatible alias for old scripts. Despite the historical filename,
+  it now uses the same non-shared full-core path as the recommended config.
 - `configs/token_merging_wan_hard_route_c4_best_fewstep.yaml`: faster
   historical C=4 config, using force-key exp2 merge and direct grid-query exp2
   routing. Keep it as a comparison point rather than the conservative default.
@@ -250,7 +251,7 @@ decode the VAE batch together:
 
 ```bash
 python generate.py \
-  --config configs/token_merging_wan_hard_route_c4_fastseed_outer_exact_r4_fewstep.yaml \
+  --config configs/token_merging_wan_hard_route_c4_fastseed_full_core_fewstep.yaml \
   --checkpoint /path/to/self_forcing_dmd.pt \
   --prompt_path prompts/MovieGenVideoBench_extended.txt \
   --output_dir videos/hard_c4_fast \

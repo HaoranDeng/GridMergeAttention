@@ -9,12 +9,68 @@ from .common import (
 )
 from .hard_route_triton import (
     triton_biased_attention,
+    triton_direct_route_biased_attention,
     triton_grid_biased_attention,
     triton_grid_outer_exact_local_biased_attention,
     triton_grid_outer_local_biased_attention,
     triton_hard_route_merge,
     triton_hard_route_merge_c4,
+    triton_hard_route_merge_c4_direct_route,
 )
+
+
+_SEED_ROWS_CACHE = {}
+
+
+def _cached_seed_rows(
+    device,
+    query_outer_offset,
+    query_outer_count,
+    key_outer_count,
+    key_rows,
+    query_columns,
+    query_rows,
+    num_seeds,
+    seed,
+    include_ith,
+    fast_with_include,
+):
+    cache_key = (
+        str(device),
+        int(query_outer_offset),
+        int(query_outer_count),
+        int(key_outer_count),
+        int(key_rows),
+        int(query_columns),
+        int(query_rows),
+        int(num_seeds),
+        int(seed),
+        bool(include_ith),
+        bool(fast_with_include),
+    )
+    seed_rows = _SEED_ROWS_CACHE.get(cache_key)
+    if seed_rows is not None:
+        return seed_rows
+
+    query_outer = torch.arange(
+        query_outer_offset,
+        query_outer_offset + query_outer_count,
+        device=device,
+    )
+    key_outer = torch.arange(key_outer_count, device=device)
+    seed_rows = random_seed_rows(
+        query_outer,
+        key_outer,
+        key_rows,
+        query_columns,
+        query_rows,
+        num_seeds,
+        seed,
+        include_ith=include_ith,
+        fast_with_include=fast_with_include,
+    )
+    _SEED_ROWS_CACHE[cache_key] = seed_rows
+    return seed_rows
 
 
 def assign_keys_to_seeds(seed_logits):
@@ -73,8 +129,256 @@ def _merge(seed_queries, k, v, backend, scale):
         return triton_hard_route_merge_c4(seed_queries, k, v, scale=scale, block_j_target=16)
     raise ValueError(
         f"unsupported hard_route_backend={backend!r}; expected 'sdpa', 'triton', "
-        "'triton_c4', or 'triton_c4_j16'."
+        "'triton_c4', 'triton_c4_j16', or a direct-route C4 backend."
     )
+
+
+def _direct_route_merge(q, seed_rows, k, v, backend, scale):
+    backend = (backend or "").lower()
+    if backend == "triton_c4_direct_route_j16_w2":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=16,
+            num_warps=2,
+        )
+    if backend == "triton_c4_direct_route_j16_w1":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=16,
+            num_warps=1,
+        )
+    if backend == "triton_c4_direct_route_j32_w2":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=2,
+        )
+    if backend == "triton_c4_direct_route_j32_w2_exp2merge":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=2,
+            use_exp2=True,
+        )
+    if backend == "triton_c4_direct_route_j32_w2_exp2merge_forcekeys":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=2,
+            use_exp2=True,
+            force_seed_keys=True,
+        )
+    if backend == "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_bf16bias":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=2,
+            bias_dtype=torch.bfloat16,
+            use_exp2=True,
+            force_seed_keys=True,
+        )
+    if backend == "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_bf16bias_s1":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=2,
+            bias_dtype=torch.bfloat16,
+            use_exp2=True,
+            force_seed_keys=True,
+            num_stages=1,
+        )
+    if backend == "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_bf16bias_s1_fastdot":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=2,
+            bias_dtype=torch.bfloat16,
+            use_exp2=True,
+            force_seed_keys=True,
+            num_stages=1,
+            logit_input_precision="tf32",
+        )
+    if backend == "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16bias_s1_fastdot":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=2,
+            bias_dtype=torch.float16,
+            use_exp2=True,
+            force_seed_keys=True,
+            num_stages=1,
+            logit_input_precision="tf32",
+        )
+    if backend == "triton_c4_direct_route_j16_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=16,
+            num_warps=2,
+            bias_dtype=torch.float16,
+            merged_dtype=torch.float16,
+            use_exp2=True,
+            force_seed_keys=True,
+            num_stages=1,
+            logit_input_precision="tf32",
+        )
+    if backend == "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=2,
+            bias_dtype=torch.float16,
+            merged_dtype=torch.float16,
+            use_exp2=True,
+            force_seed_keys=True,
+            num_stages=1,
+            logit_input_precision="tf32",
+        )
+    if backend == "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_bf16bias_s2":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=2,
+            bias_dtype=torch.bfloat16,
+            use_exp2=True,
+            force_seed_keys=True,
+            num_stages=2,
+        )
+    if backend == "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_bf16bias_s4":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=2,
+            bias_dtype=torch.bfloat16,
+            use_exp2=True,
+            force_seed_keys=True,
+            num_stages=4,
+        )
+    if backend == "triton_c4_direct_route_j32_w2_exp2merge_bf16bias":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=2,
+            bias_dtype=torch.bfloat16,
+            use_exp2=True,
+        )
+    if backend == "triton_c4_direct_route_j32_w2_bf16bias":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=2,
+            bias_dtype=torch.bfloat16,
+        )
+    if backend == "triton_c4_direct_route_j32_w1":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=1,
+        )
+    if backend == "triton_c4_direct_route_j32_w4":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=4,
+        )
+    if backend == "triton_c4_direct_route_j64_w1":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=64,
+            num_warps=1,
+        )
+    if backend == "triton_c4_direct_route_j64_w2":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=64,
+            num_warps=2,
+        )
+    if backend == "triton_c4_direct_route_j64_w4":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=64,
+            num_warps=4,
+        )
+    return None
 
 
 def hard_route_compressed_attention(query, key, value, bias, backend, scale):
@@ -83,6 +387,17 @@ def hard_route_compressed_attention(query, key, value, bias, backend, scale):
         return biased_sdpa(query, key, value, bias, scale=scale)
     if backend == "triton":
         return triton_biased_attention(query, key, value, bias, scale=scale)
+    if backend == "triton_m32_n32_s1":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=32,
+            block_n=32,
+            scale=scale,
+            num_stages=1,
+        )
     if backend == "triton_m128_n32":
         return triton_biased_attention(
             query,
@@ -104,6 +419,136 @@ def hard_route_compressed_attention(query, key, value, bias, backend, scale):
             scale=scale,
             num_stages=1,
         )
+    if backend == "triton_m32_n128":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=32,
+            block_n=128,
+            scale=scale,
+        )
+    if backend == "triton_m32_n128_w2_s1":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=32,
+            block_n=128,
+            scale=scale,
+            num_warps=2,
+            num_stages=1,
+        )
+    if backend == "triton_m32_n128_s1":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=32,
+            block_n=128,
+            scale=scale,
+            num_stages=1,
+        )
+    if backend == "triton_m32_n128_w2_s1_exp2":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=32,
+            block_n=128,
+            scale=scale,
+            num_warps=2,
+            num_stages=1,
+            use_exp2=True,
+        )
+    if backend == "triton_m32_n256_s1":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=32,
+            block_n=256,
+            scale=scale,
+            num_stages=1,
+        )
+    if backend == "triton_m32_n64_s1":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=32,
+            block_n=64,
+            scale=scale,
+            num_stages=1,
+        )
+    if backend == "triton_m32_n64_w1_s1":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=32,
+            block_n=64,
+            scale=scale,
+            num_warps=1,
+            num_stages=1,
+        )
+    if backend == "triton_m32_n64_w2_s1":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=32,
+            block_n=64,
+            scale=scale,
+            num_warps=2,
+            num_stages=1,
+        )
+    if backend == "triton_m32_n64_w1_s1_exp2":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=32,
+            block_n=64,
+            scale=scale,
+            num_warps=1,
+            num_stages=1,
+            use_exp2=True,
+        )
+    if backend == "triton_m32_n64_w2_s1_exp2":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=32,
+            block_n=64,
+            scale=scale,
+            num_warps=2,
+            num_stages=1,
+            use_exp2=True,
+        )
+    if backend == "triton_m64_n64_w2_s1":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=64,
+            block_n=64,
+            scale=scale,
+            num_warps=2,
+            num_stages=1,
+        )
     if backend == "triton_m256_n32":
         return triton_biased_attention(
             query,
@@ -119,6 +564,38 @@ def hard_route_compressed_attention(query, key, value, bias, backend, scale):
         "'sdpa', 'triton', 'triton_m128_n32', 'triton_m128_n32_s1', "
         "or 'triton_m256_n32'."
     )
+
+
+def hard_route_direct_compressed_attention(q, key, value, bias, backend, scale, output=None):
+    backend = (backend or "").lower()
+    direct_configs = {
+        "triton_direct_m16_n64_w1_s1_exp2": (16, 64, 1),
+        "triton_direct_m16_n128_w1_s1_exp2": (16, 128, 1),
+        "triton_direct_m32_n32_w1_s1_exp2": (32, 32, 1),
+        "triton_direct_m32_n64_w1_s1_exp2": (32, 64, 1),
+        "triton_direct_m32_n64_w2_s1_exp2": (32, 64, 2),
+        "triton_direct_m32_n128_w1_s1_exp2": (32, 128, 1),
+        "triton_direct_m32_n128_w2_s1_exp2": (32, 128, 2),
+        "triton_direct_m64_n64_w1_s1_exp2": (64, 64, 1),
+        "triton_direct_m64_n128_w1_s1_exp2": (64, 128, 1),
+    }
+    direct_config = direct_configs.get(backend)
+    if direct_config is not None:
+        block_m, block_n, num_warps = direct_config
+        return triton_direct_route_biased_attention(
+            q,
+            key,
+            value,
+            bias,
+            block_m=block_m,
+            block_n=block_n,
+            scale=scale,
+            num_warps=num_warps,
+            num_stages=1,
+            use_exp2=True,
+            out=output,
+        )
+    return None
 
 
 def hard_route_grid_compressed_attention(query, key, value, bias, backend, scale):
@@ -965,6 +1442,7 @@ def hard_route_attention(
     query_outer_offset,
     hard_route_backend="sdpa",
     hard_route_routing_backend="sdpa",
+    output=None,
 ):
     # q:   [B, A, I, J, H, D]
     # k/v: [B, F, K, L, H, D]
@@ -975,38 +1453,51 @@ def hard_route_attention(
     if num_merge_tokens > k.size(3):
         raise ValueError("num_merge_tokens cannot exceed key columns per block.")
 
-    query_outer = torch.arange(
+    seed_rows = _cached_seed_rows(
+        q.device,
         query_outer_offset,
-        query_outer_offset + q.size(1),
-        device=q.device,
-    )
-    key_outer = torch.arange(k.size(1), device=q.device)
-    seed_rows = random_seed_rows(
-        query_outer,
-        key_outer,
+        q.size(1),
+        k.size(1),
         k.size(2),
         q.size(3),
         q.size(2),
         num_merge_tokens,
         seed,
-        include_ith=include_ith,
-        fast_with_include=fast_with_include,
-    )
-    seed_queries = gather_seed_queries(q, seed_rows)
-
-    merged_keys, merged_values, routing_bias, cluster_has_keys = _merge(
-        seed_queries,
-        k,
-        v,
-        hard_route_backend,
-        scale,
+        include_ith,
+        fast_with_include,
     )
 
-    query = rearrange(q, "b a i j h d -> (b h a j) i d")
-    key = rearrange(merged_keys, "b a f j k c h d -> (b h a j) (f k c) d")
-    value = rearrange(merged_values, "b a f j k c h d -> (b h a j) (f k c) d")
-    bias = rearrange(routing_bias, "b h a f k j c -> (b h a j) (f k c)")
-    del cluster_has_keys
+    direct_merge = _direct_route_merge(q, seed_rows, k, v, hard_route_backend, scale)
+    if direct_merge is None:
+        query = rearrange(q, "b a i j h d -> (b h a j) i d")
+        seed_queries = gather_seed_queries(q, seed_rows)
+        merged_keys, merged_values, routing_bias, cluster_has_keys = _merge(
+            seed_queries,
+            k,
+            v,
+            hard_route_backend,
+            scale,
+        )
+        key = rearrange(merged_keys, "b a f j k c h d -> (b h a j) (f k c) d")
+        value = rearrange(merged_values, "b a f j k c h d -> (b h a j) (f k c) d")
+        bias = rearrange(routing_bias, "b h a f k j c -> (b h a j) (f k c)")
+        del cluster_has_keys
+    else:
+        key, value, bias, cluster_has_keys = direct_merge
+        del cluster_has_keys
+        direct_out = hard_route_direct_compressed_attention(
+            q,
+            key,
+            value,
+            bias,
+            hard_route_routing_backend,
+            scale,
+            output=output if output is not None and output.is_contiguous() else None,
+        )
+        if direct_out is not None:
+            return direct_out
+        query = rearrange(q, "b a i j h d -> (b h a j) i d")
+
     out = hard_route_compressed_attention(
         query,
         key,

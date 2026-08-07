@@ -40,6 +40,10 @@ DTYPE="${DTYPE:-bf16}"
 WARMUP="${WARMUP:-1}"
 SEED="${SEED:-0}"
 FPS="${FPS:-16}"
+BASELINE_LABEL="${BASELINE_LABEL:-dense}"
+BASELINE_CONFIG="${BASELINE_CONFIG:-configs/dense_wan_fewstep.yaml}"
+CANDIDATE_LABEL="${CANDIDATE_LABEL:-hard_route_c4_best}"
+CANDIDATE_CONFIG="${CANDIDATE_CONFIG:-configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j32_w2_routing_triton_grid_m128_s1_fewstep.yaml}"
 
 cd "${REPO_DIR}"
 mkdir -p out "${RESULT_DIR}" "${VIDEO_DIR}"
@@ -73,8 +77,8 @@ run_profile() {
       --use_ema
 }
 
-run_profile "dense" "configs/dense_wan_fewstep.yaml"
-run_profile "hard_route_c4_best" "configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j32_w2_routing_triton_grid_m128_s1_fewstep.yaml"
+run_profile "${BASELINE_LABEL}" "${BASELINE_CONFIG}"
+run_profile "${CANDIDATE_LABEL}" "${CANDIDATE_CONFIG}"
 
 python - "${RESULT_DIR}" <<'PY'
 import json
