@@ -45,25 +45,26 @@ class TokenMergingWanPipeline(torch.nn.Module):
         noisy_image_or_video = noise
         pred_image_or_video = None
 
-        for index, current_timestep in enumerate(self.denoising_step_list[:-1]):
+        for index, current_timestep in enumerate(self.denoising_step_list):
             _, pred_image_or_video = self.generator(
                 noisy_image_or_video=noisy_image_or_video,
                 conditional_dict=conditional_dict,
                 timestep=torch.ones(noise.shape[:2], dtype=torch.long, device=noise.device) * current_timestep,
             )
-            next_timestep = self.denoising_step_list[index + 1] * torch.ones(
-                noise.shape[:2],
-                dtype=torch.long,
-                device=noise.device,
-            )
-            noisy_image_or_video = self.scheduler.add_noise(
-                pred_image_or_video.flatten(0, 1),
-                torch.randn_like(pred_image_or_video.flatten(0, 1)),
-                next_timestep.flatten(0, 1),
-            ).unflatten(0, noise.shape[:2])
+            if index + 1 < len(self.denoising_step_list):
+                next_timestep = self.denoising_step_list[index + 1] * torch.ones(
+                    noise.shape[:2],
+                    dtype=torch.long,
+                    device=noise.device,
+                )
+                noisy_image_or_video = self.scheduler.add_noise(
+                    pred_image_or_video.flatten(0, 1),
+                    torch.randn_like(pred_image_or_video.flatten(0, 1)),
+                    next_timestep.flatten(0, 1),
+                ).unflatten(0, noise.shape[:2])
 
         if pred_image_or_video is None:
-            raise ValueError("denoising_step_list must contain at least two steps.")
+            raise ValueError("denoising_step_list must contain at least one step.")
 
         video = self.vae.decoder(pred_image_or_video)
         video = (video * 0.5 + 0.5).clamp(0, 1)

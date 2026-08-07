@@ -91,8 +91,13 @@ def token_merging_attn(
     #   sequence = frame * height * width = 21 * 30 * 52 = 32760.
     # After video_to_blocks:
     #   q/k/v: [batch, 21, 30, 52, head, dim]
-    if q.size(1) != k.size(1) or k.size(1) != v.size(1):
-        raise ValueError("token-merging attention expects self-attention q/k/v lengths to match.")
+    if k.size(1) != v.size(1):
+        raise ValueError("token-merging attention expects k/v lengths to match.")
+    if q.size(0) != k.size(0) or q.shape[2:] != k.shape[2:]:
+        raise ValueError(
+            "token-merging attention expects q and k/v batch, head, and "
+            "head-dimension shapes to match."
+        )
 
     if sm_scale is None:
         sm_scale = q.size(-1) ** -0.5
@@ -154,7 +159,11 @@ def token_merging_attn(
         )
         return blocks_to_video(out, f_tied, h_reduce, w_reduce)
 
-    out = torch.empty_like(v_blocks)
+    # The output follows the query sequence, not the visible K/V prefix.  The
+    # two lengths are equal for ordinary Wan attention, but causal
+    # Self-Forcing supplies only the current block as Q and the complete
+    # committed prefix as K/V.
+    out = torch.empty_like(q_blocks)
     for start in range(0, q_blocks.size(1), query_outer_chunk):
         end = min(start + query_outer_chunk, q_blocks.size(1))
         if num_merge_tokens > 1:
@@ -184,8 +193,100 @@ def token_merging_attn(
     return blocks_to_video(out, f_tied, h_reduce, w_reduce)
 
 
+def token_merging_attn_with_kv_cache(
+    q,
+    k_cache,
+    v_cache,
+    new_k,
+    new_v,
+    start_idx,
+    end_idx,
+    f_tied,
+    h_reduce,
+    w_reduce,
+    h,
+    w,
+    sm_scale=None,
+    q_init=None,
+    query_outer_chunk=None,
+    layout=LAYOUT_HARD_ROUTE,
+    num_merge_tokens=1,
+    seed_mode="random",
+    seed=0,
+    hard_route_backend="sdpa",
+    hard_route_routing_backend="sdpa",
+):
+    """Run one-token GridMerge from current Q over a visible cached K/V prefix.
+
+    The cache stores unmerged, RoPE-applied keys and their corresponding values
+    in ordinary video-token order. ``new_k``/``new_v`` overwrite the current
+    temporal block, while entries after ``end_idx`` remain invisible. Repeated
+    denoising calls at the same ``current_start_frame`` therefore overwrite the
+    same cache slots instead of extending the prefix.
+
+    Only the default one-token, non-transposed GridMerge layout is enabled for
+    causal caching initially. The other experimental layouts need independent
+    unequal-Q/KV validation before they can be claimed as Self-Forcing-safe.
+    """
+
+    layout = normalize_layout(layout)
+    if layout != LAYOUT_HARD_ROUTE or int(num_merge_tokens) != 1:
+        raise ValueError(
+            "causal cached token merging currently supports only "
+            "layout='hard_route' with num_merge_tokens=1 (gridmerge_one)."
+        )
+    if k_cache.shape != v_cache.shape:
+        raise ValueError("k_cache and v_cache must have identical shapes.")
+    if new_k.shape != new_v.shape:
+        raise ValueError("new_k and new_v must have identical shapes.")
+    if q.size(0) != k_cache.size(0) or q.shape[2:] != k_cache.shape[2:]:
+        raise ValueError(
+            "q and cached k/v batch, head, and head-dimension shapes must match."
+        )
+    if new_k.size(0) != k_cache.size(0) or new_k.shape[2:] != k_cache.shape[2:]:
+        raise ValueError(
+            "new k/v and cached k/v batch, head, and head-dimension shapes must match."
+        )
+
+    start_idx = int(start_idx)
+    end_idx = int(end_idx)
+    if not 0 <= start_idx <= end_idx <= k_cache.size(1):
+        raise ValueError(
+            f"invalid cache interval [{start_idx}, {end_idx}) for capacity "
+            f"{k_cache.size(1)}."
+        )
+    if end_idx - start_idx != new_k.size(1):
+        raise ValueError(
+            "cache interval length must equal the number of new K/V tokens."
+        )
+
+    k_cache[:, start_idx:end_idx].copy_(new_k)
+    v_cache[:, start_idx:end_idx].copy_(new_v)
+
+    return token_merging_attn(
+        q,
+        k_cache[:, :end_idx],
+        v_cache[:, :end_idx],
+        f_tied=f_tied,
+        h_reduce=h_reduce,
+        w_reduce=w_reduce,
+        h=h,
+        w=w,
+        sm_scale=sm_scale,
+        q_init=q_init,
+        query_outer_chunk=query_outer_chunk,
+        layout=layout,
+        num_merge_tokens=num_merge_tokens,
+        seed_mode=seed_mode,
+        seed=seed,
+        hard_route_backend=hard_route_backend,
+        hard_route_routing_backend=hard_route_routing_backend,
+    )
+
+
 __all__ = [
     "token_merging_attn",
+    "token_merging_attn_with_kv_cache",
     "normalize_layout",
     "LAYOUT_HARD_ROUTE",
     "LAYOUT_HARD_ROUTE_GROUP_SHARED",

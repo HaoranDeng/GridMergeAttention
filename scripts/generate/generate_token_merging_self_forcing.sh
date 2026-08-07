@@ -6,12 +6,15 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 WAN_MODEL_DIR="${WAN_MODEL_DIR:-${REPO_DIR}/wan_models/Wan2.1-T2V-1.3B}"
 CHECKPOINT="${CHECKPOINT:-${REPO_DIR}/checkpoints/self_forcing_dmd.pt}"
-CONFIG="${CONFIG:-${REPO_DIR}/configs/token_merging_wan_fewstep.yaml}"
+CONFIG="${CONFIG:-${REPO_DIR}/configs/token_merging_self_forcing_causal.yaml}"
 PROMPT_PATH="${PROMPT_PATH:-${REPO_DIR}/prompts/vbench_all_dimension.txt}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REPO_DIR}/videos/token_merging_self_forcing}"
 # generate.py interprets a negative limit as "use every prompt in the file".
 NUM_VIDEOS="${NUM_VIDEOS:--1}"
 NUM_SAMPLES="${NUM_SAMPLES:-5}"
+# A full 30-layer causal K/V cache is large. Generate samples sequentially by
+# default even when NUM_SAMPLES requests multiple outputs for each prompt.
+SAMPLE_BATCH_SIZE="${SAMPLE_BATCH_SIZE:-1}"
 SEED="${SEED:-0}"
 FPS="${FPS:-16}"
 DTYPE="${DTYPE:-bf16}"
@@ -26,6 +29,10 @@ if [[ ! -f "${CHECKPOINT}" ]]; then
 fi
 if [[ ! -f "${PROMPT_PATH}" ]]; then
   echo "Prompt file not found: ${PROMPT_PATH}" >&2
+  exit 1
+fi
+if [[ ! -f "${CONFIG}" ]]; then
+  echo "Generation config not found: ${CONFIG}" >&2
   exit 1
 fi
 
@@ -52,6 +59,7 @@ python generate.py \
   --output_dir "${OUTPUT_DIR}" \
   --num_videos "${NUM_VIDEOS}" \
   --num_samples "${NUM_SAMPLES}" \
+  --sample_batch_size "${SAMPLE_BATCH_SIZE}" \
   --seed "${SEED}" \
   --fps "${FPS}" \
   --dtype "${DTYPE}" \

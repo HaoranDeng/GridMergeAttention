@@ -6,7 +6,7 @@ import torch
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
-from pipeline import TokenMergingWanPipeline
+from pipeline import CausalTokenMergingWanPipeline, TokenMergingWanPipeline
 from utils.misc import save_video, set_seed
 
 
@@ -66,7 +66,14 @@ def load_prompts(path: str, limit: int):
     return prompts
 
 
-def load_generator_checkpoint(pipeline: TokenMergingWanPipeline, checkpoint_path: str, use_ema: bool):
+def build_pipeline(config, device):
+    """Route causal configs to Self-Forcing and other configs to ordinary Wan."""
+    if bool(config.get("causal", False)):
+        return CausalTokenMergingWanPipeline(config, device=device)
+    return TokenMergingWanPipeline(config, device=device)
+
+
+def load_generator_checkpoint(pipeline: torch.nn.Module, checkpoint_path: str, use_ema: bool):
     state = torch.load(checkpoint_path, map_location="cpu")
     if isinstance(state, dict) and ("generator" in state or "generator_ema" in state):
         key = "generator_ema" if use_ema and "generator_ema" in state else "generator"
@@ -194,8 +201,14 @@ def main():
 
     token_merging_enabled = bool(config.get("token_merging_args", {}).get("enable", False))
     attention_mode = "token-merging attention" if token_merging_enabled else "dense SDPA attention"
-    print(f"Loading Wan2.1 + {attention_mode} on {device} with dtype={dtype}.")
-    pipeline = TokenMergingWanPipeline(config, device=device)
+    generation_mode = (
+        "causal Self-Forcing" if bool(config.get("causal", False)) else "bidirectional Wan"
+    )
+    print(
+        f"Loading Wan2.1 + {attention_mode} with {generation_mode} "
+        f"on {device} with dtype={dtype}."
+    )
+    pipeline = build_pipeline(config, device=device)
     load_generator_checkpoint(pipeline, args.checkpoint, args.use_ema)
     pipeline = pipeline.to(dtype=dtype)
     pipeline.text_encoder.to(device=device)

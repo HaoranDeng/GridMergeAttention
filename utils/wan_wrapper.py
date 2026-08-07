@@ -6,6 +6,7 @@ from typing import List, Optional
 import torch
 
 from utils.scheduler import FlowMatchScheduler, SchedulerInterface
+from wan.modules.causal_model import CausalWanModel
 from wan.modules.model import WanModel
 from wan.modules.t5 import umt5_xxl
 from wan.modules.tokenizers import HuggingfaceTokenizer
@@ -129,12 +130,26 @@ class WanDiffusionWrapper(torch.nn.Module):
         model_name: str = "Wan2.1-T2V-1.3B",
         model_root: Optional[str] = None,
         timestep_shift: float = 5.0,
+        is_causal: bool = False,
+        local_attn_size: int = -1,
+        sink_size: int = 0,
         image_or_video_shape=(1, 21, 16, 60, 104),
     ):
         super().__init__()
         model_dir = _resolve_model_dir(model_name, model_root)
-        self.model = WanModel.from_pretrained(str(model_dir)).eval()
-        self.uniform_timestep = True
+        if is_causal:
+            self.model = CausalWanModel.from_pretrained(
+                str(model_dir),
+                local_attn_size=local_attn_size,
+                sink_size=sink_size,
+            ).eval()
+        else:
+            self.model = WanModel.from_pretrained(str(model_dir)).eval()
+        self.is_causal = bool(is_causal)
+        # Bidirectional Wan uses one shared timestep for the whole video. A
+        # causal block keeps a timestep for every frame so its per-frame time
+        # modulation matches the Self-Forcing model definition.
+        self.uniform_timestep = not self.is_causal
         self.scheduler = FlowMatchScheduler(
             shift=timestep_shift,
             sigma_min=0.0,
@@ -165,14 +180,40 @@ class WanDiffusionWrapper(torch.nn.Module):
         x0_pred = xt - sigma_t * flow_pred
         return x0_pred.to(original_dtype)
 
-    def forward(self, noisy_image_or_video: torch.Tensor, conditional_dict: dict, timestep: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        noisy_image_or_video: torch.Tensor,
+        conditional_dict: dict,
+        timestep: torch.Tensor,
+        kv_cache: Optional[List[dict]] = None,
+        crossattn_cache: Optional[List[dict]] = None,
+        current_start_frame: Optional[int] = None,
+    ) -> torch.Tensor:
         prompt_embeds = conditional_dict["prompt_embeds"]
-        input_timestep = timestep[:, 0]
+        input_timestep = timestep[:, 0] if self.uniform_timestep else timestep
+
+        model_kwargs = {
+            "t": input_timestep,
+            "context": prompt_embeds,
+            "seq_len": self.seq_len,
+        }
+        if self.is_causal:
+            if kv_cache is None or crossattn_cache is None:
+                raise ValueError(
+                    "causal Wan generation requires self-attention and "
+                    "cross-attention caches."
+                )
+            model_kwargs.update(
+                {
+                    "kv_cache": kv_cache,
+                    "crossattn_cache": crossattn_cache,
+                    "current_start_frame": current_start_frame,
+                }
+            )
+
         flow_pred = self.model(
             noisy_image_or_video.permute(0, 2, 1, 3, 4),
-            t=input_timestep,
-            context=prompt_embeds,
-            seq_len=self.seq_len,
+            **model_kwargs,
         ).permute(0, 2, 1, 3, 4)
 
         pred_x0 = self._convert_flow_pred_to_x0(
@@ -201,4 +242,3 @@ class WanDiffusionWrapper(torch.nn.Module):
 
     def post_init(self):
         self.get_scheduler()
-
