@@ -101,7 +101,7 @@ indices without recomputing them.
 - `triton_c4_direct_route_j32_w2_exp2merge_bf16bias_cached`: same C=4 hard
   assignment and exact R4 routing setup, with base-2 exponentials for the merge
   softmax and bf16 routing-bias storage. This is the current default
-  speed/error tradeoff for C=4.
+  merge backend for the conservative C=4 speed/error tradeoff.
 - `triton_c4_direct_route_j16_w2_cached`: same conservative C=4 merge rule,
   using `block_j=16` and `num_warps=2`; kept as a merge-tile tuning variant.
 - `triton_c4_direct_route_j32_w2_forcekeys`: approximate `j32_w2` variant that
@@ -135,8 +135,8 @@ step:
   and writes the block-layout output directly. This is the current fastest
   routing backend for the default route-layout C=4 shared setup.
 - `triton_grid_m128_n32_s1_exp2`: same direct grid-query routing backend, with
-  the routing softmax computed using base-2 exponentials. This is the current
-  fastest measured low-error routing backend on MI300X.
+  the routing softmax computed using base-2 exponentials. This is a fast
+  historical comparison point for the route-layout C=4 setup.
 - `triton_grid_m128_n32_s1_nobias`: matching aggressive routing backend for
   `triton_c4_direct_route_j32_w2_nobias`; it skips loading/subtracting the
   routing bias.
@@ -156,7 +156,8 @@ Useful configs:
   routing, while storing the intermediate routing-bias tensor in bf16 for lower
   memory traffic and using base-2 exponentials for the merge softmax. In the
   90-call MI300X component profile it used about 2.39 ms/token-merging
-  attention call with rel-L2 0.261 against dense attention output.
+  attention call with rel-L2 0.261 against dense attention output. The default
+  routing launch is `triton_grid_outer_exact_r4_m128_n64_w4_s2_exp2`.
 - `configs/token_merging_wan_hard_route_c4_best_fewstep.yaml`: faster
   historical C=4 config, using force-key exp2 merge and direct grid-query exp2
   routing. Keep it as a comparison point rather than the conservative default.

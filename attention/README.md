@@ -88,8 +88,8 @@ deterministic hash instead of ranking every candidate query row.
   in bf16.
 - `triton_c4_direct_route_j32_w2_exp2merge_bf16bias_cached`: same route-layout
   shared C=4 kernel, but uses base-2 exponentials in the merge softmax and
-  stores routing bias in bf16. This is the current default C=4 speed/error
-  tradeoff.
+  stores routing bias in bf16. This is the current default merge backend for
+  the conservative C=4 speed/error tradeoff.
 - `triton_c4_direct_route_j16_w1_exp2merge_bf16bias_cached`,
   `triton_c4_direct_route_j16_w2_exp2merge_bf16bias_cached`,
   `triton_c4_direct_route_j32_w1_exp2merge_bf16bias_cached`,
@@ -157,8 +157,8 @@ deterministic hash instead of ranking every candidate query row.
   the fastest current routing backend for the default route-layout C=4 setup.
 - `triton_grid_m128_n32_s1_exp2`: same direct grid-query routing backend, but
   computes softmax with base-2 exponentials. On MI300X this preserves the
-  measured bf16 output while reducing routing latency. This is the fastest
-  measured low-error C=4 routing backend on MI300X.
+  measured bf16 output while reducing routing latency. This is a fast
+  historical comparison point for the route-layout C=4 setup.
 - `triton_grid_outer_local_r2_m128_n32_s1_exp2` through
   `triton_grid_outer_local_r6_m128_n32_s1_exp2`: experimental faster C=4
   routing backends. They keep the C4 compressed K/V tokens unchanged, but each
@@ -206,7 +206,8 @@ deterministic hash instead of ranking every candidate query row.
   `triton_grid_outer_exact_r4_m128_n64_w2_s1_exp2`,
   `triton_grid_outer_exact_r4_m128_n64_w8_s1_exp2`, and
   `triton_grid_outer_exact_r4_m128_n64_w4_s2_exp2`: launch-parameter tuning
-  hooks for the R4 exact-window backend.
+  hooks for the R4 exact-window backend. The conservative C=4 default config
+  uses `triton_grid_outer_exact_r4_m128_n64_w4_s2_exp2`.
 - `triton_grid_outer_exact_r4_m128_n64_s1_exp2_nobias` and
   `triton_grid_outer_exact_r4_m128_n32_s1_exp2_nobias`: exact-window R4
   routing variants that skip routing bias. Use only with a no-bias merge
