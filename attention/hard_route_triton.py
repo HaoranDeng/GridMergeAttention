@@ -273,6 +273,7 @@ if triton is not None:
             has_seed = tl.sum(tl.where(assigned_to_seed & valid_logits, 1, 0), axis=1) > 0
             forced_first_key = (~has_seed[:, None]) & (key_offsets[None, :] == 0)
             active = valid_logits & (assigned_to_seed | forced_first_key)
+            has_keys = tl.sum(tl.where(active, 1, 0), axis=1) > 0
 
             row_max = tl.max(tl.where(active, logits, -float("inf")), axis=1)
             probs = tl.where(active, tl.exp(logits - row_max[:, None]), 0.0)
