@@ -83,6 +83,9 @@ deterministic hash instead of ranking every candidate query row.
   directly in routing layout.
 - `triton_c4_direct_route_j32_w2`: route-layout shared C=4 kernel using
   `block_j=32` and `num_warps=2`; stable conservative default.
+- `triton_c4_direct_route_j32_w2_bf16bias_cached`: same route-layout shared C=4
+  kernel with cached workspaces, but stores the intermediate routing-bias tensor
+  in bf16. This is the current default C=4 speed/error tradeoff.
 - `triton_c4_direct_route_j16_w2_cached`: same conservative merge rule using
   `block_j=16` and `num_warps=2`, with cached workspace buffers. Kept as a
   merge-kernel tuning variant.
