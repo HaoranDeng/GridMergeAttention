@@ -12,6 +12,7 @@ from .hard_route import (
     hard_route_merge_weights,
 )
 from .hard_route_triton import (
+    triton_grid_outer_exact_local_biased_attention,
     triton_hard_route_merge,
     triton_hard_route_merge_c4,
     triton_hard_route_shared_merge_c3_route_layout,
@@ -21,6 +22,8 @@ from .hard_route_triton import (
 
 
 _SHARED_SEED_ROWS_CACHE = {}
+_DEFAULT_C4_MERGE_BACKEND = "triton_c4_direct_route_j32_w2_exp2merge_bf16bias_cached"
+_DEFAULT_EXACT_R4_ROUTING_BACKEND = "triton_grid_outer_exact_r4_m128_n64_w4_s3_exp2"
 
 
 def shared_seed_rows(
@@ -159,7 +162,7 @@ def _merge(seed_queries, k, v, backend, scale):
 
 def _merge_shared(q, seed_rows, k, v, backend, scale):
     backend = (backend or "sdpa").lower()
-    if backend == "triton_c4_direct_route_j32_w2_exp2merge_bf16bias_cached":
+    if backend == _DEFAULT_C4_MERGE_BACKEND:
         return triton_hard_route_shared_merge_c4_route_layout(
             q,
             seed_rows,
@@ -575,6 +578,44 @@ def _merge_shared(q, seed_rows, k, v, backend, scale):
     return _merge(seed_queries, k, v, backend, scale)
 
 
+def _default_c4_exact_r4_attention(q, k, v, scale, seed):
+    """Fast path for the default hard C4 + exact R4 inference configuration."""
+    seed_rows = cached_shared_seed_rows(
+        q.device,
+        k.size(1),
+        k.size(2),
+        q.size(3),
+        q.size(2),
+        4,
+        seed,
+        include_ith=True,
+        fast_with_include=True,
+    )
+    merged_keys, merged_values, routing_bias, _ = triton_hard_route_shared_merge_c4_route_layout(
+        q,
+        seed_rows,
+        k,
+        v,
+        scale=scale,
+        block_j_target=32,
+        num_warps=2,
+        bias_dtype=k.dtype,
+        use_exp2=True,
+        workspace_cache=True,
+    )
+    return triton_grid_outer_exact_local_biased_attention(
+        q,
+        merged_keys,
+        merged_values,
+        routing_bias,
+        local_radius=4,
+        block_m=128,
+        block_n=64,
+        scale=scale,
+        num_stages=3,
+    )
+
+
 def hard_route_shared_attention(
     q,
     k,
@@ -593,12 +634,20 @@ def hard_route_shared_attention(
     # query outers. This keeps the C-seed hard-route rule but removes the
     # repeated per-query-outer KV compression used by hard_route_attention.
     del query_outer_offset
-    include_ith = validate_block_seed_mode(seed_mode, "shared multi-token merging")
-    fast_with_include = seed_mode == "fast_random_with_ith"
     if q.size(1) != k.size(1):
         raise ValueError("shared hard-route expects query_outer and key_outer to match.")
     if num_merge_tokens > k.size(3):
         raise ValueError("num_merge_tokens cannot exceed key columns per block.")
+    if (
+        num_merge_tokens == 4
+        and seed_mode == "fast_random_with_ith"
+        and hard_route_backend == _DEFAULT_C4_MERGE_BACKEND
+        and hard_route_routing_backend == _DEFAULT_EXACT_R4_ROUTING_BACKEND
+    ):
+        return _default_c4_exact_r4_attention(q, k, v, scale, seed)
+
+    include_ith = validate_block_seed_mode(seed_mode, "shared multi-token merging")
+    fast_with_include = seed_mode == "fast_random_with_ith"
 
     seed_rows = cached_shared_seed_rows(
         q.device,
