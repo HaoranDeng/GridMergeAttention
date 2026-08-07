@@ -83,6 +83,9 @@ def video_to_blocks(x, f_tied, h_reduce, w_reduce, height, width):
     if frames % f_tied:
         raise ValueError("number of frames must be divisible by f_tied.")
 
+    if f_tied == 1 and h_reduce == 1 and w_reduce == 1:
+        return x.reshape(batch, frames, height, width, heads, dim)
+
     return rearrange(
         x,
         "b (outer ft hr row wr col) head dim -> b (outer hr wr) (ft row) col head dim",
@@ -96,6 +99,10 @@ def video_to_blocks(x, f_tied, h_reduce, w_reduce, height, width):
 
 def blocks_to_video(x, f_tied, h_reduce, w_reduce):
     """[B, outer, row, col, heads, dim] -> [B, F*H*W, heads, dim]."""
+    if f_tied == 1 and h_reduce == 1 and w_reduce == 1:
+        batch, outer, row, col, heads, dim = x.shape
+        return x.reshape(batch, outer * row * col, heads, dim)
+
     return rearrange(
         x,
         "b (outer hr wr) (ft row) col head dim -> b (outer ft hr row wr col) head dim",
