@@ -742,10 +742,9 @@ if triton is not None:
                 mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
                 other=0.0,
             )
-            logits = tl.dot(q, tl.trans(k)) * SCORE_SCALE
-            if USE_BIAS:
-                bias = tl.load(bias_base + keys, mask=keys < K_LEN, other=float("inf"))
-                logits = logits - bias[None, :]
+            bias = tl.load(bias_base + keys, mask=keys < K_LEN, other=float("inf"))
+
+            logits = tl.dot(q, tl.trans(k)) * SCORE_SCALE - bias[None, :]
             logits = tl.where(
                 (query_offsets[:, None] < Q_LEN) & (keys[None, :] < K_LEN),
                 logits,
