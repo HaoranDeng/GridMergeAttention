@@ -846,27 +846,27 @@ if triton is not None:
         while local_start < local_key_len:
             local_keys = local_start + key_offsets
             keys = local_token_start + local_keys
-            valid_query = query_offsets < Q_LEN
             valid_key = local_keys < local_key_len
-            valid = valid_query[:, None] & valid_key[None, :]
+            valid = (query_offsets[:, None] < Q_LEN) & valid_key[None, :] & (keys[None, :] < K_LEN)
             k = tl.load(
                 key_base + keys[:, None] * D_HEAD + dim_offsets[None, :],
-                mask=valid_key[:, None] & (dim_offsets[None, :] < D_HEAD),
+                mask=valid_key[:, None] & (keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
                 other=0.0,
             )
             v = tl.load(
                 value_base + keys[:, None] * D_HEAD + dim_offsets[None, :],
-                mask=valid_key[:, None] & (dim_offsets[None, :] < D_HEAD),
+                mask=valid_key[:, None] & (keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
                 other=0.0,
             )
             logits = tl.dot(q, tl.trans(k)) * SCORE_SCALE
             if USE_BIAS:
-                bias = tl.load(bias_base + keys, mask=valid_key, other=float("inf"))
+                bias = tl.load(bias_base + keys, mask=valid_key & (keys < K_LEN), other=float("inf"))
                 logits = logits - bias[None, :]
             logits = tl.where(valid, logits, -float("inf"))
 
-            block_max = tl.max(tl.where(valid_key[None, :], logits, -float("inf")), axis=1)
-            next_max = tl.where(valid_query, tl.maximum(max_score, block_max), max_score)
+            has_block = tl.max(tl.where(valid, 1, 0), axis=1) > 0
+            block_max = tl.max(tl.where(valid, logits, -float("inf")), axis=1)
+            next_max = tl.where(has_block, tl.maximum(max_score, block_max), max_score)
             safe_max = tl.where(next_max == -float("inf"), 0.0, next_max)
             p = tl.where(valid, tl.exp2((logits - safe_max[:, None]) * 1.4426950408889634), 0.0)
             alpha = tl.where(
