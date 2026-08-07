@@ -348,7 +348,8 @@ class WanSelfAttention(nn.Module):
         if self.enable_token_merging:
             f, h, w = grid_size
             b, s, _, d = q.shape
-            assert f % self.token_merging_f_tied == 0 and h % self.token_merging_h_reduce == 0 and w % self.token_merging_w_reduce == 0
+            if f % self.token_merging_f_tied != 0:
+                raise ValueError("frame count must be divisible by token_merging_f_tied.")
             hard_route_routing_backend = resolve_hard_route_routing_backend_policy(
                 self.token_merging_hard_route_routing_backend,
                 self.token_merging_hard_route_routing_backend_policy,
