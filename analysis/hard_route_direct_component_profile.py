@@ -7,9 +7,10 @@ from pathlib import Path
 import torch
 from omegaconf import OmegaConf
 
-from attention.common import blocks_to_video, random_seed_rows, video_to_blocks
+from attention.common import blocks_to_video, video_to_blocks
 from attention.hard_route import (
     _direct_route_merge,
+    _cached_seed_rows,
     hard_route_direct_compressed_attention,
 )
 from generate import load_generator_checkpoint, load_prompts
@@ -95,22 +96,18 @@ def load_pipeline(config_path, checkpoint, dtype, device, use_ema):
 
 
 def make_seed_rows(q_chunk, k_blocks, query_outer_offset, args):
-    query_outer = torch.arange(
+    return _cached_seed_rows(
+        q_chunk.device,
         query_outer_offset,
-        query_outer_offset + q_chunk.size(1),
-        device=q_chunk.device,
-    )
-    key_outer = torch.arange(k_blocks.size(1), device=q_chunk.device)
-    return random_seed_rows(
-        query_outer,
-        key_outer,
+        q_chunk.size(1),
+        k_blocks.size(1),
         k_blocks.size(2),
         q_chunk.size(3),
         q_chunk.size(2),
         args.num_merge_tokens,
         args.seed,
-        include_ith=True,
-        fast_with_include=args.seed_mode == "fast_random_with_ith",
+        True,
+        args.seed_mode == "fast_random_with_ith",
     )
 
 

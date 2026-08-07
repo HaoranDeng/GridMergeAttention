@@ -19,6 +19,60 @@ from .hard_route_triton import (
 )
 
 
+_SEED_ROWS_CACHE = {}
+
+
+def _cached_seed_rows(
+    device,
+    query_outer_offset,
+    query_outer_count,
+    key_outer_count,
+    key_rows,
+    query_columns,
+    query_rows,
+    num_seeds,
+    seed,
+    include_ith,
+    fast_with_include,
+):
+    cache_key = (
+        str(device),
+        int(query_outer_offset),
+        int(query_outer_count),
+        int(key_outer_count),
+        int(key_rows),
+        int(query_columns),
+        int(query_rows),
+        int(num_seeds),
+        int(seed),
+        bool(include_ith),
+        bool(fast_with_include),
+    )
+    seed_rows = _SEED_ROWS_CACHE.get(cache_key)
+    if seed_rows is not None:
+        return seed_rows
+
+    query_outer = torch.arange(
+        query_outer_offset,
+        query_outer_offset + query_outer_count,
+        device=device,
+    )
+    key_outer = torch.arange(key_outer_count, device=device)
+    seed_rows = random_seed_rows(
+        query_outer,
+        key_outer,
+        key_rows,
+        query_columns,
+        query_rows,
+        num_seeds,
+        seed,
+        include_ith=include_ith,
+        fast_with_include=fast_with_include,
+    )
+    _SEED_ROWS_CACHE[cache_key] = seed_rows
+    return seed_rows
+
+
 def assign_keys_to_seeds(seed_logits):
     # seed_logits: [B, H, A, F, K, J, C, L].
     num_seeds = seed_logits.size(-2)
@@ -1258,22 +1312,18 @@ def hard_route_attention(
     if num_merge_tokens > k.size(3):
         raise ValueError("num_merge_tokens cannot exceed key columns per block.")
 
-    query_outer = torch.arange(
+    seed_rows = _cached_seed_rows(
+        q.device,
         query_outer_offset,
-        query_outer_offset + q.size(1),
-        device=q.device,
-    )
-    key_outer = torch.arange(k.size(1), device=q.device)
-    seed_rows = random_seed_rows(
-        query_outer,
-        key_outer,
+        q.size(1),
+        k.size(1),
         k.size(2),
         q.size(3),
         q.size(2),
         num_merge_tokens,
         seed,
-        include_ith=include_ith,
-        fast_with_include=fast_with_include,
+        include_ith,
+        fast_with_include,
     )
 
     direct_merge = _direct_route_merge(q, seed_rows, k, v, hard_route_backend, scale)
