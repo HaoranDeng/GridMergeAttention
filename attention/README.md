@@ -90,6 +90,14 @@ deterministic hash instead of ranking every candidate query row.
   shared C=4 kernel, but uses base-2 exponentials in the merge softmax and
   stores routing bias in bf16. This is the current default C=4 speed/error
   tradeoff.
+- `triton_c4_direct_route_j16_w1_exp2merge_bf16bias_cached`,
+  `triton_c4_direct_route_j16_w2_exp2merge_bf16bias_cached`,
+  `triton_c4_direct_route_j32_w1_exp2merge_bf16bias_cached`,
+  `triton_c4_direct_route_j32_w4_exp2merge_bf16bias_cached`,
+  `triton_c4_direct_route_j64_w2_exp2merge_bf16bias_cached`, and
+  `triton_c4_direct_route_j64_w4_exp2merge_bf16bias_cached`: same math as the
+  current default C=4 backend with different merge-kernel tile/warp settings.
+  They are kept as implementation-level tuning variants.
 - `triton_c4_direct_route_j16_w2_cached`: same conservative merge rule using
   `block_j=16` and `num_warps=2`, with cached workspace buffers. Kept as a
   merge-kernel tuning variant.
