@@ -382,13 +382,6 @@ if triton is not None:
             mask=valid_key[:, None] & valid_dim[None, :],
             other=0.0,
         )
-        value_base = value_ptr + (((batch * F + key_outer) * K_ROWS + key_row) * L * H + head) * D_HEAD
-        value_block = tl.load(
-            value_base + key_offsets[:, None] * H * D_HEAD + dim_offsets[None, :],
-            mask=valid_key[:, None] & valid_dim[None, :],
-            other=0.0,
-        )
-
         seed_rows_base = (
             seed_rows_ptr
             + ((((query_outer * F + key_outer) * K_ROWS + key_row) * J + query_offsets) * 4)
@@ -458,6 +451,12 @@ if triton is not None:
         route_group = (((batch * H + head) * A + query_outer) * J + query_offsets)
         route_token_base = (key_outer * K_ROWS + key_row) * 4
         route_tokens = F * K_ROWS * 4
+        value_base = value_ptr + (((batch * F + key_outer) * K_ROWS + key_row) * L * H + head) * D_HEAD
+        value_block = tl.load(
+            value_base + key_offsets[:, None] * H * D_HEAD + dim_offsets[None, :],
+            mask=valid_key[:, None] & valid_dim[None, :],
+            other=0.0,
+        )
 
         for seed_idx in tl.static_range(0, 4):
             logits = logits0
