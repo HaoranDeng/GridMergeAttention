@@ -742,9 +742,10 @@ if triton is not None:
                 mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
                 other=0.0,
             )
-            bias = tl.load(bias_base + keys, mask=keys < K_LEN, other=float("inf"))
-
-            logits = tl.dot(q, tl.trans(k)) * SCORE_SCALE - bias[None, :]
+            logits = tl.dot(q, tl.trans(k)) * SCORE_SCALE
+            if USE_BIAS:
+                bias = tl.load(bias_base + keys, mask=keys < K_LEN, other=float("inf"))
+                logits = logits - bias[None, :]
             logits = tl.where(
                 (query_offsets[:, None] < Q_LEN) & (keys[None, :] < K_LEN),
                 logits,
@@ -888,6 +889,7 @@ if triton is not None:
         BLOCK_D: tl.constexpr,
         SCORE_SCALE: tl.constexpr,
         USE_EXP2: tl.constexpr,
+        USE_BIAS: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_block_id = tl.program_id(1)
@@ -934,9 +936,10 @@ if triton is not None:
                 mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
                 other=0.0,
             )
-            bias = tl.load(bias_base + keys, mask=keys < K_LEN, other=float("inf"))
-
-            logits = tl.dot(q, tl.trans(k)) * SCORE_SCALE - bias[None, :]
+            logits = tl.dot(q, tl.trans(k)) * SCORE_SCALE
+            if USE_BIAS:
+                bias = tl.load(bias_base + keys, mask=keys < K_LEN, other=float("inf"))
+                logits = logits - bias[None, :]
             logits = tl.where(
                 (query_offsets[:, None] < Q_ROWS) & (keys[None, :] < K_LEN),
                 logits,
@@ -1258,6 +1261,7 @@ def triton_direct_route_biased_attention(
     num_warps=1,
     num_stages=1,
     use_exp2=True,
+    use_bias=True,
     out=None,
 ):
     """Fused routing attention that reads/writes hard-route block layout.
@@ -1321,6 +1325,7 @@ def triton_direct_route_biased_attention(
         BLOCK_D=block_d,
         SCORE_SCALE=float(scale),
         USE_EXP2=bool(use_exp2),
+        USE_BIAS=bool(use_bias),
         **meta,
     )
     return out
