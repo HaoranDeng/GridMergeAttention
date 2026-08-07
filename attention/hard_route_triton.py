@@ -354,6 +354,7 @@ if triton is not None:
         FORCE_SEED_KEYS: tl.constexpr,
         LOGIT_INPUT_PRECISION: tl.constexpr,
         COMPUTE_IN_FP16: tl.constexpr,
+        REPRESENTATIVE_KEY: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -504,7 +505,20 @@ if triton is not None:
             else:
                 log_denom = row_max + tl.log(safe_denom)
 
-            merged_key = tl.dot(weights.to(key_compute.dtype), key_compute)
+            if REPRESENTATIVE_KEY:
+                representative_key_index = tl.argmax(
+                    tl.where(active, logits, -float("inf")),
+                    axis=1,
+                )
+                merged_key = tl.load(
+                    key_base
+                    + representative_key_index[:, None] * H * D_HEAD
+                    + dim_offsets[None, :],
+                    mask=valid_query[:, None] & valid_dim[None, :],
+                    other=0.0,
+                )
+            else:
+                merged_key = tl.dot(weights.to(key_compute.dtype), key_compute)
             merged_value = tl.dot(weights.to(value_compute.dtype), value_compute)
             expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
             routing_bias = expected_logit - log_denom
@@ -1792,6 +1806,7 @@ def triton_hard_route_merge_c4_direct_route(
     num_stages=None,
     logit_input_precision="ieee",
     compute_in_fp16=False,
+    representative_key=False,
 ):
     """Exact non-shared C=4 merge that writes routing-ready K/V/bias.
 
@@ -1888,6 +1903,7 @@ def triton_hard_route_merge_c4_direct_route(
         FORCE_SEED_KEYS=bool(force_seed_keys),
         LOGIT_INPUT_PRECISION=logit_input_precision,
         COMPUTE_IN_FP16=bool(compute_in_fp16),
+        REPRESENTATIVE_KEY=bool(representative_key),
         **launch_kwargs,
     )
     return merged_key, merged_value, routing_bias, None
