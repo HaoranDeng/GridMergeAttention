@@ -50,12 +50,15 @@ mkdir -p out "${RESULT_DIR}"
 
 export PYTHONPATH="${REPO_DIR}:${PYTHONPATH:-}"
 export TOKEN_MERGING_FORCE_TORCH_RMSNORM="${TOKEN_MERGING_FORCE_TORCH_RMSNORM:-1}"
+export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-${SCRATCH_ROOT}/triton_cache/${SLURM_JOB_ID:-manual}}"
+mkdir -p "${TRITON_CACHE_DIR}"
 
 echo "Benchmarking non-shared hard C4 attention backends"
 echo "  max calls: ${MAX_CALLS}"
 echo "  prompts:   ${NUM_PROMPTS}"
 echo "  variants:  ${VARIANTS}"
 echo "  output:    ${OUTPUT_JSON}"
+echo "  triton cache: ${TRITON_CACHE_DIR}"
 
 HIP_VISIBLE_DEVICES="${GPU_ID}" ROCR_VISIBLE_DEVICES="${GPU_ID}" CUDA_VISIBLE_DEVICES="${GPU_ID}" \
 PYTHONUNBUFFERED=1 \
