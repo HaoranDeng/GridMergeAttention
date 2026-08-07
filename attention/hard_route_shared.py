@@ -68,7 +68,7 @@ def cached_shared_seed_rows(
 ):
     """Reuse deterministic shared seed rows across layers and denoise steps."""
     cache_key = (
-        str(device),
+        device,
         int(key_outers),
         int(key_rows),
         int(query_columns),
