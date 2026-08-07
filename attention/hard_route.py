@@ -371,7 +371,7 @@ def hard_route_compressed_attention(query, key, value, bias, backend, scale):
     )
 
 
-def hard_route_direct_compressed_attention(q, key, value, bias, backend, scale):
+def hard_route_direct_compressed_attention(q, key, value, bias, backend, scale, output=None):
     backend = (backend or "").lower()
     direct_configs = {
         "triton_direct_m16_n64_w1_s1_exp2": (16, 64, 1),
@@ -398,6 +398,7 @@ def hard_route_direct_compressed_attention(q, key, value, bias, backend, scale):
             num_warps=num_warps,
             num_stages=1,
             use_exp2=True,
+            out=output,
         )
     return None
 
@@ -1246,6 +1247,7 @@ def hard_route_attention(
     query_outer_offset,
     hard_route_backend="sdpa",
     hard_route_routing_backend="sdpa",
+    output=None,
 ):
     # q:   [B, A, I, J, H, D]
     # k/v: [B, F, K, L, H, D]
@@ -1299,6 +1301,7 @@ def hard_route_attention(
             bias,
             hard_route_routing_backend,
             scale,
+            output=output if output is not None and output.is_contiguous() else None,
         )
         if direct_out is not None:
             return direct_out

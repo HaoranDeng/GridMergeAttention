@@ -171,7 +171,13 @@ def token_merging_attn(
             if layout in HARD_ROUTE_LAYOUTS:
                 args.append(hard_route_backend)
                 args.append(hard_route_routing_backend)
-            out[:, start:end] = attention_impl(*args)
+            out_slice = out[:, start:end]
+            if layout == LAYOUT_HARD_ROUTE and str(hard_route_routing_backend).startswith("triton_direct_"):
+                chunk = attention_impl(*args, output=out_slice)
+                if chunk is not out_slice:
+                    out_slice.copy_(chunk)
+            else:
+                out_slice.copy_(attention_impl(*args))
         else:
             out[:, start:end] = attention_impl(
                 q_blocks[:, start:end],

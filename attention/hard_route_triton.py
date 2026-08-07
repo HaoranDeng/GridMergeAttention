@@ -1258,6 +1258,7 @@ def triton_direct_route_biased_attention(
     num_warps=1,
     num_stages=1,
     use_exp2=True,
+    out=None,
 ):
     """Fused routing attention that reads/writes hard-route block layout.
 
@@ -1292,7 +1293,13 @@ def triton_direct_route_biased_attention(
     if block_d > 128:
         raise ValueError(f"Triton hard-route attention supports head dim <= 128, got {dim}.")
 
-    out = _cached_empty("direct_route_attention_out", query.shape, query.device, query.dtype)
+    if out is None:
+        out = _cached_empty("direct_route_attention_out", query.shape, query.device, query.dtype)
+    else:
+        if out.shape != query.shape or out.device != query.device or out.dtype != query.dtype:
+            raise ValueError("direct-route attention output tensor has inconsistent shape/device/dtype.")
+        if not out.is_contiguous():
+            raise ValueError("direct-route attention output tensor must be contiguous.")
     grid = (groups, triton.cdiv(query_rows, block_m))
     meta = {"num_warps": int(num_warps)}
     if num_stages is not None:
