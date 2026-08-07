@@ -349,14 +349,10 @@ if triton is not None:
         BLOCK_J: tl.constexpr,
         BLOCK_L: tl.constexpr,
         BLOCK_D: tl.constexpr,
-        QUERY_COL_OFFSET: tl.constexpr,
         SCORE_SCALE: tl.constexpr,
         USE_EXP2: tl.constexpr,
         FORCE_SEED_KEYS: tl.constexpr,
         LOGIT_INPUT_PRECISION: tl.constexpr,
-        COMPUTE_IN_FP16: tl.constexpr,
-        REPRESENTATIVE_KEY: tl.constexpr,
-        TOP2_KEY: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -370,7 +366,7 @@ if triton is not None:
         query_outer = tmp % A
         batch = tmp // A
 
-        query_offsets = QUERY_COL_OFFSET + query_col_block * BLOCK_J + tl.arange(0, BLOCK_J)
+        query_offsets = query_col_block * BLOCK_J + tl.arange(0, BLOCK_J)
         key_offsets = tl.arange(0, BLOCK_L)
         dim_offsets = tl.arange(0, BLOCK_D)
         valid_query = query_offsets < J
@@ -422,18 +418,10 @@ if triton is not None:
             other=0.0,
         )
 
-        key_compute = key_block
-        if COMPUTE_IN_FP16:
-            key_compute = key_block.to(tl.float16)
-            seed0 = seed0.to(tl.float16)
-            seed1 = seed1.to(tl.float16)
-            seed2 = seed2.to(tl.float16)
-            seed3 = seed3.to(tl.float16)
-
-        logits0 = tl.dot(seed0, tl.trans(key_compute), input_precision=LOGIT_INPUT_PRECISION) * SCORE_SCALE
-        logits1 = tl.dot(seed1, tl.trans(key_compute), input_precision=LOGIT_INPUT_PRECISION) * SCORE_SCALE
-        logits2 = tl.dot(seed2, tl.trans(key_compute), input_precision=LOGIT_INPUT_PRECISION) * SCORE_SCALE
-        logits3 = tl.dot(seed3, tl.trans(key_compute), input_precision=LOGIT_INPUT_PRECISION) * SCORE_SCALE
+        logits0 = tl.dot(seed0, tl.trans(key_block), input_precision=LOGIT_INPUT_PRECISION) * SCORE_SCALE
+        logits1 = tl.dot(seed1, tl.trans(key_block), input_precision=LOGIT_INPUT_PRECISION) * SCORE_SCALE
+        logits2 = tl.dot(seed2, tl.trans(key_block), input_precision=LOGIT_INPUT_PRECISION) * SCORE_SCALE
+        logits3 = tl.dot(seed3, tl.trans(key_block), input_precision=LOGIT_INPUT_PRECISION) * SCORE_SCALE
         valid_logits = valid_query[:, None] & valid_key[None, :]
         logits0 = tl.where(valid_logits, logits0, -float("inf"))
         logits1 = tl.where(valid_logits, logits1, -float("inf"))
@@ -466,10 +454,6 @@ if triton is not None:
             mask=valid_key[:, None] & valid_dim[None, :],
             other=0.0,
         )
-        value_compute = value_block
-        if COMPUTE_IN_FP16:
-            value_compute = value_block.to(tl.float16)
-
         for seed_idx in tl.static_range(0, 4):
             logits = logits0
             if seed_idx == 1:
@@ -507,41 +491,8 @@ if triton is not None:
             else:
                 log_denom = row_max + tl.log(safe_denom)
 
-            key_scores = tl.where(active, logits, -float("inf"))
-            if REPRESENTATIVE_KEY:
-                representative_key_index = tl.argmax(key_scores, axis=1)
-                merged_key = tl.load(
-                    key_base
-                    + representative_key_index[:, None] * H * D_HEAD
-                    + dim_offsets[None, :],
-                    mask=valid_query[:, None] & valid_dim[None, :],
-                    other=0.0,
-                )
-            elif TOP2_KEY:
-                top1_index = tl.argmax(key_scores, axis=1)
-                top1_score = row_max
-                top2_scores = tl.where(key_offsets[None, :] == top1_index[:, None], -float("inf"), key_scores)
-                top2_index = tl.argmax(top2_scores, axis=1)
-                top2_score = tl.max(top2_scores, axis=1)
-                if USE_EXP2:
-                    top2_weight = tl.exp2((top2_score - top1_score) * 1.4426950408889634)
-                else:
-                    top2_weight = tl.exp(top2_score - top1_score)
-                top2_weight = tl.where(top2_score > -float("inf"), top2_weight, 0.0)
-                top1_key = tl.load(
-                    key_base + top1_index[:, None] * H * D_HEAD + dim_offsets[None, :],
-                    mask=valid_query[:, None] & valid_dim[None, :],
-                    other=0.0,
-                )
-                top2_key = tl.load(
-                    key_base + top2_index[:, None] * H * D_HEAD + dim_offsets[None, :],
-                    mask=valid_query[:, None] & valid_dim[None, :],
-                    other=0.0,
-                )
-                merged_key = (top1_key + top2_weight[:, None] * top2_key) / (1.0 + top2_weight[:, None])
-            else:
-                merged_key = tl.dot(weights.to(key_compute.dtype), key_compute)
-            merged_value = tl.dot(weights.to(value_compute.dtype), value_compute)
+            merged_key = tl.dot(weights.to(key_block.dtype), key_block)
+            merged_value = tl.dot(weights.to(value_block.dtype), value_block)
             expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
             routing_bias = expected_logit - log_denom
             if not FORCE_SEED_KEYS:
@@ -1827,11 +1778,6 @@ def triton_hard_route_merge_c4_direct_route(
     force_seed_keys=False,
     num_stages=None,
     logit_input_precision="ieee",
-    compute_in_fp16=False,
-    representative_key=False,
-    top2_key=False,
-    tail_block_j_target=None,
-    tail_num_warps=1,
 ):
     """Exact non-shared C=4 merge that writes routing-ready K/V/bias.
 
@@ -1897,51 +1843,38 @@ def triton_hard_route_merge_c4_direct_route(
         bias_dtype,
     )
 
-    group_count = batch * query_outer * key_outer * key_rows * heads
-
-    def launch_column_tiles(query_col_offset, column_count, tile_j, warps):
-        grid = (group_count, triton.cdiv(column_count, tile_j))
-        launch_kwargs = {"num_warps": int(warps)}
-        if num_stages is not None:
-            launch_kwargs["num_stages"] = int(num_stages)
-        _hard_route_merge_c4_direct_route_kernel[grid](
-            query,
-            seed_rows,
-            key,
-            value,
-            merged_key,
-            merged_value,
-            routing_bias,
-            A=query_outer,
-            F=key_outer,
-            Q_ROWS=query_rows,
-            K_ROWS=key_rows,
-            J=query_columns,
-            H=heads,
-            L=key_columns,
-            D_HEAD=dim,
-            BLOCK_J=tile_j,
-            BLOCK_L=block_l,
-            BLOCK_D=block_d,
-            QUERY_COL_OFFSET=query_col_offset,
-            SCORE_SCALE=float(scale),
-            USE_EXP2=bool(use_exp2),
-            FORCE_SEED_KEYS=bool(force_seed_keys),
-            LOGIT_INPUT_PRECISION=logit_input_precision,
-            COMPUTE_IN_FP16=bool(compute_in_fp16),
-            REPRESENTATIVE_KEY=bool(representative_key),
-            TOP2_KEY=bool(top2_key),
-            **launch_kwargs,
-        )
-
-    tail_block_j = int(tail_block_j_target or 0)
-    main_columns = (query_columns // block_j) * block_j
-    if tail_block_j > 0 and 0 < main_columns < query_columns:
-        launch_column_tiles(0, main_columns, block_j, num_warps)
-        tail_columns = query_columns - main_columns
-        launch_column_tiles(main_columns, tail_columns, tail_block_j, tail_num_warps)
-    else:
-        launch_column_tiles(0, query_columns, block_j, num_warps)
+    grid = (
+        batch * query_outer * key_outer * key_rows * heads,
+        triton.cdiv(query_columns, block_j),
+    )
+    launch_kwargs = {"num_warps": int(num_warps)}
+    if num_stages is not None:
+        launch_kwargs["num_stages"] = int(num_stages)
+    _hard_route_merge_c4_direct_route_kernel[grid](
+        query,
+        seed_rows,
+        key,
+        value,
+        merged_key,
+        merged_value,
+        routing_bias,
+        A=query_outer,
+        F=key_outer,
+        Q_ROWS=query_rows,
+        K_ROWS=key_rows,
+        J=query_columns,
+        H=heads,
+        L=key_columns,
+        D_HEAD=dim,
+        BLOCK_J=block_j,
+        BLOCK_L=block_l,
+        BLOCK_D=block_d,
+        SCORE_SCALE=float(scale),
+        USE_EXP2=bool(use_exp2),
+        FORCE_SEED_KEYS=bool(force_seed_keys),
+        LOGIT_INPUT_PRECISION=logit_input_precision,
+        **launch_kwargs,
+    )
     return merged_key, merged_value, routing_bias, None
 
 

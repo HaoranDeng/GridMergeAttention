@@ -217,69 +217,13 @@ def exact_variants():
             "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot",
             "hard_route_routing_backend": "triton_direct_m32_n64_w1_s1_exp2",
         },
-        "hard_c4_direct_route_j16_w1_exp2merge_forcekeys_fp16kvbias_s1_fastdot_direct_m32_n32_w1_s1_exp2": {
-            "hard_route_backend": "triton_c4_direct_route_j16_w1_exp2merge_forcekeys_fp16kvbias_s1_fastdot",
-            "hard_route_routing_backend": "triton_direct_m32_n32_w1_s1_exp2",
-        },
-        "hard_c4_direct_route_j8_w1_exp2merge_forcekeys_fp16kvbias_s1_fastdot_direct_m32_n32_w1_s1_exp2": {
-            "hard_route_backend": "triton_c4_direct_route_j8_w1_exp2merge_forcekeys_fp16kvbias_s1_fastdot",
-            "hard_route_routing_backend": "triton_direct_m32_n32_w1_s1_exp2",
-        },
-        "hard_c4_direct_route_j8_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_direct_m32_n32_w1_s1_exp2": {
-            "hard_route_backend": "triton_c4_direct_route_j8_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot",
-            "hard_route_routing_backend": "triton_direct_m32_n32_w1_s1_exp2",
-        },
         "hard_c4_direct_route_j16_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_direct_m32_n32_w1_s1_exp2": {
             "hard_route_backend": "triton_c4_direct_route_j16_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot",
             "hard_route_routing_backend": "triton_direct_m32_n32_w1_s1_exp2",
         },
-        "hard_c4_direct_route_j16_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_direct_m32_n32_w2_s1_exp2": {
-            "hard_route_backend": "triton_c4_direct_route_j16_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot",
-            "hard_route_routing_backend": "triton_direct_m32_n32_w2_s1_exp2",
-        },
-        "hard_c4_direct_route_j16_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_direct_m32_n32_w4_s1_exp2": {
-            "hard_route_backend": "triton_c4_direct_route_j16_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot",
-            "hard_route_routing_backend": "triton_direct_m32_n32_w4_s1_exp2",
-        },
         "hard_c4_direct_route_j16_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_direct_m32_n64_w1_s1_exp2": {
             "hard_route_backend": "triton_c4_direct_route_j16_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot",
             "hard_route_routing_backend": "triton_direct_m32_n64_w1_s1_exp2",
-        },
-        "hard_c4_direct_route_j16_w2_tail4_exp2merge_forcekeys_fp16kvbias_s1_fastdot_direct_m32_n32_w1_s1_exp2": {
-            "hard_route_backend": "triton_c4_direct_route_j16_w2_tail4_exp2merge_forcekeys_fp16kvbias_s1_fastdot",
-            "hard_route_routing_backend": "triton_direct_m32_n32_w1_s1_exp2",
-        },
-        "hard_c4_direct_route_j16_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_repkey_direct_m32_n32_w1_s1_exp2": {
-            "hard_route_backend": "triton_c4_direct_route_j16_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_repkey",
-            "hard_route_routing_backend": "triton_direct_m32_n32_w1_s1_exp2",
-        },
-        "hard_c4_direct_route_j16_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_top2key_direct_m32_n32_w1_s1_exp2": {
-            "hard_route_backend": "triton_c4_direct_route_j16_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_top2key",
-            "hard_route_routing_backend": "triton_direct_m32_n32_w1_s1_exp2",
-        },
-        "hard_c4_direct_route_j32_w1_exp2merge_forcekeys_fp16kvbias_s1_fastdot_direct_m32_n32_w1_s1_exp2": {
-            "hard_route_backend": "triton_c4_direct_route_j32_w1_exp2merge_forcekeys_fp16kvbias_s1_fastdot",
-            "hard_route_routing_backend": "triton_direct_m32_n32_w1_s1_exp2",
-        },
-        "hard_c4_direct_route_j32_w4_exp2merge_forcekeys_fp16kvbias_s1_fastdot_direct_m32_n32_w1_s1_exp2": {
-            "hard_route_backend": "triton_c4_direct_route_j32_w4_exp2merge_forcekeys_fp16kvbias_s1_fastdot",
-            "hard_route_routing_backend": "triton_direct_m32_n32_w1_s1_exp2",
-        },
-        "hard_c4_direct_route_j64_w1_exp2merge_forcekeys_fp16kvbias_s1_fastdot_direct_m32_n32_w1_s1_exp2": {
-            "hard_route_backend": "triton_c4_direct_route_j64_w1_exp2merge_forcekeys_fp16kvbias_s1_fastdot",
-            "hard_route_routing_backend": "triton_direct_m32_n32_w1_s1_exp2",
-        },
-        "hard_c4_direct_route_j64_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_direct_m32_n32_w1_s1_exp2": {
-            "hard_route_backend": "triton_c4_direct_route_j64_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot",
-            "hard_route_routing_backend": "triton_direct_m32_n32_w1_s1_exp2",
-        },
-        "hard_c4_direct_route_j64_w4_exp2merge_forcekeys_fp16kvbias_s1_fastdot_direct_m32_n32_w1_s1_exp2": {
-            "hard_route_backend": "triton_c4_direct_route_j64_w4_exp2merge_forcekeys_fp16kvbias_s1_fastdot",
-            "hard_route_routing_backend": "triton_direct_m32_n32_w1_s1_exp2",
-        },
-        "hard_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16all_s1_fastdot_direct_m32_n32_w1_s1_exp2": {
-            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16all_s1_fastdot",
-            "hard_route_routing_backend": "triton_direct_m32_n32_w1_s1_exp2",
         },
         "hard_c4_direct_route_j32_w2_exp2merge_forcekeys_bf16bias_s2_direct_m32_n32_w1_s1_exp2": {
             "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_bf16bias_s2",
