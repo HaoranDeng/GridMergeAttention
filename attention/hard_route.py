@@ -201,6 +201,20 @@ def _direct_route_merge(q, seed_rows, k, v, backend, scale):
             use_exp2=True,
             force_seed_keys=True,
         )
+    if backend == "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_bf16bias_fastbias":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=2,
+            bias_dtype=torch.bfloat16,
+            use_exp2=True,
+            force_seed_keys=True,
+            fast_bias_product=True,
+        )
     if backend == "triton_c4_direct_route_j32_w2_exp2merge_bf16bias":
         return triton_hard_route_merge_c4_direct_route(
             q,
@@ -467,8 +481,6 @@ def hard_route_direct_compressed_attention(q, key, value, bias, backend, scale, 
     direct_configs = {
         "triton_direct_m16_n64_w1_s1_exp2": (16, 64, 1),
         "triton_direct_m16_n128_w1_s1_exp2": (16, 128, 1),
-        "triton_direct_m32_n16_w1_s1_exp2": (32, 16, 1),
-        "triton_direct_m32_n16_w2_s1_exp2": (32, 16, 2),
         "triton_direct_m32_n32_w1_s1_exp2": (32, 32, 1),
         "triton_direct_m32_n64_w1_s1_exp2": (32, 64, 1),
         "triton_direct_m32_n64_w2_s1_exp2": (32, 64, 2),
