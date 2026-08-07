@@ -90,6 +90,16 @@ def _direct_route_merge(q, seed_rows, k, v, backend, scale):
             block_j_target=16,
             num_warps=2,
         )
+    if backend == "triton_c4_direct_route_j16_w1":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=16,
+            num_warps=1,
+        )
     if backend == "triton_c4_direct_route_j32_w2":
         return triton_hard_route_merge_c4_direct_route(
             q,
@@ -99,6 +109,56 @@ def _direct_route_merge(q, seed_rows, k, v, backend, scale):
             scale=scale,
             block_j_target=32,
             num_warps=2,
+        )
+    if backend == "triton_c4_direct_route_j32_w1":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=1,
+        )
+    if backend == "triton_c4_direct_route_j32_w4":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=4,
+        )
+    if backend == "triton_c4_direct_route_j64_w1":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=64,
+            num_warps=1,
+        )
+    if backend == "triton_c4_direct_route_j64_w2":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=64,
+            num_warps=2,
+        )
+    if backend == "triton_c4_direct_route_j64_w4":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=64,
+            num_warps=4,
         )
     return None
 

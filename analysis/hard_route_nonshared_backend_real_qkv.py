@@ -97,9 +97,37 @@ def exact_variants():
             "hard_route_backend": "triton_c4_direct_route_j16_w2",
             "hard_route_routing_backend": "triton",
         },
+        "hard_c4_direct_route_j16_w1_route_m32_n64_w1_s1_exp2": {
+            "hard_route_backend": "triton_c4_direct_route_j16_w1",
+            "hard_route_routing_backend": "triton_m32_n64_w1_s1_exp2",
+        },
+        "hard_c4_direct_route_j16_w2_route_m32_n64_w1_s1_exp2": {
+            "hard_route_backend": "triton_c4_direct_route_j16_w2",
+            "hard_route_routing_backend": "triton_m32_n64_w1_s1_exp2",
+        },
         "hard_c4_direct_route_j32_w2": {
             "hard_route_backend": "triton_c4_direct_route_j32_w2",
             "hard_route_routing_backend": "triton",
+        },
+        "hard_c4_direct_route_j32_w1_route_m32_n64_w1_s1_exp2": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w1",
+            "hard_route_routing_backend": "triton_m32_n64_w1_s1_exp2",
+        },
+        "hard_c4_direct_route_j32_w4_route_m32_n64_w1_s1_exp2": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w4",
+            "hard_route_routing_backend": "triton_m32_n64_w1_s1_exp2",
+        },
+        "hard_c4_direct_route_j64_w1_route_m32_n64_w1_s1_exp2": {
+            "hard_route_backend": "triton_c4_direct_route_j64_w1",
+            "hard_route_routing_backend": "triton_m32_n64_w1_s1_exp2",
+        },
+        "hard_c4_direct_route_j64_w2_route_m32_n64_w1_s1_exp2": {
+            "hard_route_backend": "triton_c4_direct_route_j64_w2",
+            "hard_route_routing_backend": "triton_m32_n64_w1_s1_exp2",
+        },
+        "hard_c4_direct_route_j64_w4_route_m32_n64_w1_s1_exp2": {
+            "hard_route_backend": "triton_c4_direct_route_j64_w4",
+            "hard_route_routing_backend": "triton_m32_n64_w1_s1_exp2",
         },
         "hard_c4_direct_route_j32_w2_route_m32_n128": {
             "hard_route_backend": "triton_c4_direct_route_j32_w2",
