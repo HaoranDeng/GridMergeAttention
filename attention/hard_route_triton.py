@@ -1193,50 +1193,6 @@ def triton_grid_outer_exact_local_biased_attention(
     return out
 
 
-def triton_grid_outer_exact_r4_m128_n64_w4_s3_biased_attention(query, key, value, bias, scale=1.0):
-    """Fast wrapper for the default exact-R4 compressed-attention launch."""
-    if triton is None:
-        raise RuntimeError("hard_route_routing_backend='triton_grid_outer_exact_*' requires Triton.")
-
-    query = query.contiguous()
-    key = key.contiguous()
-    value = value.contiguous()
-    bias = bias.contiguous()
-
-    batch, query_outer, query_rows, query_columns, heads, dim = query.shape
-    groups, key_len, _ = key.shape
-    query_len = query_outer * query_rows
-    tokens_per_outer = key_len // query_outer
-    block_d = triton.next_power_of_2(dim)
-
-    out = _cached_empty("grid_outer_exact_local_attention_out", query.shape, query.device, query.dtype)
-    grid = (groups, triton.cdiv(query_len, 128))
-    _grid_outer_exact_local_biased_attention_kernel[grid](
-        query,
-        key,
-        value,
-        bias,
-        out,
-        A_OUTER=query_outer,
-        Q_ROWS=query_rows,
-        J_COLS=query_columns,
-        H_HEADS=heads,
-        Q_LEN=query_len,
-        K_LEN=key_len,
-        TOKENS_PER_OUTER=tokens_per_outer,
-        LOCAL_RADIUS=4,
-        D_HEAD=dim,
-        BLOCK_M=128,
-        BLOCK_N=64,
-        BLOCK_D=block_d,
-        SCORE_SCALE=float(scale),
-        USE_BIAS=True,
-        num_warps=4,
-        num_stages=3,
-    )
-    return out
-
-
 def triton_hard_route_merge(seed_queries, key, value, scale=1.0):
     """Fuse hard assignment, per-cluster softmax, KV merge, and routing bias.
 
@@ -1703,7 +1659,6 @@ __all__ = [
     "triton_biased_attention",
     "triton_grid_biased_attention",
     "triton_grid_outer_exact_local_biased_attention",
-    "triton_grid_outer_exact_r4_m128_n64_w4_s3_biased_attention",
     "triton_grid_outer_local_biased_attention",
     "triton_hard_route_merge",
     "triton_hard_route_merge_c4",
