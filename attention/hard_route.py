@@ -188,6 +188,42 @@ def _direct_route_merge(q, seed_rows, k, v, backend, scale):
             use_exp2=True,
             force_seed_keys=True,
         )
+    if backend == "triton_c4_direct_route_j16_w1_exp2merge_forcekeys":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=16,
+            num_warps=1,
+            use_exp2=True,
+            force_seed_keys=True,
+        )
+    if backend == "triton_c4_direct_route_j16_w2_exp2merge_forcekeys":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=16,
+            num_warps=2,
+            use_exp2=True,
+            force_seed_keys=True,
+        )
+    if backend == "triton_c4_direct_route_j32_w1_exp2merge_forcekeys":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=1,
+            use_exp2=True,
+            force_seed_keys=True,
+        )
     if backend == "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_bf16bias":
         return triton_hard_route_merge_c4_direct_route(
             q,
