@@ -464,10 +464,8 @@ if triton is not None:
                         routing_bias = -tl.log(tl.maximum(count, 1.0))
                     else:
                         log_denom = row_max + tl.log(safe_denom)
-                        routing_bias = tl.sum(
-                            tl.where(active, weights * (logits - log_denom[:, None]), 0.0),
-                            axis=1,
-                        )
+                        weighted_logits = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
+                        routing_bias = weighted_logits - log_denom
 
                 if ROUTE_LAYOUT:
                     group = (batch * H + head) * J + query_offsets
