@@ -355,6 +355,7 @@ if triton is not None:
         LOGIT_INPUT_PRECISION: tl.constexpr,
         COMPUTE_IN_FP16: tl.constexpr,
         REPRESENTATIVE_KEY: tl.constexpr,
+        TOP2_KEY: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -505,11 +506,9 @@ if triton is not None:
             else:
                 log_denom = row_max + tl.log(safe_denom)
 
+            key_scores = tl.where(active, logits, -float("inf"))
             if REPRESENTATIVE_KEY:
-                representative_key_index = tl.argmax(
-                    tl.where(active, logits, -float("inf")),
-                    axis=1,
-                )
+                representative_key_index = tl.argmax(key_scores, axis=1)
                 merged_key = tl.load(
                     key_base
                     + representative_key_index[:, None] * H * D_HEAD
@@ -517,6 +516,28 @@ if triton is not None:
                     mask=valid_query[:, None] & valid_dim[None, :],
                     other=0.0,
                 )
+            elif TOP2_KEY:
+                top1_index = tl.argmax(key_scores, axis=1)
+                top1_score = row_max
+                top2_scores = tl.where(key_offsets[None, :] == top1_index[:, None], -float("inf"), key_scores)
+                top2_index = tl.argmax(top2_scores, axis=1)
+                top2_score = tl.max(top2_scores, axis=1)
+                if USE_EXP2:
+                    top2_weight = tl.exp2((top2_score - top1_score) * 1.4426950408889634)
+                else:
+                    top2_weight = tl.exp(top2_score - top1_score)
+                top2_weight = tl.where(top2_score > -float("inf"), top2_weight, 0.0)
+                top1_key = tl.load(
+                    key_base + top1_index[:, None] * H * D_HEAD + dim_offsets[None, :],
+                    mask=valid_query[:, None] & valid_dim[None, :],
+                    other=0.0,
+                )
+                top2_key = tl.load(
+                    key_base + top2_index[:, None] * H * D_HEAD + dim_offsets[None, :],
+                    mask=valid_query[:, None] & valid_dim[None, :],
+                    other=0.0,
+                )
+                merged_key = (top1_key + top2_weight[:, None] * top2_key) / (1.0 + top2_weight[:, None])
             else:
                 merged_key = tl.dot(weights.to(key_compute.dtype), key_compute)
             merged_value = tl.dot(weights.to(value_compute.dtype), value_compute)
@@ -1807,6 +1828,7 @@ def triton_hard_route_merge_c4_direct_route(
     logit_input_precision="ieee",
     compute_in_fp16=False,
     representative_key=False,
+    top2_key=False,
 ):
     """Exact non-shared C=4 merge that writes routing-ready K/V/bias.
 
@@ -1904,6 +1926,7 @@ def triton_hard_route_merge_c4_direct_route(
         LOGIT_INPUT_PRECISION=logit_input_precision,
         COMPUTE_IN_FP16=bool(compute_in_fp16),
         REPRESENTATIVE_KEY=bool(representative_key),
+        TOP2_KEY=bool(top2_key),
         **launch_kwargs,
     )
     return merged_key, merged_value, routing_bias, None

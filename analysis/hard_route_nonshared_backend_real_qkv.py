@@ -241,6 +241,10 @@ def exact_variants():
             "hard_route_backend": "triton_c4_direct_route_j16_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_repkey",
             "hard_route_routing_backend": "triton_direct_m32_n32_w1_s1_exp2",
         },
+        "hard_c4_direct_route_j16_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_top2key_direct_m32_n32_w1_s1_exp2": {
+            "hard_route_backend": "triton_c4_direct_route_j16_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_top2key",
+            "hard_route_routing_backend": "triton_direct_m32_n32_w1_s1_exp2",
+        },
         "hard_c4_direct_route_j32_w1_exp2merge_forcekeys_fp16kvbias_s1_fastdot_direct_m32_n32_w1_s1_exp2": {
             "hard_route_backend": "triton_c4_direct_route_j32_w1_exp2merge_forcekeys_fp16kvbias_s1_fastdot",
             "hard_route_routing_backend": "triton_direct_m32_n32_w1_s1_exp2",
