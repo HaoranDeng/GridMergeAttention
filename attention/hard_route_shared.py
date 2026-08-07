@@ -23,6 +23,7 @@ from .hard_route_triton import (
 
 
 _SHARED_SEED_ROWS_CACHE = {}
+_DEFAULT_C4_SEED_ROWS_CACHE = {}
 _DEFAULT_C4_MERGE_BACKEND = "triton_c4_direct_route_j32_w2_exp2merge_bf16bias_cached"
 _DEFAULT_EXACT_R4_ROUTING_BACKEND = "triton_grid_outer_exact_r4_m128_n64_w4_s3_exp2"
 
@@ -96,6 +97,32 @@ def cached_shared_seed_rows(
             fast_with_include=fast_with_include,
         )
         _SHARED_SEED_ROWS_CACHE[cache_key] = seed_rows
+    return seed_rows
+
+
+def cached_default_c4_seed_rows(device, key_outers, key_rows, query_columns, query_rows, seed):
+    """Reuse seed rows for the default fast_random_with_ith C=4 path."""
+    cache_key = (device, key_outers, key_rows, query_columns, query_rows, seed)
+    seed_rows = _DEFAULT_C4_SEED_ROWS_CACHE.get(cache_key)
+    if seed_rows is not None:
+        return seed_rows
+
+    key_outer = torch.arange(key_outers, device=device).view(-1, 1, 1)
+    key_row = torch.arange(key_rows, device=device).view(1, key_rows, 1)
+    query_col = torch.arange(query_columns, device=device).view(1, 1, query_columns)
+    base = (
+        key_outer * 73856093
+        + key_outer * 19349663
+        + key_row * 83492791
+        + query_col * 2654435761
+        + int(seed)
+    )
+    ith_seed = key_row.expand(key_outers, key_rows, query_columns)
+    offsets = torch.arange(3, device=device).view(1, 1, 1, 3)
+    extra = (base.unsqueeze(-1).remainder(query_rows - 1) + offsets).remainder(query_rows - 1)
+    extra = extra + (extra >= ith_seed.unsqueeze(-1)).long()
+    seed_rows = torch.cat((ith_seed.unsqueeze(-1).long(), extra.long()), dim=-1)
+    _DEFAULT_C4_SEED_ROWS_CACHE[cache_key] = seed_rows
     return seed_rows
 
 
@@ -581,16 +608,13 @@ def _merge_shared(q, seed_rows, k, v, backend, scale):
 
 def _default_c4_exact_r4_attention(q, k, v, scale, seed):
     """Fast path for the default hard C4 + exact R4 inference configuration."""
-    seed_rows = cached_shared_seed_rows(
+    seed_rows = cached_default_c4_seed_rows(
         q.device,
         k.size(1),
         k.size(2),
         q.size(3),
         q.size(2),
-        4,
         seed,
-        include_ith=True,
-        fast_with_include=True,
     )
     merged_keys, merged_values, routing_bias, _ = triton_hard_route_shared_merge_c4_default_route_layout(
         q,
