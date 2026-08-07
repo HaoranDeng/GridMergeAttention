@@ -522,9 +522,12 @@ def hard_route_compressed_attention(query, key, value, bias, backend, scale):
 def hard_route_direct_compressed_attention(q, key, value, bias, backend, scale, output=None):
     backend = (backend or "").lower()
     direct_configs = {
+        "triton_direct_m16_n32_w1_s1_exp2": (16, 32, 1),
         "triton_direct_m16_n64_w1_s1_exp2": (16, 64, 1),
         "triton_direct_m16_n128_w1_s1_exp2": (16, 128, 1),
+        "triton_direct_m32_n16_w1_s1_exp2": (32, 16, 1),
         "triton_direct_m32_n32_w1_s1_exp2": (32, 32, 1),
+        "triton_direct_m32_n32_w2_s1_exp2": (32, 32, 2),
         "triton_direct_m32_n64_w1_s1_exp2": (32, 64, 1),
         "triton_direct_m32_n64_w2_s1_exp2": (32, 64, 2),
         "triton_direct_m32_n128_w1_s1_exp2": (32, 128, 1),
