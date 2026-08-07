@@ -38,6 +38,7 @@ CHECKPOINT="${CHECKPOINT:-${REPO_DIR}/checkpoints/self_forcing_dmd.pt}"
 PROMPT_PATH="${PROMPT_PATH:-${REPO_DIR}/prompts/MovieGenVideoBench_extended.txt}"
 OUTPUT_JSON="${OUTPUT_JSON:-${RESULT_DIR}/hard_c4_attention_backends.json}"
 MAX_CALLS="${MAX_CALLS:-30}"
+NUM_PROMPTS="${NUM_PROMPTS:-1}"
 VARIANTS="${VARIANTS:-hard_c4_triton_c4,hard_c4_triton_c4_j16,hard_c4_direct_route_j16_w2,hard_c4_direct_route_j32_w2,hard_c4_triton_c4_route_m128_n32,hard_c4_triton_c4_route_m128_n32_s1,hard_c4_triton_c4_route_m256_n32}"
 QUERY_OUTER_CHUNK="${QUERY_OUTER_CHUNK:-7}"
 SEED="${SEED:-0}"
@@ -52,6 +53,7 @@ export TOKEN_MERGING_FORCE_TORCH_RMSNORM="${TOKEN_MERGING_FORCE_TORCH_RMSNORM:-1
 
 echo "Benchmarking non-shared hard C4 attention backends"
 echo "  max calls: ${MAX_CALLS}"
+echo "  prompts:   ${NUM_PROMPTS}"
 echo "  variants:  ${VARIANTS}"
 echo "  output:    ${OUTPUT_JSON}"
 
@@ -64,6 +66,7 @@ python analysis/hard_route_nonshared_backend_real_qkv.py \
   --dtype "${DTYPE}" \
   --use_ema \
   --max_calls "${MAX_CALLS}" \
+  --num_prompts "${NUM_PROMPTS}" \
   --query_outer_chunk "${QUERY_OUTER_CHUNK}" \
   --variants "${VARIANTS}" \
   --seed "${SEED}" \

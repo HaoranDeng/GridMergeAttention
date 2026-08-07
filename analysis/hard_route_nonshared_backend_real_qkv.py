@@ -248,7 +248,7 @@ def install_probe(stats, args):
     if "hard_c4_baseline" not in variants:
         variants = {"hard_c4_baseline": all_variants["hard_c4_baseline"], **variants}
 
-    state = {"calls": 0, "warmed": False}
+    state = {"calls_total": 0, "calls_current_prompt": 0, "warmed": False}
 
     def run_dense(q, k, v, self):
         return wan_model.flash_attention(q=q, k=k, v=v, window_size=self.window_size)
@@ -285,8 +285,9 @@ def install_probe(stats, args):
         v = self.v(x).view(batch, seq_len, heads, dim)
         q, k = wan_model.apply_rope_video_tokens(q, k, rope_cache)
 
-        should_record = args.max_calls <= 0 or state["calls"] < args.max_calls
-        state["calls"] += 1
+        should_record = args.max_calls <= 0 or state["calls_current_prompt"] < args.max_calls
+        state["calls_current_prompt"] += 1
+        state["calls_total"] += 1
 
         if should_record and not state["warmed"]:
             _ = run_dense(q, k, v, self)
@@ -318,6 +319,7 @@ def install_probe(stats, args):
         return self.o(x.flatten(2))
 
     wan_model.WanSelfAttention.forward = probed_self_attention
+    return state
 
 
 @torch.inference_mode()
@@ -354,6 +356,7 @@ def parse_args():
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--prompt_path", default="prompts/MovieGenVideoBench_extended.txt")
     parser.add_argument("--prompt_index", type=int, default=0)
+    parser.add_argument("--num_prompts", type=int, default=1)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--dtype", choices=["bf16", "fp16"], default="bf16")
     parser.add_argument("--use_ema", action="store_true")
@@ -376,14 +379,26 @@ def main():
     dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float16
     device = torch.device("cuda")
     config, pipeline = load_pipeline(args.config, args.checkpoint, dtype, device, args.use_ema)
-    prompt = load_prompts(args.prompt_path, args.prompt_index + 1)[args.prompt_index]
+    if args.num_prompts < 1:
+        raise ValueError("--num_prompts must be at least 1.")
+    prompts = load_prompts(args.prompt_path, args.prompt_index + args.num_prompts)[
+        args.prompt_index : args.prompt_index + args.num_prompts
+    ]
+    if len(prompts) != args.num_prompts:
+        raise ValueError(
+            f"Requested {args.num_prompts} prompts from index {args.prompt_index}, "
+            f"but only found {len(prompts)}."
+        )
 
     stats = defaultdict(Stats)
-    install_probe(stats, args)
+    probe_state = install_probe(stats, args)
 
     sync()
     start = time.perf_counter()
-    run_denoise_only(pipeline, config, prompt, args.seed, dtype)
+    for prompt_offset, prompt in enumerate(prompts):
+        probe_state["calls_current_prompt"] = 0
+        probe_state["warmed"] = False
+        run_denoise_only(pipeline, config, prompt, args.seed + prompt_offset, dtype)
     sync()
     wall_seconds = time.perf_counter() - start
 
@@ -393,7 +408,11 @@ def main():
         "device": torch.cuda.get_device_name(0),
         "config": args.config,
         "dtype": args.dtype,
+        "prompt_index": args.prompt_index,
+        "num_prompts": args.num_prompts,
         "max_calls": args.max_calls,
+        "max_calls_per_prompt": args.max_calls,
+        "total_self_attention_calls": probe_state["calls_total"],
         "query_outer_chunk": args.query_outer_chunk,
         "wall_seconds": wall_seconds,
         "variants": {
