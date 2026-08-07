@@ -1775,6 +1775,7 @@ def triton_hard_route_merge_c4_direct_route(
     block_j_target=16,
     num_warps=2,
     bias_dtype=torch.float32,
+    merged_dtype=None,
     use_exp2=False,
     force_seed_keys=False,
     num_stages=None,
@@ -1823,17 +1824,19 @@ def triton_hard_route_merge_c4_direct_route(
 
     route_groups = batch * heads * query_outer * query_columns
     route_tokens = key_outer * key_rows * 4
+    if merged_dtype is None:
+        merged_dtype = key.dtype
     merged_key = _cached_empty(
         "hard_route_c4_direct_route_key",
         (route_groups, route_tokens, dim),
         key.device,
-        key.dtype,
+        merged_dtype,
     )
     merged_value = _cached_empty(
         "hard_route_c4_direct_route_value",
         (route_groups, route_tokens, dim),
         key.device,
-        key.dtype,
+        merged_dtype,
     )
     routing_bias = _cached_empty(
         "hard_route_c4_direct_route_bias",
