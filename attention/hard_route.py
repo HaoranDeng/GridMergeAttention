@@ -14,6 +14,7 @@ from .hard_route_triton import (
     triton_grid_outer_local_biased_attention,
     triton_hard_route_merge,
     triton_hard_route_merge_c4,
+    triton_hard_route_merge_c4_direct_route,
 )
 
 
@@ -73,8 +74,33 @@ def _merge(seed_queries, k, v, backend, scale):
         return triton_hard_route_merge_c4(seed_queries, k, v, scale=scale, block_j_target=16)
     raise ValueError(
         f"unsupported hard_route_backend={backend!r}; expected 'sdpa', 'triton', "
-        "'triton_c4', or 'triton_c4_j16'."
+        "'triton_c4', 'triton_c4_j16', or a direct-route C4 backend."
     )
+
+
+def _direct_route_merge(q, seed_rows, k, v, backend, scale):
+    backend = (backend or "").lower()
+    if backend == "triton_c4_direct_route_j16_w2":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=16,
+            num_warps=2,
+        )
+    if backend == "triton_c4_direct_route_j32_w2":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=2,
+        )
+    return None
 
 
 def hard_route_compressed_attention(query, key, value, bias, backend, scale):
@@ -992,21 +1018,26 @@ def hard_route_attention(
         include_ith=include_ith,
         fast_with_include=fast_with_include,
     )
-    seed_queries = gather_seed_queries(q, seed_rows)
-
-    merged_keys, merged_values, routing_bias, cluster_has_keys = _merge(
-        seed_queries,
-        k,
-        v,
-        hard_route_backend,
-        scale,
-    )
 
     query = rearrange(q, "b a i j h d -> (b h a j) i d")
-    key = rearrange(merged_keys, "b a f j k c h d -> (b h a j) (f k c) d")
-    value = rearrange(merged_values, "b a f j k c h d -> (b h a j) (f k c) d")
-    bias = rearrange(routing_bias, "b h a f k j c -> (b h a j) (f k c)")
-    del cluster_has_keys
+    direct_merge = _direct_route_merge(q, seed_rows, k, v, hard_route_backend, scale)
+    if direct_merge is None:
+        seed_queries = gather_seed_queries(q, seed_rows)
+        merged_keys, merged_values, routing_bias, cluster_has_keys = _merge(
+            seed_queries,
+            k,
+            v,
+            hard_route_backend,
+            scale,
+        )
+        key = rearrange(merged_keys, "b a f j k c h d -> (b h a j) (f k c) d")
+        value = rearrange(merged_values, "b a f j k c h d -> (b h a j) (f k c) d")
+        bias = rearrange(routing_bias, "b h a f k j c -> (b h a j) (f k c)")
+        del cluster_has_keys
+    else:
+        key, value, bias, cluster_has_keys = direct_merge
+        del cluster_has_keys
+
     out = hard_route_compressed_attention(
         query,
         key,

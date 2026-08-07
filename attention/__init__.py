@@ -11,6 +11,7 @@ from .hard_route_triton import (
     triton_grid_outer_exact_local_biased_attention,
     triton_grid_outer_local_biased_attention,
     triton_hard_route_merge,
+    triton_hard_route_merge_c4_direct_route,
     triton_hard_route_shared_merge_c4,
     triton_hard_route_shared_merge_c4_route_layout,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "triton_grid_outer_exact_local_biased_attention",
     "triton_grid_outer_local_biased_attention",
     "triton_hard_route_merge",
+    "triton_hard_route_merge_c4_direct_route",
     "triton_hard_route_shared_merge_c4",
     "triton_hard_route_shared_merge_c4_route_layout",
     "select_route_attention",
