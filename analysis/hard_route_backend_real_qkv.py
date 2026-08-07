@@ -334,14 +334,34 @@ def backend_variants(variant_set):
             "hard_route_routing_backend": "triton_grid_outer_exact_r4_m128_n64_w2_s1_exp2",
             "seed_mode": "fast_random_with_ith",
         },
+        "outer_r4_exact_preserve_cached_exp2merge_bf16bias_w2_s2": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_bf16bias_cached",
+            "hard_route_routing_backend": "triton_grid_outer_exact_r4_m128_n64_w2_s2_exp2",
+            "seed_mode": "fast_random_with_ith",
+        },
+        "outer_r4_exact_preserve_cached_exp2merge_bf16bias_w2_s3": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_bf16bias_cached",
+            "hard_route_routing_backend": "triton_grid_outer_exact_r4_m128_n64_w2_s3_exp2",
+            "seed_mode": "fast_random_with_ith",
+        },
         "outer_r4_exact_preserve_cached_exp2merge_bf16bias_w8": {
             "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_bf16bias_cached",
             "hard_route_routing_backend": "triton_grid_outer_exact_r4_m128_n64_w8_s1_exp2",
             "seed_mode": "fast_random_with_ith",
         },
+        "outer_r4_exact_preserve_cached_exp2merge_bf16bias_w8_s2": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_bf16bias_cached",
+            "hard_route_routing_backend": "triton_grid_outer_exact_r4_m128_n64_w8_s2_exp2",
+            "seed_mode": "fast_random_with_ith",
+        },
         "outer_r4_exact_preserve_cached_exp2merge_bf16bias_s2": {
             "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_bf16bias_cached",
             "hard_route_routing_backend": "triton_grid_outer_exact_r4_m128_n64_w4_s2_exp2",
+            "seed_mode": "fast_random_with_ith",
+        },
+        "outer_r4_exact_preserve_cached_exp2merge_bf16bias_w4_s3": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_bf16bias_cached",
+            "hard_route_routing_backend": "triton_grid_outer_exact_r4_m128_n64_w4_s3_exp2",
             "seed_mode": "fast_random_with_ith",
         },
         "outer_r4_exact_preserve_cached_exp2merge_bf16bias_merge_s1_route_s2": {
