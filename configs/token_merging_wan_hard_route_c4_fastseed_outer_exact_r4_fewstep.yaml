@@ -24,8 +24,7 @@ token_merging_args:
   num_merge_tokens: 4
   seed_mode: random_with_ith
   seed: 0
-  hard_route_backend: triton
-  # Kept for backward-compatible scripts; this default now uses full
-  # compressed core attention with non-shared KV compression, not an
-  # R4/local-window routing backend.
-  hard_route_routing_backend: triton
+  # Fastest measured exact full-core C4 path. The second step still runs
+  # complete compressed core attention, not a local/window routing variant.
+  hard_route_backend: triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot
+  hard_route_routing_backend: triton_direct_m32_n32_w1_s1_exp2
