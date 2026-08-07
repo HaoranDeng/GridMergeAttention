@@ -246,6 +246,8 @@ def _direct_route_merge(q, seed_rows, k, v, backend, scale):
             logit_input_precision="tf32",
         )
     fp16kv_fast_configs = {
+        "triton_c4_direct_route_j8_w1_exp2merge_forcekeys_fp16kvbias_s1_fastdot": (8, 1),
+        "triton_c4_direct_route_j8_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot": (8, 2),
         "triton_c4_direct_route_j16_w1_exp2merge_forcekeys_fp16kvbias_s1_fastdot": (16, 1),
         "triton_c4_direct_route_j16_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot": (16, 2),
         "triton_c4_direct_route_j32_w1_exp2merge_forcekeys_fp16kvbias_s1_fastdot": (32, 1),
