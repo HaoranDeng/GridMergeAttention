@@ -130,6 +130,49 @@ def hard_route_compressed_attention(query, key, value, bias, backend, scale):
             scale=scale,
             num_stages=1,
         )
+    if backend == "triton_m32_n128":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=32,
+            block_n=128,
+            scale=scale,
+        )
+    if backend == "triton_m32_n128_s1":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=32,
+            block_n=128,
+            scale=scale,
+            num_stages=1,
+        )
+    if backend == "triton_m32_n256_s1":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=32,
+            block_n=256,
+            scale=scale,
+            num_stages=1,
+        )
+    if backend == "triton_m32_n64_s1":
+        return triton_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            block_m=32,
+            block_n=64,
+            scale=scale,
+            num_stages=1,
+        )
     if backend == "triton_m256_n32":
         return triton_biased_attention(
             query,

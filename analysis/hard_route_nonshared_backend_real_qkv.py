@@ -101,6 +101,22 @@ def exact_variants():
             "hard_route_backend": "triton_c4_direct_route_j32_w2",
             "hard_route_routing_backend": "triton",
         },
+        "hard_c4_direct_route_j32_w2_route_m32_n128": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2",
+            "hard_route_routing_backend": "triton_m32_n128",
+        },
+        "hard_c4_direct_route_j32_w2_route_m32_n128_s1": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2",
+            "hard_route_routing_backend": "triton_m32_n128_s1",
+        },
+        "hard_c4_direct_route_j32_w2_route_m32_n256_s1": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2",
+            "hard_route_routing_backend": "triton_m32_n256_s1",
+        },
+        "hard_c4_direct_route_j32_w2_route_m32_n64_s1": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2",
+            "hard_route_routing_backend": "triton_m32_n64_s1",
+        },
         "hard_c4_triton_c4_route_m128_n32": {
             "hard_route_backend": "triton_c4",
             "hard_route_routing_backend": "triton_m128_n32",
