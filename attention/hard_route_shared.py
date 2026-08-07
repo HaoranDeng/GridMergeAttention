@@ -159,6 +159,19 @@ def _merge(seed_queries, k, v, backend, scale):
 
 def _merge_shared(q, seed_rows, k, v, backend, scale):
     backend = (backend or "sdpa").lower()
+    if backend == "triton_c4_direct_route_j32_w2_exp2merge_bf16bias_cached":
+        return triton_hard_route_shared_merge_c4_route_layout(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=2,
+            bias_dtype=k.dtype,
+            use_exp2=True,
+            workspace_cache=True,
+        )
     if backend == "triton_c4_direct":
         return triton_hard_route_shared_merge_c4(q, seed_rows, k, v, scale=scale)
     if backend == "triton_c4_direct_j16":
@@ -231,19 +244,6 @@ def _merge_shared(q, seed_rows, k, v, backend, scale):
             block_j_target=32,
             num_warps=2,
             bias_dtype=k.dtype,
-            workspace_cache=True,
-        )
-    if backend == "triton_c4_direct_route_j32_w2_exp2merge_bf16bias_cached":
-        return triton_hard_route_shared_merge_c4_route_layout(
-            q,
-            seed_rows,
-            k,
-            v,
-            scale=scale,
-            block_j_target=32,
-            num_warps=2,
-            bias_dtype=k.dtype,
-            use_exp2=True,
             workspace_cache=True,
         )
     if backend == "triton_c4_direct_route_j32_w2_s1_exp2merge_bf16bias_cached":
@@ -620,43 +620,7 @@ def hard_route_shared_attention(
         scale,
     )
 
-    route_layout_backend = (hard_route_backend or "").lower() in {
-        "triton_c4_direct_route",
-        "triton_c4_direct_route_j16",
-        "triton_c4_direct_route_j32_w2",
-        "triton_c4_direct_route_j32_w2_cached",
-        "triton_c4_direct_route_j16_w1_cached",
-        "triton_c4_direct_route_j16_w2_cached",
-        "triton_c4_direct_route_j32_w1_cached",
-        "triton_c4_direct_route_j32_w2_bf16bias_cached",
-        "triton_c4_direct_route_j32_w2_exp2merge_bf16bias_cached",
-        "triton_c4_direct_route_j32_w2_s1_exp2merge_bf16bias_cached",
-        "triton_c4_direct_route_j32_w2_s2_exp2merge_bf16bias_cached",
-        "triton_c4_direct_route_j32_w2_s3_exp2merge_bf16bias_cached",
-        "triton_c4_direct_route_j16_w1_exp2merge_bf16bias_cached",
-        "triton_c4_direct_route_j16_w2_exp2merge_bf16bias_cached",
-        "triton_c4_direct_route_j32_w1_exp2merge_bf16bias_cached",
-        "triton_c4_direct_route_j32_w4_exp2merge_bf16bias_cached",
-        "triton_c4_direct_route_j64_w2_exp2merge_bf16bias_cached",
-        "triton_c4_direct_route_j64_w4_exp2merge_bf16bias_cached",
-        "triton_c4_direct_route_j64_w2_cached",
-        "triton_c4_direct_route_j64_w4_cached",
-        "triton_c4_direct_route_j32_w2_forcekeys",
-        "triton_c4_direct_route_j32_w2_forcekeys_exp2merge",
-        "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached",
-        "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_nobias_cached",
-        "triton_c3_direct_route_j32_w2_forcekeys_exp2merge",
-        "triton_c4_direct_route_j64_w2_forcekeys_exp2merge_cached",
-        "triton_c4_direct_route_j64_forcekeys_exp2merge_cached",
-        "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_maxprob_cached",
-        "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_countbias_cached",
-        "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_bf16bias_cached",
-        "triton_c4_direct_route_j32_w1_forcekeys_exp2merge_cached",
-        "triton_c4_direct_route_j16_w1_forcekeys_exp2merge_cached",
-        "triton_c4_direct_route_j16_w2_forcekeys_exp2merge_cached",
-        "triton_c4_direct_route_j32_w2_nobias",
-        "triton_c4_direct_route_j64",
-    }
+    route_layout_backend = merged_keys.dim() == 3
     routing_backend = (hard_route_routing_backend or "").lower()
     if route_layout_backend and routing_backend.startswith("triton_grid_"):
         del cluster_has_keys

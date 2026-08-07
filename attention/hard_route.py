@@ -123,6 +123,18 @@ def hard_route_compressed_attention(query, key, value, bias, backend, scale):
 
 def hard_route_grid_compressed_attention(query, key, value, bias, backend, scale):
     backend = (backend or "sdpa").lower()
+    if backend == "triton_grid_outer_exact_r4_m128_n64_w4_s3_exp2":
+        return triton_grid_outer_exact_local_biased_attention(
+            query,
+            key,
+            value,
+            bias,
+            local_radius=4,
+            block_m=128,
+            block_n=64,
+            scale=scale,
+            num_stages=3,
+        )
     if backend == "triton_grid_m128_n32_s1":
         return triton_grid_biased_attention(
             query,
@@ -589,18 +601,6 @@ def hard_route_grid_compressed_attention(query, key, value, bias, backend, scale
             block_n=64,
             scale=scale,
             num_stages=2,
-        )
-    if backend == "triton_grid_outer_exact_r4_m128_n64_w4_s3_exp2":
-        return triton_grid_outer_exact_local_biased_attention(
-            query,
-            key,
-            value,
-            bias,
-            local_radius=4,
-            block_m=128,
-            block_n=64,
-            scale=scale,
-            num_stages=3,
         )
     if backend == "triton_grid_outer_exact_r4_m128_n64_w4_s4_exp2":
         return triton_grid_outer_exact_local_biased_attention(
