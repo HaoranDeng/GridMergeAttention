@@ -138,34 +138,32 @@ tradeoff for C=4 shared hard-route.
 
 Useful configs:
 
-- `configs/token_merging_wan_hard_route_c4_best_fewstep.yaml`: current
-  fastest measured low-error C=4 config, using force-key exp2 merge and direct
-  grid-query exp2 routing.
+- `configs/token_merging_wan_hard_route_c4_fastseed_outer_exact_r4_fewstep.yaml`:
+  recommended C=4 config when preserving the original two-stage hard-route
+  algorithm. It keeps exact routing bias and exact R4 compressed-attention
+  routing, so optimizations here are implementation-level rather than changing
+  the second-stage attention rule. In the 90-call MI300X component profile it
+  used about 2.60 ms/token-merging attention call with rel-L2 0.265 against
+  dense attention output.
+- `configs/token_merging_wan_hard_route_c4_best_fewstep.yaml`: faster
+  historical C=4 config, using force-key exp2 merge and direct grid-query exp2
+  routing. Keep it as a comparison point rather than the conservative default.
 - `configs/token_merging_wan_hard_route_c4_best_fastseed_fewstep.yaml`: same
   C=4 backend as `c4_best`, but uses lightweight deterministic seed selection.
-  This is the fastest measured low-error C=4 config in the latest MI300X
-  real-QKV probe.
-- `configs/token_merging_wan_hard_route_c4_fastseed_outer_exact_r4_fewstep.yaml`:
-  faster exact-window C=4 shared hard-route config. In the 90-call MI300X
-  component profile it used about 2.60 ms/token-merging attention call with
-  rel-L2 0.265 against dense attention output.
+  Keep it as a speed-oriented comparison point.
 - `configs/token_merging_wan_hard_route_c4_fastseed_bf16bias_r3firststep_r4rest_fewstep.yaml`:
-  faster C=4 shared hard-route candidate. It combines bf16 routing-bias storage
-  with R3 routing on the first denoise step and R4 for the rest. In the latest
-  90-call MI300X real-QKV probe it ran at 2.32 ms/attention call versus 2.57 ms
-  for all-R4, with rel-L2 0.264 versus 0.259.
+  ablation that changes the second-stage compressed-attention routing window.
+  It combines bf16 routing-bias storage with R3 routing on the first denoise
+  step and R4 for the rest, so it should not be used when preserving the
+  original core attention is the priority.
 - `configs/token_merging_wan_hard_route_c4_fastseed_bf16bias_r3firsttwo_r4rest_fewstep.yaml`:
-  more aggressive speed candidate. It uses R3 routing for the first two denoise
-  steps and R4 for the rest. In the same probe it ran at 2.27 ms/attention call,
-  with rel-L2 0.270.
+  more aggressive R3/R4 ablation. It changes the second-stage routing window
+  for the first two denoise steps.
 - `configs/token_merging_wan_hard_route_c4_fastseed_bf16bias_r3lowdelta33_r4rest_fewstep.yaml`:
-  selected-layer R3/R4 policy from the per-call real-QKV probe. It uses R3 for
-  the 30 lowest incremental-error layer/step calls and R4 elsewhere; this keeps
-  lower attention error than `r3_first_step_r4_rest` in that probe.
+  selected-layer R3/R4 ablation from the per-call real-QKV probe. It changes
+  the second-stage routing window for selected layer/step calls.
 - `configs/token_merging_wan_hard_route_c4_fastseed_bf16bias_r3lowdelta50_r4rest_fewstep.yaml`:
-  selected-layer variant with 45 R3 calls. This is a more aggressive policy that
-  still measured lower attention error than `r3_first_step_r4_rest` in the
-  per-call probe, but should be checked visually for each prompt set.
+  selected-layer R3/R4 ablation with 45 R3 calls.
 - `configs/token_merging_wan_hard_route_c4_fastseed_outer_exact_r5_fewstep.yaml`:
   balanced exact-window C=4 shared hard-route config. It is slightly slower
   than R4 but lower-error, about 2.83 ms/call with rel-L2 0.256.
@@ -239,7 +237,7 @@ decode the VAE batch together:
 
 ```bash
 python generate.py \
-  --config configs/token_merging_wan_hard_route_c4_fastseed_bf16bias_r3firststep_r4rest_fewstep.yaml \
+  --config configs/token_merging_wan_hard_route_c4_fastseed_outer_exact_r4_fewstep.yaml \
   --checkpoint /path/to/self_forcing_dmd.pt \
   --prompt_path prompts/MovieGenVideoBench_extended.txt \
   --output_dir videos/hard_c4_fast \
