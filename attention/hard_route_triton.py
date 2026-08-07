@@ -375,27 +375,51 @@ if triton is not None:
             seed_row3 = tl.load(seed_rows_base + 3, mask=valid_query, other=0)
 
         query_base = query_ptr + (batch * F + key_outer) * Q_ROWS * J * H * D_HEAD
-        seed0 = tl.load(
-            query_base + (((seed_row0[:, None] * J + query_offsets[:, None]) * H + head) * D_HEAD + dim_offsets[None, :]),
-            mask=valid_query[:, None] & valid_dim[None, :],
-            other=0.0,
-        )
-        seed1 = tl.load(
-            query_base + (((seed_row1[:, None] * J + query_offsets[:, None]) * H + head) * D_HEAD + dim_offsets[None, :]),
-            mask=valid_query[:, None] & valid_dim[None, :],
-            other=0.0,
-        )
-        seed2 = tl.load(
-            query_base + (((seed_row2[:, None] * J + query_offsets[:, None]) * H + head) * D_HEAD + dim_offsets[None, :]),
-            mask=valid_query[:, None] & valid_dim[None, :],
-            other=0.0,
-        )
-        if C_SEEDS == 4:
-            seed3 = tl.load(
-                query_base + (((seed_row3[:, None] * J + query_offsets[:, None]) * H + head) * D_HEAD + dim_offsets[None, :]),
+        if D_HEAD == BLOCK_D:
+            seed0 = tl.load(
+                query_base + (((seed_row0[:, None] * J + query_offsets[:, None]) * H + head) * D_HEAD + dim_offsets[None, :]),
+                mask=valid_query[:, None],
+                other=0.0,
+            )
+            seed1 = tl.load(
+                query_base + (((seed_row1[:, None] * J + query_offsets[:, None]) * H + head) * D_HEAD + dim_offsets[None, :]),
+                mask=valid_query[:, None],
+                other=0.0,
+            )
+            seed2 = tl.load(
+                query_base + (((seed_row2[:, None] * J + query_offsets[:, None]) * H + head) * D_HEAD + dim_offsets[None, :]),
+                mask=valid_query[:, None],
+                other=0.0,
+            )
+        else:
+            seed0 = tl.load(
+                query_base + (((seed_row0[:, None] * J + query_offsets[:, None]) * H + head) * D_HEAD + dim_offsets[None, :]),
                 mask=valid_query[:, None] & valid_dim[None, :],
                 other=0.0,
             )
+            seed1 = tl.load(
+                query_base + (((seed_row1[:, None] * J + query_offsets[:, None]) * H + head) * D_HEAD + dim_offsets[None, :]),
+                mask=valid_query[:, None] & valid_dim[None, :],
+                other=0.0,
+            )
+            seed2 = tl.load(
+                query_base + (((seed_row2[:, None] * J + query_offsets[:, None]) * H + head) * D_HEAD + dim_offsets[None, :]),
+                mask=valid_query[:, None] & valid_dim[None, :],
+                other=0.0,
+            )
+        if C_SEEDS == 4:
+            if D_HEAD == BLOCK_D:
+                seed3 = tl.load(
+                    query_base + (((seed_row3[:, None] * J + query_offsets[:, None]) * H + head) * D_HEAD + dim_offsets[None, :]),
+                    mask=valid_query[:, None],
+                    other=0.0,
+                )
+            else:
+                seed3 = tl.load(
+                    query_base + (((seed_row3[:, None] * J + query_offsets[:, None]) * H + head) * D_HEAD + dim_offsets[None, :]),
+                    mask=valid_query[:, None] & valid_dim[None, :],
+                    other=0.0,
+                )
 
         logits0 = tl.dot(seed0, tl.trans(key_block), input_precision="ieee") * SCORE_SCALE
         logits1 = tl.dot(seed1, tl.trans(key_block), input_precision="ieee") * SCORE_SCALE
@@ -487,16 +511,28 @@ if triton is not None:
                             (((((batch * H + head) * F + key_outer)
                                * K_ROWS + key_row) * J + query_offsets) * C_SEEDS + seed_idx)
                         )
-                tl.store(
-                    merged_key_ptr + merged_offset,
-                    merged_key,
-                    mask=valid_query[:, None] & valid_dim[None, :],
-                )
-                tl.store(
-                    merged_value_ptr + merged_offset,
-                    merged_value,
-                    mask=valid_query[:, None] & valid_dim[None, :],
-                )
+                if D_HEAD == BLOCK_D:
+                    tl.store(
+                        merged_key_ptr + merged_offset,
+                        merged_key,
+                        mask=valid_query[:, None],
+                    )
+                    tl.store(
+                        merged_value_ptr + merged_offset,
+                        merged_value,
+                        mask=valid_query[:, None],
+                    )
+                else:
+                    tl.store(
+                        merged_key_ptr + merged_offset,
+                        merged_key,
+                        mask=valid_query[:, None] & valid_dim[None, :],
+                    )
+                    tl.store(
+                        merged_value_ptr + merged_offset,
+                        merged_value,
+                        mask=valid_query[:, None] & valid_dim[None, :],
+                    )
                 if WRITE_BIAS:
                     tl.store(routing_bias_ptr + bias_offset, routing_bias, mask=valid_query)
 
@@ -829,14 +865,24 @@ if triton is not None:
         bias_base = bias_ptr + group_id * K_LEN
         out_base = out_ptr + batch * A_OUTER * Q_ROWS * J_COLS * H_HEADS * D_HEAD
 
-        q = tl.load(
-            query_base
-            + (((query_outer[:, None] * Q_ROWS + query_row[:, None]) * J_COLS + query_col)
-               * H_HEADS + head) * D_HEAD
-            + dim_offsets[None, :],
-            mask=(query_offsets[:, None] < Q_LEN) & (dim_offsets[None, :] < D_HEAD),
-            other=0.0,
-        )
+        if D_HEAD == BLOCK_D:
+            q = tl.load(
+                query_base
+                + (((query_outer[:, None] * Q_ROWS + query_row[:, None]) * J_COLS + query_col)
+                   * H_HEADS + head) * D_HEAD
+                + dim_offsets[None, :],
+                mask=query_offsets[:, None] < Q_LEN,
+                other=0.0,
+            )
+        else:
+            q = tl.load(
+                query_base
+                + (((query_outer[:, None] * Q_ROWS + query_row[:, None]) * J_COLS + query_col)
+                   * H_HEADS + head) * D_HEAD
+                + dim_offsets[None, :],
+                mask=(query_offsets[:, None] < Q_LEN) & (dim_offsets[None, :] < D_HEAD),
+                other=0.0,
+            )
 
         max_score = tl.full((BLOCK_M,), -float("inf"), tl.float32)
         normalizer = tl.zeros((BLOCK_M,), tl.float32)
@@ -848,16 +894,28 @@ if triton is not None:
             keys = local_token_start + local_keys
             valid_key = local_keys < local_key_len
             valid = (query_offsets[:, None] < Q_LEN) & valid_key[None, :] & (keys[None, :] < K_LEN)
-            k = tl.load(
-                key_base + keys[:, None] * D_HEAD + dim_offsets[None, :],
-                mask=valid_key[:, None] & (keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
-                other=0.0,
-            )
-            v = tl.load(
-                value_base + keys[:, None] * D_HEAD + dim_offsets[None, :],
-                mask=valid_key[:, None] & (keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
-                other=0.0,
-            )
+            if D_HEAD == BLOCK_D:
+                k = tl.load(
+                    key_base + keys[:, None] * D_HEAD + dim_offsets[None, :],
+                    mask=valid_key[:, None] & (keys[:, None] < K_LEN),
+                    other=0.0,
+                )
+                v = tl.load(
+                    value_base + keys[:, None] * D_HEAD + dim_offsets[None, :],
+                    mask=valid_key[:, None] & (keys[:, None] < K_LEN),
+                    other=0.0,
+                )
+            else:
+                k = tl.load(
+                    key_base + keys[:, None] * D_HEAD + dim_offsets[None, :],
+                    mask=valid_key[:, None] & (keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
+                    other=0.0,
+                )
+                v = tl.load(
+                    value_base + keys[:, None] * D_HEAD + dim_offsets[None, :],
+                    mask=valid_key[:, None] & (keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
+                    other=0.0,
+                )
             logits = tl.dot(q, tl.trans(k)) * SCORE_SCALE
             if USE_BIAS:
                 bias = tl.load(bias_base + keys, mask=valid_key & (keys < K_LEN), other=float("inf"))
@@ -881,14 +939,24 @@ if triton is not None:
             local_start += BLOCK_N
 
         out = acc / normalizer[:, None]
-        tl.store(
-            out_base
-            + (((query_outer[:, None] * Q_ROWS + query_row[:, None]) * J_COLS + query_col)
-               * H_HEADS + head) * D_HEAD
-            + dim_offsets[None, :],
-            out,
-            mask=(query_offsets[:, None] < Q_LEN) & (dim_offsets[None, :] < D_HEAD),
-        )
+        if D_HEAD == BLOCK_D:
+            tl.store(
+                out_base
+                + (((query_outer[:, None] * Q_ROWS + query_row[:, None]) * J_COLS + query_col)
+                   * H_HEADS + head) * D_HEAD
+                + dim_offsets[None, :],
+                out,
+                mask=query_offsets[:, None] < Q_LEN,
+            )
+        else:
+            tl.store(
+                out_base
+                + (((query_outer[:, None] * Q_ROWS + query_row[:, None]) * J_COLS + query_col)
+                   * H_HEADS + head) * D_HEAD
+                + dim_offsets[None, :],
+                out,
+                mask=(query_offsets[:, None] < Q_LEN) & (dim_offsets[None, :] < D_HEAD),
+            )
 
 def triton_biased_attention(query, key, value, bias, block_m=16, block_n=128, scale=1.0, num_stages=None):
     """Fused Triton attention for hard-route compressed KV routing.
