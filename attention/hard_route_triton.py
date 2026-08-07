@@ -357,6 +357,7 @@ if triton is not None:
         USE_EXP2: tl.constexpr,
         FORCE_SEED_KEYS: tl.constexpr,
         LOGIT_INPUT_PRECISION: tl.constexpr,
+        COMPUTE_IN_FP16: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -422,10 +423,18 @@ if triton is not None:
             other=0.0,
         )
 
-        logits0 = tl.dot(seed0, tl.trans(key_block), input_precision=LOGIT_INPUT_PRECISION) * SCORE_SCALE
-        logits1 = tl.dot(seed1, tl.trans(key_block), input_precision=LOGIT_INPUT_PRECISION) * SCORE_SCALE
-        logits2 = tl.dot(seed2, tl.trans(key_block), input_precision=LOGIT_INPUT_PRECISION) * SCORE_SCALE
-        logits3 = tl.dot(seed3, tl.trans(key_block), input_precision=LOGIT_INPUT_PRECISION) * SCORE_SCALE
+        key_compute = key_block
+        if COMPUTE_IN_FP16:
+            key_compute = key_block.to(tl.float16)
+            seed0 = seed0.to(tl.float16)
+            seed1 = seed1.to(tl.float16)
+            seed2 = seed2.to(tl.float16)
+            seed3 = seed3.to(tl.float16)
+
+        logits0 = tl.dot(seed0, tl.trans(key_compute), input_precision=LOGIT_INPUT_PRECISION) * SCORE_SCALE
+        logits1 = tl.dot(seed1, tl.trans(key_compute), input_precision=LOGIT_INPUT_PRECISION) * SCORE_SCALE
+        logits2 = tl.dot(seed2, tl.trans(key_compute), input_precision=LOGIT_INPUT_PRECISION) * SCORE_SCALE
+        logits3 = tl.dot(seed3, tl.trans(key_compute), input_precision=LOGIT_INPUT_PRECISION) * SCORE_SCALE
         valid_logits = valid_query[:, None] & valid_key[None, :]
         logits0 = tl.where(valid_logits, logits0, -float("inf"))
         logits1 = tl.where(valid_logits, logits1, -float("inf"))
@@ -458,6 +467,9 @@ if triton is not None:
             mask=valid_key[:, None] & valid_dim[None, :],
             other=0.0,
         )
+        value_compute = value_block
+        if COMPUTE_IN_FP16:
+            value_compute = value_block.to(tl.float16)
 
         for seed_idx in tl.static_range(0, 4):
             logits = logits0
@@ -496,8 +508,8 @@ if triton is not None:
             else:
                 log_denom = row_max + tl.log(safe_denom)
 
-            merged_key = tl.dot(weights.to(key_block.dtype), key_block)
-            merged_value = tl.dot(weights.to(value_block.dtype), value_block)
+            merged_key = tl.dot(weights.to(key_compute.dtype), key_compute)
+            merged_value = tl.dot(weights.to(value_compute.dtype), value_compute)
             routing_bias = tl.sum(
                 tl.where(active, weights * (logits - log_denom[:, None]), 0.0),
                 axis=1,
@@ -1785,6 +1797,7 @@ def triton_hard_route_merge_c4_direct_route(
     force_seed_keys=False,
     num_stages=None,
     logit_input_precision="ieee",
+    compute_in_fp16=False,
 ):
     """Exact non-shared C=4 merge that writes routing-ready K/V/bias.
 
@@ -1880,6 +1893,7 @@ def triton_hard_route_merge_c4_direct_route(
         USE_EXP2=bool(use_exp2),
         FORCE_SEED_KEYS=bool(force_seed_keys),
         LOGIT_INPUT_PRECISION=logit_input_precision,
+        COMPUTE_IN_FP16=bool(compute_in_fp16),
         **launch_kwargs,
     )
     return merged_key, merged_value, routing_bias, None
