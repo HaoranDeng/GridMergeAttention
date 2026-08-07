@@ -143,7 +143,7 @@ Useful configs:
   algorithm. It keeps exact routing bias and exact R4 compressed-attention
   routing, so optimizations here are implementation-level rather than changing
   the second-stage attention rule. In the 90-call MI300X component profile it
-  used about 2.60 ms/token-merging attention call with rel-L2 0.265 against
+  used about 2.39 ms/token-merging attention call with rel-L2 0.259 against
   dense attention output.
 - `configs/token_merging_wan_hard_route_c4_best_fewstep.yaml`: faster
   historical C=4 config, using force-key exp2 merge and direct grid-query exp2
