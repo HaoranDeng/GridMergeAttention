@@ -96,37 +96,8 @@ def token_merging_attn(
 
     if sm_scale is None:
         sm_scale = q.size(-1) ** -0.5
-    layout = normalize_layout(layout)
-    num_merge_tokens = int(num_merge_tokens)
-
-    if (
-        layout == LAYOUT_HARD_ROUTE_SHARED
-        and f_tied == 1
-        and h_reduce == 1
-        and w_reduce == 1
-        and num_merge_tokens == 4
-        and seed_mode == "fast_random_with_ith"
-        and hard_route_backend == "triton_c4_direct_route_j32_w2_exp2merge_bf16bias_cached"
-        and hard_route_routing_backend == "triton_grid_outer_exact_r4_m128_n64_w4_s3_exp2"
-    ):
-        q_blocks = video_to_blocks(q, 1, 1, 1, h, w)
-        k_blocks = video_to_blocks(k, 1, 1, 1, h, w)
-        v_blocks = video_to_blocks(v, 1, 1, 1, h, w)
-        out = hard_route_shared_attention(
-            q_blocks,
-            k_blocks,
-            v_blocks,
-            sm_scale,
-            4,
-            seed_mode,
-            seed,
-            0,
-            hard_route_backend,
-            hard_route_routing_backend,
-        )
-        return blocks_to_video(out, 1, 1, 1)
-
     query_outer_chunk = max(1, int(query_outer_chunk or 1))
+    layout = normalize_layout(layout)
     if layout not in SUPPORTED_LAYOUTS:
         raise ValueError(
             "layout must be 'hard_route', 'hard_route_group_shared', "
@@ -135,6 +106,7 @@ def token_merging_attn(
             f"got {layout!r}."
         )
 
+    num_merge_tokens = int(num_merge_tokens)
     if num_merge_tokens < 1:
         raise ValueError(f"num_merge_tokens must be >= 1, got {num_merge_tokens!r}.")
     if num_merge_tokens > 1 and layout not in LOCAL_LAYOUTS:
