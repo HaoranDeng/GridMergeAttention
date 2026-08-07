@@ -911,6 +911,7 @@ if triton is not None:
         BLOCK_D: tl.constexpr,
         SCORE_SCALE: tl.constexpr,
         USE_EXP2: tl.constexpr,
+        CAST_Q_TO_FP16: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_block_id = tl.program_id(1)
@@ -940,6 +941,9 @@ if triton is not None:
             mask=(query_offsets[:, None] < Q_ROWS) & (dim_offsets[None, :] < D_HEAD),
             other=0.0,
         )
+        q_dot = q
+        if CAST_Q_TO_FP16:
+            q_dot = q.to(tl.float16)
 
         max_score = tl.full((BLOCK_M,), -float("inf"), tl.float32)
         normalizer = tl.zeros((BLOCK_M,), tl.float32)
@@ -959,7 +963,7 @@ if triton is not None:
             )
             bias = tl.load(bias_base + keys, mask=keys < K_LEN, other=float("inf"))
 
-            logits = tl.dot(q, tl.trans(k)) * SCORE_SCALE - bias[None, :]
+            logits = tl.dot(q_dot, tl.trans(k)) * SCORE_SCALE - bias[None, :]
             logits = tl.where(
                 (query_offsets[:, None] < Q_ROWS) & (keys[None, :] < K_LEN),
                 logits,
@@ -1344,6 +1348,7 @@ def triton_direct_route_biased_attention(
         BLOCK_D=block_d,
         SCORE_SCALE=float(scale),
         USE_EXP2=bool(use_exp2),
+        CAST_Q_TO_FP16=bool(key.dtype == torch.float16 and query.dtype != torch.float16),
         **meta,
     )
     return out
