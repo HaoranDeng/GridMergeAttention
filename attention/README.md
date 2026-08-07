@@ -82,10 +82,10 @@ deterministic hash instead of ranking every candidate query row.
 - `triton_c4_direct_route_j16`: shared C=4 kernel that writes compressed K/V
   directly in routing layout.
 - `triton_c4_direct_route_j32_w2`: route-layout shared C=4 kernel using
-  `block_j=32` and `num_warps=2`; stable conservative comparison point.
+  `block_j=32` and `num_warps=2`; stable conservative default.
 - `triton_c4_direct_route_j16_w2_cached`: same conservative merge rule using
-  `block_j=16` and `num_warps=2`, with cached workspace buffers. This is the
-  current conservative merge backend for the default 480p C=4 setup.
+  `block_j=16` and `num_warps=2`, with cached workspace buffers. Kept as a
+  merge-kernel tuning variant.
 - `triton_c4_direct_route_j32_w2_forcekeys`: same route-layout shared C=4
   kernel, but directly assigns the first four key columns to the four seeds.
   This removes the empty-cluster fallback reductions and is an explicit

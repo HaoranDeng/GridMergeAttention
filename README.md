@@ -94,10 +94,10 @@ indices without recomputing them.
   `block_j=32` and `num_warps=2`. This is the default stable
   `hard_route_shared` merge backend in the 480p C=4 benchmark.
 - `triton_c4_direct_route_j32_w2_cached`: same C=4 merge rule as
-  `triton_c4_direct_route_j32_w2`, but reuses cached workspace buffers.
+  `triton_c4_direct_route_j32_w2`, but reuses cached workspace buffers. This is
+  the current conservative default when preserving the hard-route algorithm.
 - `triton_c4_direct_route_j16_w2_cached`: same conservative C=4 merge rule,
-  using `block_j=16` and `num_warps=2`. This is the current conservative
-  default when preserving the hard-route algorithm.
+  using `block_j=16` and `num_warps=2`; kept as a merge-tile tuning variant.
 - `triton_c4_direct_route_j32_w2_forcekeys`: approximate `j32_w2` variant that
   assigns the first four keys in each block to the four seeds before the
   remaining hard routing. This removes the empty-cluster fallback reductions and
@@ -149,7 +149,7 @@ Useful configs:
   algorithm. It keeps exact routing bias and exact R4 compressed-attention
   routing, so optimizations here are implementation-level rather than changing
   the second-stage attention rule. In the 90-call MI300X component profile it
-  used about 2.60 ms/token-merging attention call with rel-L2 0.261 against
+  used about 2.53 ms/token-merging attention call with rel-L2 0.261 against
   dense attention output.
 - `configs/token_merging_wan_hard_route_c4_best_fewstep.yaml`: faster
   historical C=4 config, using force-key exp2 merge and direct grid-query exp2

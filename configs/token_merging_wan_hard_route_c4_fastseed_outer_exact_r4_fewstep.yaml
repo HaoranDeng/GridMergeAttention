@@ -23,5 +23,5 @@ token_merging_args:
   num_merge_tokens: 4
   seed_mode: fast_random_with_ith
   seed: 0
-  hard_route_backend: triton_c4_direct_route_j16_w2_cached
+  hard_route_backend: triton_c4_direct_route_j32_w2_cached
   hard_route_routing_backend: triton_grid_outer_exact_r4_m128_n64_s1_exp2
