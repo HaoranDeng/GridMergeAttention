@@ -1776,6 +1776,7 @@ def triton_hard_route_merge_c4_direct_route(
     bias_dtype=torch.float32,
     use_exp2=False,
     force_seed_keys=False,
+    num_stages=None,
 ):
     """Exact non-shared C=4 merge that writes routing-ready K/V/bias.
 
@@ -1843,6 +1844,9 @@ def triton_hard_route_merge_c4_direct_route(
         batch * query_outer * key_outer * key_rows * heads,
         triton.cdiv(query_columns, block_j),
     )
+    launch_kwargs = {"num_warps": int(num_warps)}
+    if num_stages is not None:
+        launch_kwargs["num_stages"] = int(num_stages)
     _hard_route_merge_c4_direct_route_kernel[grid](
         query,
         seed_rows,
@@ -1865,7 +1869,7 @@ def triton_hard_route_merge_c4_direct_route(
         SCORE_SCALE=float(scale),
         USE_EXP2=bool(use_exp2),
         FORCE_SEED_KEYS=bool(force_seed_keys),
-        num_warps=int(num_warps),
+        **launch_kwargs,
     )
     return merged_key, merged_value, routing_bias, None
 
