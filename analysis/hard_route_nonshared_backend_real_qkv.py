@@ -181,6 +181,38 @@ def exact_variants():
             "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge",
             "hard_route_routing_backend": "triton_direct_m32_n64_w1_s1_exp2",
         },
+        "hard_c4_direct_route_j32_w2_exp2merge_direct_m16_n64_w1_s1_exp2": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge",
+            "hard_route_routing_backend": "triton_direct_m16_n64_w1_s1_exp2",
+        },
+        "hard_c4_direct_route_j32_w2_exp2merge_direct_m16_n128_w1_s1_exp2": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge",
+            "hard_route_routing_backend": "triton_direct_m16_n128_w1_s1_exp2",
+        },
+        "hard_c4_direct_route_j32_w2_exp2merge_direct_m32_n32_w1_s1_exp2": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge",
+            "hard_route_routing_backend": "triton_direct_m32_n32_w1_s1_exp2",
+        },
+        "hard_c4_direct_route_j32_w2_exp2merge_direct_m32_n64_w2_s1_exp2": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge",
+            "hard_route_routing_backend": "triton_direct_m32_n64_w2_s1_exp2",
+        },
+        "hard_c4_direct_route_j32_w2_exp2merge_direct_m32_n128_w1_s1_exp2": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge",
+            "hard_route_routing_backend": "triton_direct_m32_n128_w1_s1_exp2",
+        },
+        "hard_c4_direct_route_j32_w2_exp2merge_direct_m32_n128_w2_s1_exp2": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge",
+            "hard_route_routing_backend": "triton_direct_m32_n128_w2_s1_exp2",
+        },
+        "hard_c4_direct_route_j32_w2_exp2merge_direct_m64_n64_w1_s1_exp2": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge",
+            "hard_route_routing_backend": "triton_direct_m64_n64_w1_s1_exp2",
+        },
+        "hard_c4_direct_route_j32_w2_exp2merge_direct_m64_n128_w1_s1_exp2": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge",
+            "hard_route_routing_backend": "triton_direct_m64_n128_w1_s1_exp2",
+        },
         "hard_c4_direct_route_j32_w2_bf16bias_direct_m32_n64_w1_s1_exp2": {
             "hard_route_backend": "triton_c4_direct_route_j32_w2_bf16bias",
             "hard_route_routing_backend": "triton_direct_m32_n64_w1_s1_exp2",

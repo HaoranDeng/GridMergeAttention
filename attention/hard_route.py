@@ -373,29 +373,29 @@ def hard_route_compressed_attention(query, key, value, bias, backend, scale):
 
 def hard_route_direct_compressed_attention(q, key, value, bias, backend, scale):
     backend = (backend or "").lower()
-    if backend == "triton_direct_m32_n64_w1_s1_exp2":
+    direct_configs = {
+        "triton_direct_m16_n64_w1_s1_exp2": (16, 64, 1),
+        "triton_direct_m16_n128_w1_s1_exp2": (16, 128, 1),
+        "triton_direct_m32_n32_w1_s1_exp2": (32, 32, 1),
+        "triton_direct_m32_n64_w1_s1_exp2": (32, 64, 1),
+        "triton_direct_m32_n64_w2_s1_exp2": (32, 64, 2),
+        "triton_direct_m32_n128_w1_s1_exp2": (32, 128, 1),
+        "triton_direct_m32_n128_w2_s1_exp2": (32, 128, 2),
+        "triton_direct_m64_n64_w1_s1_exp2": (64, 64, 1),
+        "triton_direct_m64_n128_w1_s1_exp2": (64, 128, 1),
+    }
+    direct_config = direct_configs.get(backend)
+    if direct_config is not None:
+        block_m, block_n, num_warps = direct_config
         return triton_direct_route_biased_attention(
             q,
             key,
             value,
             bias,
-            block_m=32,
-            block_n=64,
+            block_m=block_m,
+            block_n=block_n,
             scale=scale,
-            num_warps=1,
-            num_stages=1,
-            use_exp2=True,
-        )
-    if backend == "triton_direct_m32_n128_w1_s1_exp2":
-        return triton_direct_route_biased_attention(
-            q,
-            key,
-            value,
-            bias,
-            block_m=32,
-            block_n=128,
-            scale=scale,
-            num_warps=1,
+            num_warps=num_warps,
             num_stages=1,
             use_exp2=True,
         )
