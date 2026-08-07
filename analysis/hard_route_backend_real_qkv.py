@@ -289,6 +289,16 @@ def backend_variants(variant_set):
             "hard_route_routing_backend": "triton_grid_outer_exact_r4_m128_n64_s1_exp2",
             "seed_mode": "fast_random_with_ith",
         },
+        "outer_r4_exact_preserve_cached_exp2merge_bf16bias_m256": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_bf16bias_cached",
+            "hard_route_routing_backend": "triton_grid_outer_exact_r4_m256_n64_s1_exp2",
+            "seed_mode": "fast_random_with_ith",
+        },
+        "outer_r4_exact_preserve_cached_exp2merge_bf16bias_m256_n128": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_bf16bias_cached",
+            "hard_route_routing_backend": "triton_grid_outer_exact_r4_m256_n128_s1_exp2",
+            "seed_mode": "fast_random_with_ith",
+        },
         "outer_r4_exact_preserve_cached_j64_w2": {
             "hard_route_backend": "triton_c4_direct_route_j64_w2_cached",
             "hard_route_routing_backend": "triton_grid_outer_exact_r4_m128_n64_s1_exp2",
