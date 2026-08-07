@@ -140,10 +140,8 @@ if triton is not None:
 
             merged_key = tl.dot(weights.to(key_block.dtype), key_block)
             merged_value = tl.dot(weights.to(value_block.dtype), value_block)
-            routing_bias = tl.sum(
-                tl.where(active, weights * (logits - log_denom[:, None]), 0.0),
-                axis=1,
-            )
+            expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
+            routing_bias = expected_logit - log_denom
             routing_bias = tl.where(has_keys, routing_bias, 0.0)
 
             merged_offset = (
@@ -306,10 +304,8 @@ if triton is not None:
 
             merged_key = tl.dot(weights.to(key_block.dtype), key_block)
             merged_value = tl.dot(weights.to(value_block.dtype), value_block)
-            routing_bias = tl.sum(
-                tl.where(active, weights * (logits - log_denom[:, None]), 0.0),
-                axis=1,
-            )
+            expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
+            routing_bias = expected_logit - log_denom
             routing_bias = tl.where(has_keys, routing_bias, 0.0)
 
             merged_offset = (
@@ -510,10 +506,8 @@ if triton is not None:
 
             merged_key = tl.dot(weights.to(key_compute.dtype), key_compute)
             merged_value = tl.dot(weights.to(value_compute.dtype), value_compute)
-            routing_bias = tl.sum(
-                tl.where(active, weights * (logits - log_denom[:, None]), 0.0),
-                axis=1,
-            )
+            expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
+            routing_bias = expected_logit - log_denom
             if not FORCE_SEED_KEYS:
                 has_keys = tl.sum(tl.where(active, 1, 0), axis=1) > 0
                 routing_bias = tl.where(has_keys, routing_bias, 0.0)
