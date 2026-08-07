@@ -93,13 +93,17 @@ indices without recomputing them.
 - `triton_c4_direct_route_j32_w2`: route-layout direct shared C=4 kernel with
   `block_j=32` and `num_warps=2`. This is the default stable
   `hard_route_shared` merge backend in the 480p C=4 benchmark.
+- `triton_c4_direct_route_j32_w2_cached`: same C=4 merge rule as
+  `triton_c4_direct_route_j32_w2`, but reuses cached workspace buffers. This is
+  the conservative default when preserving the hard-route algorithm.
 - `triton_c4_direct_route_j32_w2_forcekeys`: approximate `j32_w2` variant that
   assigns the first four keys in each block to the four seeds before the
   remaining hard routing. This removes the empty-cluster fallback reductions and
   can be slightly faster, but it changes the merge rule and is not the default.
 - `triton_c4_direct_route_j32_w2_forcekeys_exp2merge`: same force-key variant,
-  with the merge softmax computed using base-2 exponentials. This is the
-  current fastest measured low-error C=4 merge backend on MI300X.
+  with the merge softmax computed using base-2 exponentials. This is a
+  speed-oriented ablation rather than the conservative default, because it
+  changes the first-stage merge rule.
 - `triton_c4_direct_route_j32_w2_forcekeys_exp2merge_bf16bias_cached`: same
   C=4 merge path, but stores routing bias in bf16. In the real-QKV probe this
   kept nearly identical output error while shaving a small amount of attention
@@ -143,7 +147,7 @@ Useful configs:
   algorithm. It keeps exact routing bias and exact R4 compressed-attention
   routing, so optimizations here are implementation-level rather than changing
   the second-stage attention rule. In the 90-call MI300X component profile it
-  used about 2.58 ms/token-merging attention call with rel-L2 0.259 against
+  used about 2.54 ms/token-merging attention call with rel-L2 0.261 against
   dense attention output.
 - `configs/token_merging_wan_hard_route_c4_best_fewstep.yaml`: faster
   historical C=4 config, using force-key exp2 merge and direct grid-query exp2
