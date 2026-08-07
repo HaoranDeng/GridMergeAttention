@@ -157,7 +157,7 @@ Useful configs:
   memory traffic and using base-2 exponentials for the merge softmax. In the
   90-call MI300X component profile it used about 2.39 ms/token-merging
   attention call with rel-L2 0.261 against dense attention output. The default
-  routing launch is `triton_grid_outer_exact_r4_m128_n64_w4_s2_exp2`.
+  routing launch is `triton_grid_outer_exact_r4_m128_n64_w4_s3_exp2`.
 - `configs/token_merging_wan_hard_route_c4_best_fewstep.yaml`: faster
   historical C=4 config, using force-key exp2 merge and direct grid-query exp2
   routing. Keep it as a comparison point rather than the conservative default.

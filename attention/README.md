@@ -205,9 +205,10 @@ deterministic hash instead of ranking every candidate query row.
   `triton_grid_outer_exact_r4_m128_n32_w4_s2_exp2`,
   `triton_grid_outer_exact_r4_m128_n64_w2_s1_exp2`,
   `triton_grid_outer_exact_r4_m128_n64_w8_s1_exp2`, and
-  `triton_grid_outer_exact_r4_m128_n64_w4_s2_exp2`: launch-parameter tuning
+  `triton_grid_outer_exact_r4_m128_n64_w4_s2_exp2` /
+  `triton_grid_outer_exact_r4_m128_n64_w4_s3_exp2`: launch-parameter tuning
   hooks for the R4 exact-window backend. The conservative C=4 default config
-  uses `triton_grid_outer_exact_r4_m128_n64_w4_s2_exp2`.
+  uses `triton_grid_outer_exact_r4_m128_n64_w4_s3_exp2`.
 - `triton_grid_outer_exact_r4_m128_n64_s1_exp2_nobias` and
   `triton_grid_outer_exact_r4_m128_n32_s1_exp2_nobias`: exact-window R4
   routing variants that skip routing bias. Use only with a no-bias merge
