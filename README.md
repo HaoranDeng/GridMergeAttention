@@ -134,10 +134,10 @@ step:
   `num_stages=1`. Kept as a stable comparison point.
 - `triton_grid_m128_n32_s1`: same routing tile, but reads query blocks directly
   and writes the block-layout output directly. This is the current fastest
-  routing backend for the default route-layout C=4 shared setup.
+  routing backend for route-layout C=4 shared experiments.
 - `triton_grid_m128_n32_s1_exp2`: same direct grid-query routing backend, with
   the routing softmax computed using base-2 exponentials. This is a fast
-  historical comparison point for the route-layout C=4 setup.
+  historical comparison point for route-layout shared C=4 experiments.
 - `triton_grid_m128_n32_s1_nobias`: matching aggressive routing backend for
   `triton_c4_direct_route_j32_w2_nobias`; it skips loading/subtracting the
   routing bias.
@@ -151,13 +151,14 @@ step should preserve full core attention.
 Useful configs:
 
 - `configs/token_merging_wan_hard_route_c4_fastseed_full_core_fewstep.yaml`:
-  recommended C=4 config. It keeps the hard-route C=4 KV merge, then runs the
-  second compressed-attention step over all merged KV tokens with the full core
-  routing backend `triton_grid_m128_n32_s1_exp2`. This avoids exact/local R*
-  sliding-window routing.
+  recommended accuracy-preserving C=4 config. It keeps non-shared hard-route
+  KV compression, so each `(query outer, key outer, key row, query column)`
+  attention grid gets its own C=4 compression. The second step runs full
+  compressed core attention with `hard_route_routing_backend: triton`, avoiding
+  both shared compression and exact/local R* sliding-window routing.
 - `configs/token_merging_wan_hard_route_c4_fastseed_outer_exact_r4_fewstep.yaml`:
   backward-compatible alias for old scripts. Despite the historical filename,
-  it now uses the same full-core routing backend as the recommended config.
+  it now uses the same non-shared full-core path as the recommended config.
 - `configs/token_merging_wan_hard_route_c4_best_fewstep.yaml`: faster
   historical C=4 config, using force-key exp2 merge and direct grid-query exp2
   routing. Keep it as a comparison point rather than the conservative default.

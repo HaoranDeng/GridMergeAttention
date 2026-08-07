@@ -18,11 +18,13 @@ token_merging_args:
   f_tied: 1
   h_reduce: 1
   w_reduce: 1
-  layout: hard_route_shared
+  layout: hard_route
   q_init: ith
+  query_outer_chunk: 7
   num_merge_tokens: 4
-  seed_mode: fast_random_with_ith
+  seed_mode: random_with_ith
   seed: 0
-  hard_route_backend: triton_c4_direct_route_j32_w2_exp2merge_bf16bias_cached
-  # Full compressed core attention over all merged KV tokens.
-  hard_route_routing_backend: triton_grid_m128_n32_s1_exp2
+  # Non-shared hard-route keeps query-dependent KV compression for each
+  # attention grid. This is the accuracy-preserving full-core C4 path.
+  hard_route_backend: triton
+  hard_route_routing_backend: triton

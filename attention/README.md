@@ -148,17 +148,17 @@ deterministic hash instead of ranking every candidate query row.
 - `sdpa`: PyTorch SDPA with the routing bias.
 - `triton`: fused Triton routing kernel for `q @ K_merged - bias`.
 - `triton_m128_n32` / `triton_m256_n32`: faster fused routing kernels for the
-  shared C=4 compressed attention path.
+  compressed attention path.
 - `triton_m128_n32_s1`: `triton_m128_n32` with `num_stages=1`; kept as a
   stable comparison point.
 - `triton_grid_m128_n32_s1`: direct grid-query version of `triton_m128_n32_s1`.
   It reads `[B, outer, row, col, head, dim]` query blocks and writes the same
   block layout directly, avoiding the flattened query/output copies. This is
-  the fastest current routing backend for the default route-layout C=4 setup.
+  the fastest current routing backend for route-layout shared C=4 experiments.
 - `triton_grid_m128_n32_s1_exp2`: same direct grid-query routing backend, but
   computes softmax with base-2 exponentials. On MI300X this preserves the
-  measured bf16 output while reducing routing latency. This is the default
-  full compressed-attention backend for the route-layout C=4 setup.
+  measured bf16 output while reducing routing latency. It is kept for
+  route-layout shared C=4 experiments, not the accuracy-preserving default.
 - `triton_grid_outer_local_r2_m128_n32_s1_exp2` through
   `triton_grid_outer_local_r6_m128_n32_s1_exp2`: experimental faster C=4
   routing backends. They keep the C4 compressed K/V tokens unchanged, but each

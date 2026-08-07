@@ -579,8 +579,8 @@ def _merge_shared(q, seed_rows, k, v, backend, scale):
     return _merge(seed_queries, k, v, backend, scale)
 
 
-def _default_c4_full_core_attention(q, k, v, scale, seed):
-    """Fast path for default hard C4 with full compressed core attention."""
+def _shared_c4_full_core_attention(q, k, v, scale, seed):
+    """Fast path for shared hard C4 with full compressed core attention."""
     seed_rows = cached_shared_seed_rows(
         q.device,
         k.size(1),
@@ -640,7 +640,7 @@ def hard_route_shared_attention(
         and hard_route_backend == _DEFAULT_C4_MERGE_BACKEND
         and hard_route_routing_backend == _DEFAULT_FULL_CORE_ROUTING_BACKEND
     ):
-        return _default_c4_full_core_attention(q, k, v, scale, seed)
+        return _shared_c4_full_core_attention(q, k, v, scale, seed)
 
     include_ith = validate_block_seed_mode(seed_mode, "shared multi-token merging")
     fast_with_include = seed_mode == "fast_random_with_ith"

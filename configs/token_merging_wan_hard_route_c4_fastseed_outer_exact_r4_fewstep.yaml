@@ -18,12 +18,14 @@ token_merging_args:
   f_tied: 1
   h_reduce: 1
   w_reduce: 1
-  layout: hard_route_shared
+  layout: hard_route
   q_init: ith
+  query_outer_chunk: 7
   num_merge_tokens: 4
-  seed_mode: fast_random_with_ith
+  seed_mode: random_with_ith
   seed: 0
-  hard_route_backend: triton_c4_direct_route_j32_w2_exp2merge_bf16bias_cached
+  hard_route_backend: triton
   # Kept for backward-compatible scripts; this default now uses full
-  # compressed core attention, not an R4/local-window routing backend.
-  hard_route_routing_backend: triton_grid_m128_n32_s1_exp2
+  # compressed core attention with non-shared KV compression, not an
+  # R4/local-window routing backend.
+  hard_route_routing_backend: triton
