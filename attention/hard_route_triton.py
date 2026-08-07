@@ -349,6 +349,7 @@ if triton is not None:
         BLOCK_J: tl.constexpr,
         BLOCK_L: tl.constexpr,
         BLOCK_D: tl.constexpr,
+        QUERY_COL_OFFSET: tl.constexpr,
         SCORE_SCALE: tl.constexpr,
         USE_EXP2: tl.constexpr,
         FORCE_SEED_KEYS: tl.constexpr,
@@ -369,7 +370,7 @@ if triton is not None:
         query_outer = tmp % A
         batch = tmp // A
 
-        query_offsets = query_col_block * BLOCK_J + tl.arange(0, BLOCK_J)
+        query_offsets = QUERY_COL_OFFSET + query_col_block * BLOCK_J + tl.arange(0, BLOCK_J)
         key_offsets = tl.arange(0, BLOCK_L)
         dim_offsets = tl.arange(0, BLOCK_D)
         valid_query = query_offsets < J
@@ -1829,6 +1830,8 @@ def triton_hard_route_merge_c4_direct_route(
     compute_in_fp16=False,
     representative_key=False,
     top2_key=False,
+    tail_block_j_target=None,
+    tail_num_warps=1,
 ):
     """Exact non-shared C=4 merge that writes routing-ready K/V/bias.
 
@@ -1894,41 +1897,51 @@ def triton_hard_route_merge_c4_direct_route(
         bias_dtype,
     )
 
-    grid = (
-        batch * query_outer * key_outer * key_rows * heads,
-        triton.cdiv(query_columns, block_j),
-    )
-    launch_kwargs = {"num_warps": int(num_warps)}
-    if num_stages is not None:
-        launch_kwargs["num_stages"] = int(num_stages)
-    _hard_route_merge_c4_direct_route_kernel[grid](
-        query,
-        seed_rows,
-        key,
-        value,
-        merged_key,
-        merged_value,
-        routing_bias,
-        A=query_outer,
-        F=key_outer,
-        Q_ROWS=query_rows,
-        K_ROWS=key_rows,
-        J=query_columns,
-        H=heads,
-        L=key_columns,
-        D_HEAD=dim,
-        BLOCK_J=block_j,
-        BLOCK_L=block_l,
-        BLOCK_D=block_d,
-        SCORE_SCALE=float(scale),
-        USE_EXP2=bool(use_exp2),
-        FORCE_SEED_KEYS=bool(force_seed_keys),
-        LOGIT_INPUT_PRECISION=logit_input_precision,
-        COMPUTE_IN_FP16=bool(compute_in_fp16),
-        REPRESENTATIVE_KEY=bool(representative_key),
-        TOP2_KEY=bool(top2_key),
-        **launch_kwargs,
-    )
+    group_count = batch * query_outer * key_outer * key_rows * heads
+
+    def launch_column_tiles(query_col_offset, column_count, tile_j, warps):
+        grid = (group_count, triton.cdiv(column_count, tile_j))
+        launch_kwargs = {"num_warps": int(warps)}
+        if num_stages is not None:
+            launch_kwargs["num_stages"] = int(num_stages)
+        _hard_route_merge_c4_direct_route_kernel[grid](
+            query,
+            seed_rows,
+            key,
+            value,
+            merged_key,
+            merged_value,
+            routing_bias,
+            A=query_outer,
+            F=key_outer,
+            Q_ROWS=query_rows,
+            K_ROWS=key_rows,
+            J=query_columns,
+            H=heads,
+            L=key_columns,
+            D_HEAD=dim,
+            BLOCK_J=tile_j,
+            BLOCK_L=block_l,
+            BLOCK_D=block_d,
+            QUERY_COL_OFFSET=query_col_offset,
+            SCORE_SCALE=float(scale),
+            USE_EXP2=bool(use_exp2),
+            FORCE_SEED_KEYS=bool(force_seed_keys),
+            LOGIT_INPUT_PRECISION=logit_input_precision,
+            COMPUTE_IN_FP16=bool(compute_in_fp16),
+            REPRESENTATIVE_KEY=bool(representative_key),
+            TOP2_KEY=bool(top2_key),
+            **launch_kwargs,
+        )
+
+    tail_block_j = int(tail_block_j_target or 0)
+    main_columns = (query_columns // block_j) * block_j
+    if tail_block_j > 0 and 0 < main_columns < query_columns:
+        launch_column_tiles(0, main_columns, block_j, num_warps)
+        tail_columns = query_columns - main_columns
+        launch_column_tiles(main_columns, tail_columns, tail_block_j, tail_num_warps)
+    else:
+        launch_column_tiles(0, query_columns, block_j, num_warps)
     return merged_key, merged_value, routing_bias, None
 
 
