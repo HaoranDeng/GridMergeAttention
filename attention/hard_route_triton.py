@@ -45,6 +45,7 @@ if triton is not None:
         BLOCK_L: tl.constexpr,
         BLOCK_D: tl.constexpr,
         SCORE_SCALE: tl.constexpr,
+        USE_EXP2: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -121,7 +122,14 @@ if triton is not None:
             has_keys = tl.sum(tl.where(active, 1, 0), axis=1) > 0
 
             row_max = tl.max(tl.where(active, logits, -float("inf")), axis=1)
-            probs = tl.where(active, tl.exp(logits - row_max[:, None]), 0.0)
+            if USE_EXP2:
+                probs = tl.where(
+                    active,
+                    tl.exp2((logits - row_max[:, None]) * 1.4426950408889634),
+                    0.0,
+                )
+            else:
+                probs = tl.where(active, tl.exp(logits - row_max[:, None]), 0.0)
             denom = tl.sum(probs, axis=1)
             safe_denom = tl.where(denom > 0.0, denom, 1.0)
             weights = probs / safe_denom[:, None]
@@ -181,6 +189,7 @@ if triton is not None:
         BLOCK_L: tl.constexpr,
         BLOCK_D: tl.constexpr,
         SCORE_SCALE: tl.constexpr,
+        USE_EXP2: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -276,7 +285,14 @@ if triton is not None:
             has_keys = tl.sum(tl.where(active, 1, 0), axis=1) > 0
 
             row_max = tl.max(tl.where(active, logits, -float("inf")), axis=1)
-            probs = tl.where(active, tl.exp(logits - row_max[:, None]), 0.0)
+            if USE_EXP2:
+                probs = tl.where(
+                    active,
+                    tl.exp2((logits - row_max[:, None]) * 1.4426950408889634),
+                    0.0,
+                )
+            else:
+                probs = tl.where(active, tl.exp(logits - row_max[:, None]), 0.0)
             denom = tl.sum(probs, axis=1)
             safe_denom = tl.where(denom > 0.0, denom, 1.0)
             weights = probs / safe_denom[:, None]
@@ -332,6 +348,7 @@ if triton is not None:
         BLOCK_L: tl.constexpr,
         BLOCK_D: tl.constexpr,
         SCORE_SCALE: tl.constexpr,
+        USE_EXP2: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -445,7 +462,14 @@ if triton is not None:
             has_keys = tl.sum(tl.where(active, 1, 0), axis=1) > 0
 
             row_max = tl.max(tl.where(active, logits, -float("inf")), axis=1)
-            probs = tl.where(active, tl.exp(logits - row_max[:, None]), 0.0)
+            if USE_EXP2:
+                probs = tl.where(
+                    active,
+                    tl.exp2((logits - row_max[:, None]) * 1.4426950408889634),
+                    0.0,
+                )
+            else:
+                probs = tl.where(active, tl.exp(logits - row_max[:, None]), 0.0)
             denom = tl.sum(probs, axis=1)
             safe_denom = tl.where(denom > 0.0, denom, 1.0)
             weights = probs / safe_denom[:, None]
@@ -1628,6 +1652,7 @@ def triton_hard_route_merge(seed_queries, key, value, scale=1.0):
         BLOCK_L=block_l,
         BLOCK_D=block_d,
         SCORE_SCALE=float(scale),
+        USE_EXP2=False,
         num_warps=4,
     )
     return merged_key, merged_value, routing_bias, None
@@ -1705,6 +1730,7 @@ def triton_hard_route_merge_c4(seed_queries, key, value, scale=1.0, block_j_targ
         BLOCK_L=block_l,
         BLOCK_D=block_d,
         SCORE_SCALE=float(scale),
+        USE_EXP2=False,
         num_warps=4,
     )
     return merged_key, merged_value, routing_bias, None
@@ -1719,6 +1745,7 @@ def triton_hard_route_merge_c4_direct_route(
     block_j_target=16,
     num_warps=2,
     bias_dtype=torch.float32,
+    use_exp2=False,
 ):
     """Exact non-shared C=4 merge that writes routing-ready K/V/bias.
 
@@ -1806,6 +1833,7 @@ def triton_hard_route_merge_c4_direct_route(
         BLOCK_L=block_l,
         BLOCK_D=block_d,
         SCORE_SCALE=float(scale),
+        USE_EXP2=bool(use_exp2),
         num_warps=int(num_warps),
     )
     return merged_key, merged_value, routing_bias, None
