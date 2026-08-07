@@ -356,7 +356,6 @@ if triton is not None:
         SCORE_SCALE: tl.constexpr,
         USE_EXP2: tl.constexpr,
         FORCE_SEED_KEYS: tl.constexpr,
-        FAST_BIAS_PRODUCT: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -498,14 +497,10 @@ if triton is not None:
 
             merged_key = tl.dot(weights.to(key_block.dtype), key_block)
             merged_value = tl.dot(weights.to(value_block.dtype), value_block)
-            if FAST_BIAS_PRODUCT:
-                bias_terms = weights.to(key_block.dtype) * (logits - log_denom[:, None]).to(key_block.dtype)
-                routing_bias = tl.sum(tl.where(active, bias_terms, 0.0), axis=1)
-            else:
-                routing_bias = tl.sum(
-                    tl.where(active, weights * (logits - log_denom[:, None]), 0.0),
-                    axis=1,
-                )
+            routing_bias = tl.sum(
+                tl.where(active, weights * (logits - log_denom[:, None]), 0.0),
+                axis=1,
+            )
             if not FORCE_SEED_KEYS:
                 has_keys = tl.sum(tl.where(active, 1, 0), axis=1) > 0
                 routing_bias = tl.where(has_keys, routing_bias, 0.0)
@@ -1781,7 +1776,6 @@ def triton_hard_route_merge_c4_direct_route(
     bias_dtype=torch.float32,
     use_exp2=False,
     force_seed_keys=False,
-    fast_bias_product=False,
 ):
     """Exact non-shared C=4 merge that writes routing-ready K/V/bias.
 
@@ -1871,7 +1865,6 @@ def triton_hard_route_merge_c4_direct_route(
         SCORE_SCALE=float(scale),
         USE_EXP2=bool(use_exp2),
         FORCE_SEED_KEYS=bool(force_seed_keys),
-        FAST_BIAS_PRODUCT=bool(fast_bias_product),
         num_warps=int(num_warps),
     )
     return merged_key, merged_value, routing_bias, None
