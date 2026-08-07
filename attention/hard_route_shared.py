@@ -136,6 +136,7 @@ def _merge(seed_queries, k, v, backend, scale):
         "'triton_c4_direct_route_j32_w1_cached', "
         "'triton_c4_direct_route_j32_w2_bf16bias_cached', "
         "'triton_c4_direct_route_j32_w2_exp2merge_bf16bias_cached', "
+        "'triton_c4_direct_route_j32_w2_s{1,2,3}_exp2merge_bf16bias_cached', "
         "'triton_c4_direct_route_j{16,32,64}_w*_exp2merge_bf16bias_cached', "
         "'triton_c4_direct_route_j64_w{2,4}_cached', "
         "'triton_c4_direct_route_j32_w2_forcekeys', "
@@ -244,6 +245,48 @@ def _merge_shared(q, seed_rows, k, v, backend, scale):
             bias_dtype=k.dtype,
             use_exp2=True,
             workspace_cache=True,
+        )
+    if backend == "triton_c4_direct_route_j32_w2_s1_exp2merge_bf16bias_cached":
+        return triton_hard_route_shared_merge_c4_route_layout(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=2,
+            bias_dtype=k.dtype,
+            use_exp2=True,
+            workspace_cache=True,
+            num_stages=1,
+        )
+    if backend == "triton_c4_direct_route_j32_w2_s2_exp2merge_bf16bias_cached":
+        return triton_hard_route_shared_merge_c4_route_layout(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=2,
+            bias_dtype=k.dtype,
+            use_exp2=True,
+            workspace_cache=True,
+            num_stages=2,
+        )
+    if backend == "triton_c4_direct_route_j32_w2_s3_exp2merge_bf16bias_cached":
+        return triton_hard_route_shared_merge_c4_route_layout(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=2,
+            bias_dtype=k.dtype,
+            use_exp2=True,
+            workspace_cache=True,
+            num_stages=3,
         )
     if backend == "triton_c4_direct_route_j16_w1_exp2merge_bf16bias_cached":
         return triton_hard_route_shared_merge_c4_route_layout(
@@ -587,6 +630,9 @@ def hard_route_shared_attention(
         "triton_c4_direct_route_j32_w1_cached",
         "triton_c4_direct_route_j32_w2_bf16bias_cached",
         "triton_c4_direct_route_j32_w2_exp2merge_bf16bias_cached",
+        "triton_c4_direct_route_j32_w2_s1_exp2merge_bf16bias_cached",
+        "triton_c4_direct_route_j32_w2_s2_exp2merge_bf16bias_cached",
+        "triton_c4_direct_route_j32_w2_s3_exp2merge_bf16bias_cached",
         "triton_c4_direct_route_j16_w1_exp2merge_bf16bias_cached",
         "triton_c4_direct_route_j16_w2_exp2merge_bf16bias_cached",
         "triton_c4_direct_route_j32_w1_exp2merge_bf16bias_cached",
