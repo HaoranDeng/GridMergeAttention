@@ -920,7 +920,7 @@ def triton_biased_attention(query, key, value, bias, block_m=16, block_n=128, sc
     if block_d > 128:
         raise ValueError(f"Triton hard-route attention supports head dim <= 128, got {dim}.")
 
-    out = torch.empty_like(query)
+    out = _cached_empty("grid_biased_attention_out", query.shape, query.device, query.dtype)
     grid = (groups, triton.cdiv(query_len, block_m))
     meta = {"num_warps": 4}
     if num_stages is not None:
@@ -993,7 +993,7 @@ def triton_grid_biased_attention(
         raise ValueError(f"Triton hard-route attention supports head dim <= 128, got {dim}.")
 
     query_len = query_outer * query_rows
-    out = torch.empty_like(query)
+    out = _cached_empty("grid_outer_local_attention_out", query.shape, query.device, query.dtype)
     grid = (groups, triton.cdiv(query_len, block_m))
     meta = {"num_warps": 4}
     if num_stages is not None:
@@ -1082,7 +1082,7 @@ def triton_grid_outer_local_biased_attention(
     max_query_outers_per_block = (int(block_m) + query_rows - 1) // query_rows + 1
     local_key_len = min(key_len, (max_query_outers_per_block + 2 * local_radius) * tokens_per_outer)
 
-    out = torch.empty_like(query)
+    out = _cached_empty("grid_outer_local_window_attention_out", query.shape, query.device, query.dtype)
     grid = (groups, triton.cdiv(query_len, block_m))
     _grid_outer_local_biased_attention_kernel[grid](
         query,
@@ -1165,7 +1165,7 @@ def triton_grid_outer_exact_local_biased_attention(
     query_len = query_outer * query_rows
     tokens_per_outer = key_len // query_outer
 
-    out = torch.empty_like(query)
+    out = _cached_empty("grid_outer_exact_local_attention_out", query.shape, query.device, query.dtype)
     grid = (groups, triton.cdiv(query_len, block_m))
     _grid_outer_exact_local_biased_attention_kernel[grid](
         query,
