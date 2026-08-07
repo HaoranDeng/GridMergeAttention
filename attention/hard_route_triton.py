@@ -1565,6 +1565,62 @@ def triton_hard_route_shared_merge_c4_route_layout(
     return merged_key, merged_value, routing_bias, None
 
 
+def triton_hard_route_shared_merge_c4_default_route_layout(query, seed_rows, key, value, scale=1.0):
+    """Fast wrapper for the default shared C4 hard-route merge launch."""
+    if triton is None:
+        raise RuntimeError("hard_route_backend='triton_c4_direct_route' requires Triton.")
+
+    query = query.contiguous()
+    seed_rows = seed_rows.contiguous()
+    key = key.contiguous()
+    value = value.contiguous()
+
+    batch, query_outer, query_rows, query_columns, heads, dim = query.shape
+    key_rows = key.size(2)
+    key_columns = key.size(3)
+    block_l = triton.next_power_of_2(key_columns)
+    block_d = triton.next_power_of_2(dim)
+
+    route_groups = batch * heads * query_columns
+    route_tokens = query_outer * key_rows * 4
+    merged_key = _cached_empty("shared_c4_route_key", (route_groups, route_tokens, dim), key.device, key.dtype)
+    merged_value = _cached_empty("shared_c4_route_value", (route_groups, route_tokens, dim), key.device, key.dtype)
+    routing_bias = _cached_empty("shared_c4_route_bias", (route_groups, route_tokens), key.device, key.dtype)
+
+    grid = (
+        batch * query_outer * key_rows * heads,
+        triton.cdiv(query_columns, 32),
+    )
+    _hard_route_shared_merge_c4_kernel[grid](
+        query,
+        seed_rows,
+        key,
+        value,
+        merged_key,
+        merged_value,
+        routing_bias,
+        F=query_outer,
+        Q_ROWS=query_rows,
+        K_ROWS=key_rows,
+        J=query_columns,
+        H=heads,
+        L=key_columns,
+        D_HEAD=dim,
+        C_SEEDS=4,
+        BLOCK_J=32,
+        BLOCK_L=block_l,
+        BLOCK_D=block_d,
+        SCORE_SCALE=float(scale),
+        ROUTE_LAYOUT=True,
+        WRITE_BIAS=True,
+        BIAS_MODE=0,
+        FORCE_SEED_KEYS=False,
+        USE_EXP2=True,
+        num_warps=2,
+    )
+    return merged_key, merged_value, routing_bias, None
+
+
 def triton_hard_route_shared_merge_c3_route_layout(
     query,
     seed_rows,
@@ -1664,5 +1720,6 @@ __all__ = [
     "triton_hard_route_merge_c4",
     "triton_hard_route_shared_merge_c3_route_layout",
     "triton_hard_route_shared_merge_c4",
+    "triton_hard_route_shared_merge_c4_default_route_layout",
     "triton_hard_route_shared_merge_c4_route_layout",
 ]

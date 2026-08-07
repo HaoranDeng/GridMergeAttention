@@ -17,6 +17,7 @@ from .hard_route_triton import (
     triton_hard_route_merge_c4,
     triton_hard_route_shared_merge_c3_route_layout,
     triton_hard_route_shared_merge_c4,
+    triton_hard_route_shared_merge_c4_default_route_layout,
     triton_hard_route_shared_merge_c4_route_layout,
 )
 
@@ -591,17 +592,12 @@ def _default_c4_exact_r4_attention(q, k, v, scale, seed):
         include_ith=True,
         fast_with_include=True,
     )
-    merged_keys, merged_values, routing_bias, _ = triton_hard_route_shared_merge_c4_route_layout(
+    merged_keys, merged_values, routing_bias, _ = triton_hard_route_shared_merge_c4_default_route_layout(
         q,
         seed_rows,
         k,
         v,
         scale=scale,
-        block_j_target=32,
-        num_warps=2,
-        bias_dtype=k.dtype,
-        use_exp2=True,
-        workspace_cache=True,
     )
     return triton_grid_outer_exact_local_biased_attention(
         q,
