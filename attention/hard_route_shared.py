@@ -12,7 +12,7 @@ from .hard_route import (
     hard_route_merge_weights,
 )
 from .hard_route_triton import (
-    triton_grid_outer_exact_local_biased_attention,
+    triton_grid_outer_exact_r4_m128_n64_w4_s3_biased_attention,
     triton_hard_route_merge,
     triton_hard_route_merge_c4,
     triton_hard_route_shared_merge_c3_route_layout,
@@ -599,16 +599,12 @@ def _default_c4_exact_r4_attention(q, k, v, scale, seed):
         v,
         scale=scale,
     )
-    return triton_grid_outer_exact_local_biased_attention(
+    return triton_grid_outer_exact_r4_m128_n64_w4_s3_biased_attention(
         q,
         merged_keys,
         merged_values,
         routing_bias,
-        local_radius=4,
-        block_m=128,
-        block_n=64,
         scale=scale,
-        num_stages=3,
     )
 
 
