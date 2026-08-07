@@ -245,6 +245,32 @@ def _direct_route_merge(q, seed_rows, k, v, backend, scale):
             num_stages=1,
             logit_input_precision="tf32",
         )
+    fp16kv_fast_configs = {
+        "triton_c4_direct_route_j16_w1_exp2merge_forcekeys_fp16kvbias_s1_fastdot": (16, 1),
+        "triton_c4_direct_route_j16_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot": (16, 2),
+        "triton_c4_direct_route_j32_w1_exp2merge_forcekeys_fp16kvbias_s1_fastdot": (32, 1),
+        "triton_c4_direct_route_j32_w4_exp2merge_forcekeys_fp16kvbias_s1_fastdot": (32, 4),
+        "triton_c4_direct_route_j64_w1_exp2merge_forcekeys_fp16kvbias_s1_fastdot": (64, 1),
+        "triton_c4_direct_route_j64_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot": (64, 2),
+        "triton_c4_direct_route_j64_w4_exp2merge_forcekeys_fp16kvbias_s1_fastdot": (64, 4),
+    }
+    if backend in fp16kv_fast_configs:
+        block_j_target, num_warps = fp16kv_fast_configs[backend]
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=block_j_target,
+            num_warps=num_warps,
+            bias_dtype=torch.float16,
+            merged_dtype=torch.float16,
+            use_exp2=True,
+            force_seed_keys=True,
+            num_stages=1,
+            logit_input_precision="tf32",
+        )
     if backend == "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot":
         return triton_hard_route_merge_c4_direct_route(
             q,
