@@ -349,6 +349,7 @@ if triton is not None:
         BLOCK_D: tl.constexpr,
         SCORE_SCALE: tl.constexpr,
         USE_EXP2: tl.constexpr,
+        FORCE_SEED_KEYS: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -441,6 +442,12 @@ if triton is not None:
         assignments = tl.where(update, 2, assignments)
         update = logits3 > best_logits
         assignments = tl.where(update, 3, assignments)
+        if FORCE_SEED_KEYS:
+            assignments = tl.where(
+                valid_logits & (key_offsets[None, :] < 4),
+                key_offsets[None, :],
+                assignments,
+            )
 
         route_group = (((batch * H + head) * A + query_outer) * J + query_offsets)
         route_token_base = (key_outer * K_ROWS + key_row) * 4
@@ -456,9 +463,12 @@ if triton is not None:
                 logits = logits3
 
             assigned_to_seed = assignments == seed_idx
-            has_seed = tl.sum(tl.where(assigned_to_seed & valid_logits, 1, 0), axis=1) > 0
-            forced_first_key = (~has_seed[:, None]) & (key_offsets[None, :] == 0)
-            active = valid_logits & (assigned_to_seed | forced_first_key)
+            if FORCE_SEED_KEYS:
+                active = valid_logits & assigned_to_seed
+            else:
+                has_seed = tl.sum(tl.where(assigned_to_seed & valid_logits, 1, 0), axis=1) > 0
+                forced_first_key = (~has_seed[:, None]) & (key_offsets[None, :] == 0)
+                active = valid_logits & (assigned_to_seed | forced_first_key)
             has_keys = tl.sum(tl.where(active, 1, 0), axis=1) > 0
 
             row_max = tl.max(tl.where(active, logits, -float("inf")), axis=1)
@@ -1753,6 +1763,7 @@ def triton_hard_route_merge_c4_direct_route(
     num_warps=2,
     bias_dtype=torch.float32,
     use_exp2=False,
+    force_seed_keys=False,
 ):
     """Exact non-shared C=4 merge that writes routing-ready K/V/bias.
 
@@ -1841,6 +1852,7 @@ def triton_hard_route_merge_c4_direct_route(
         BLOCK_D=block_d,
         SCORE_SCALE=float(scale),
         USE_EXP2=bool(use_exp2),
+        FORCE_SEED_KEYS=bool(force_seed_keys),
         num_warps=int(num_warps),
     )
     return merged_key, merged_value, routing_bias, None
