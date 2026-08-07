@@ -486,7 +486,10 @@ if triton is not None:
             else:
                 probs = tl.where(active, tl.exp(logits - row_max[:, None]), 0.0)
             denom = tl.sum(probs, axis=1)
-            safe_denom = tl.where(denom > 0.0, denom, 1.0)
+            if FORCE_SEED_KEYS:
+                safe_denom = tl.where(valid_query, denom, 1.0)
+            else:
+                safe_denom = tl.where(denom > 0.0, denom, 1.0)
             weights = probs / safe_denom[:, None]
             if USE_EXP2:
                 log_denom = row_max + tl.log2(safe_denom) * 0.6931471805599453
