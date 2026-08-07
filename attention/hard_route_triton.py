@@ -16,7 +16,7 @@ if triton is not None:
         """Reuse no-grad intermediate buffers for inference-only fast paths."""
         if torch.is_grad_enabled():
             return torch.empty(shape, device=device, dtype=dtype)
-        cache_key = (name, tuple(int(x) for x in shape), str(device), str(dtype))
+        cache_key = (name, torch.Size(shape), device, dtype)
         out = _WORKSPACE_CACHE.get(cache_key)
         if out is None:
             out = torch.empty(shape, device=device, dtype=dtype)
