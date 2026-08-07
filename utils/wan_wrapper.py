@@ -86,6 +86,9 @@ class WanVAECore(torch.nn.Module):
             self.mean.to(device=device, dtype=dtype),
             1.0 / self.std.to(device=device, dtype=dtype),
         ]
+        if os.environ.get("WAN_VAE_BATCH_DECODE", "").lower() in {"1", "true", "yes"}:
+            output = self.model.decode(zs, scale).float().clamp_(-1, 1)
+            return output.permute(0, 2, 1, 3, 4)
         output = [
             self.model.decode(u.unsqueeze(0), scale).float().clamp_(-1, 1).squeeze(0)
             for u in zs

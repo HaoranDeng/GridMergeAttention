@@ -4,15 +4,15 @@ from einops import rearrange
 from .common import (
     gather_seed_queries_transpose,
     random_seed_columns,
-    scale_qk,
     validate_block_seed_mode,
 )
 from .hard_route import hard_route_compressed_attention, hard_route_merge_weights
 from .hard_route_triton import triton_hard_route_merge, triton_hard_route_merge_c4
 
 
-def _torch_merge(seed_queries, k, v):
+def _torch_merge(seed_queries, k, v, scale):
     seed_logits = torch.einsum("bafilchd,bfklhd->bhafilck", seed_queries, k).float()
+    seed_logits = seed_logits * float(scale)
     merge_weights, merge_logprob, cluster_has_keys = hard_route_merge_weights(seed_logits, k.dtype)
 
     merged_keys = torch.einsum("bhafilck,bfklhd->bafilchd", merge_weights, k)
@@ -21,7 +21,7 @@ def _torch_merge(seed_queries, k, v):
     return merged_keys, merged_values, routing_bias, cluster_has_keys
 
 
-def _triton_merge(seed_queries, k, v, use_c4_kernel=False, block_j_target=8):
+def _triton_merge(seed_queries, k, v, scale, use_c4_kernel=False, block_j_target=8):
     # Reuse the row-routing Triton kernel by treating original key columns as
     # fixed key rows and original key rows as the merged key-token dimension.
     seed_queries_for_kernel = rearrange(
@@ -36,6 +36,7 @@ def _triton_merge(seed_queries, k, v, use_c4_kernel=False, block_j_target=8):
             seed_queries_for_kernel,
             key_for_kernel,
             value_for_kernel,
+            scale=scale,
             block_j_target=block_j_target,
         )
     else:
@@ -43,22 +44,24 @@ def _triton_merge(seed_queries, k, v, use_c4_kernel=False, block_j_target=8):
             seed_queries_for_kernel,
             key_for_kernel,
             value_for_kernel,
+            scale=scale,
         )
     routing_bias = rearrange(routing_bias, "b h a f l i c -> b h a f i l c")
-    cluster_has_keys = rearrange(cluster_has_keys, "b h a f l i c -> b h a f i l c")
+    if cluster_has_keys is not None:
+        cluster_has_keys = rearrange(cluster_has_keys, "b h a f l i c -> b h a f i l c")
     return merged_keys, merged_values, routing_bias, cluster_has_keys
 
 
-def _merge(seed_queries, k, v, backend):
+def _merge(seed_queries, k, v, backend, scale):
     backend = (backend or "sdpa").lower()
     if backend == "sdpa":
-        return _torch_merge(seed_queries, k, v)
+        return _torch_merge(seed_queries, k, v, scale)
     if backend == "triton":
-        return _triton_merge(seed_queries, k, v)
+        return _triton_merge(seed_queries, k, v, scale)
     if backend == "triton_c4":
-        return _triton_merge(seed_queries, k, v, use_c4_kernel=True)
+        return _triton_merge(seed_queries, k, v, scale, use_c4_kernel=True)
     if backend == "triton_c4_j16":
-        return _triton_merge(seed_queries, k, v, use_c4_kernel=True, block_j_target=16)
+        return _triton_merge(seed_queries, k, v, scale, use_c4_kernel=True, block_j_target=16)
     raise ValueError(
         f"unsupported hard_route_backend={backend!r}; expected 'sdpa', 'triton', "
         "'triton_c4', or 'triton_c4_j16'."
@@ -85,8 +88,6 @@ def hard_route_attention_transpose(
     if num_merge_tokens > q.size(3):
         raise ValueError("num_merge_tokens cannot exceed query columns per block.")
 
-    q, k = scale_qk(q, k, scale)
-
     query_outer = torch.arange(
         query_outer_offset,
         query_outer_offset + q.size(1),
@@ -111,6 +112,7 @@ def hard_route_attention_transpose(
         k,
         v,
         hard_route_backend,
+        scale,
     )
 
     query = rearrange(q, "b a i j h d -> (b h a i) j d")
@@ -124,6 +126,7 @@ def hard_route_attention_transpose(
         value,
         bias,
         hard_route_routing_backend,
+        scale,
     )
     return rearrange(
         out,

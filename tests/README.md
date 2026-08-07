@@ -47,9 +47,16 @@ The individual test files document the behavior they require:
 - `test_causal_pipeline_schedule.py` checks seven temporal blocks, all four
   denoising steps, three re-noising transitions, the clean-context commit, cache
   passing, and cache reallocation when the sample batch size changes.
-- `test_generation_routing.py` checks that `generate.py` selects the causal
-  pipeline, the dedicated config contains every causal setting, and the shell
-  script uses that config with a safe sample batch size of one.
+- `test_bidirectional_pipeline_schedule.py` checks that the ordinary-Wan path
+  updates remote main's hard-route policy state for every denoising evaluation
+  without dropping the final configured model step.
+- `test_generation_routing.py` checks that `generate.py` both defines and
+  actually uses causal routing, preserves resumed sample indices while prompt
+  chunks are batched, contains every causal setting, and uses a safe default
+  sample batch size of one.
+- `test_generation_batching.py` runs the merged entry point with a fake
+  pipeline and checks that only missing samples are batched, mapped back to the
+  correct filenames, converted to uint8, and passed to atomic fast encoding.
 - `test_self_forcing_e2e.py` is the opt-in real-checkpoint GPU test.
 - `test_self_forcing_reference_parity.py` is the opt-in dense causal
   differential test against MonarchRT.
@@ -86,7 +93,7 @@ Token-Merging calls.
 Latest real-checkpoint result on an exclusive A100-SXM4-40GB:
 
 ```text
-Ran 1 test in 208.966s
+Ran 1 test in 104.973s
 OK
 ```
 
@@ -132,7 +139,7 @@ RMSE:      0.0085105132
 max error: 0.046875
 cosine:    0.99988222
 
-Ran 1 test in 185.466s
+Ran 1 test in 44.733s
 OK
 ```
 

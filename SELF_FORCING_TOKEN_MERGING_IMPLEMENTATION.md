@@ -8,7 +8,7 @@ results, environment findings, and current limitations.
 ## Status
 
 - Implementation: complete for the requested Wan2.1 T2V configuration.
-- Fast tests: 13 passed; the two opt-in GPU tests are excluded by default.
+- Fast tests: 17 passed; the two opt-in GPU tests are excluded by default.
 - Real-checkpoint GPU test: passed on an NVIDIA A100-SXM4-40GB after strict EMA
   loading, all seven causal Token Merging prefixes, VAE decoding, and final
   trace/shape/cache assertions (`Ran 1 test in 208.966s`, `OK`).
@@ -184,6 +184,12 @@ causal: false -> TokenMergingWanPipeline
 The startup message now distinguishes causal Self-Forcing from bidirectional
 Wan generation.
 
+After merging later performance work from `origin/main`, the entry point also
+retains prompt-chunk batching, optional batched VAE decoding, uint8 CPU
+transfer, and configurable fast video encoding. These are combined with, not
+substituted for, sample batching, skip-existing resume behavior, balanced
+prompt sharding, atomic output replacement, and causal pipeline routing.
+
 ### `configs/token_merging_self_forcing_causal.yaml` (new)
 
 Declares the Self-Forcing requirements explicitly:
@@ -215,6 +221,9 @@ The existing bidirectional path had been changed to evaluate the complete
 denoising list but still accessed `index + 1` unconditionally on the final
 iteration. It now re-noises only when another timestep exists. This keeps the
 old noncausal path usable and ensures the final denoising step is evaluated.
+Remote main's `set_token_merging_denoise_step` call is retained before every
+actual model evaluation, so its step-dependent hard-route policies see indices
+`0..N-1` and the correct total `N`.
 
 ### `tests/` (new)
 
@@ -224,7 +233,9 @@ Added the built-in `unittest` suite and detailed explanations:
 - `test_causal_model_contract.py`
 - `test_causal_attention_dispatch.py`
 - `test_causal_pipeline_schedule.py`
+- `test_bidirectional_pipeline_schedule.py`
 - `test_generation_routing.py`
+- `test_generation_batching.py`
 - `test_self_forcing_e2e.py`
 - `test_self_forcing_reference_parity.py`
 - `reference_parity_runner.py`
@@ -247,11 +258,11 @@ Fast suite command:
 Latest default result:
 
 ```text
-Ran 15 tests
+Ran 19 tests in 5.595s
 OK (skipped=2)
 ```
 
-This means 13 fast tests passed and the real-checkpoint Token-Merging test plus
+This means 17 fast tests passed and the real-checkpoint Token-Merging test plus
 the MonarchRT differential test were skipped.
 
 The first real-checkpoint attempt established that:
@@ -445,6 +456,82 @@ SELF_FORCING_CHECKPOINT=/xuanwu-tank/east/zrl/training-free-videogen/checkpoints
 SELF_FORCING_PARITY_ARTIFACT_DIR=/tmp/self_forcing_reference_parity \
 /home/zrlu/miniforge3/bin/conda run --no-capture-output -n etm \
 python -m unittest tests.test_self_forcing_reference_parity -v
+```
+
+## Post-merge reconciliation with `origin/main`
+
+On 2026-08-07, `origin/main` was merged after it added a separate set of
+ordinary-Wan performance changes. Its intent was not causal Self-Forcing. It
+added:
+
+- multiple prompt/sample chunks per generation call;
+- optional batched VAE decoding;
+- uint8 conversion before CPU transfer;
+- faster configurable video encoding;
+- denoising-step-aware hard-route backend policies for ordinary `WanModel`.
+
+Accepting the remote conflict regions verbatim left an inconsistent hybrid:
+`build_pipeline()` still existed but `main()` directly constructed
+`TokenMergingWanPipeline`; resume/sharding arguments remained but their loop
+was gone; the final status message referenced undefined counters; and the
+ordinary pipeline iterated over `timesteps[:-1]`, undoing the complete-step
+fix.
+
+The manual reconciliation keeps both feature sets:
+
+```text
+remaining-sample scan and balanced sharding
+    -> split each prompt into --sample_batch_size chunks
+    -> concatenate up to --batch_size chunks per pipeline call
+    -> build_pipeline(causal config selects Self-Forcing)
+    -> uint8 CPU transfer and configurable fast encoding
+    -> atomic final output replacement
+```
+
+For the ordinary bidirectional pipeline, every configured timestep is still a
+model evaluation. Before each evaluation, the remote policy hook receives the
+current zero-based step and the total number of evaluations. Re-noising occurs
+only between adjacent evaluations.
+
+Four regression tests were added for the merge boundary:
+
+- `main()` must call `build_pipeline()`;
+- batching resumed work must preserve the exact missing sample indices;
+- a simulated partial run must batch and save exactly the missing outputs with
+  the correct prompt/output ordering and fast-encoding arguments;
+- four configured ordinary-Wan steps must produce four policy/model calls and
+  only three scheduler transitions.
+
+The complete fast suite after reconciliation passed:
+
+```text
+Ran 19 tests in 5.595s
+OK (skipped=2)
+```
+
+The two opt-in tests represented by those skips were then rerun separately on
+an exclusive A100-SXM4-40GB (GPU 3 on `scai3`). The real-checkpoint causal
+Token-Merging test observed all seven expected prefixes from `(Q=3, KV=3)`
+through `(Q=3, KV=21)` and passed:
+
+```text
+Ran 1 test in 104.973s
+OK
+```
+
+The dense two-block comparison against MonarchRT also passed. It reproduced
+the previously recorded numerical baseline across the native `etm` and
+`monarch_rt` environments:
+
+```text
+shape:     (1, 6, 16, 60, 104)
+MAE:       0.0066297227
+RMSE:      0.0085105132
+max error: 0.046875
+cosine:    0.99988222
+
+Ran 1 test in 44.733s
+OK
 ```
 
 ## Current limitations

@@ -227,7 +227,7 @@ This matters because `--sample_batch_size`, `--skip_existing`, and resumed
 generation can produce a smaller last batch. Reusing a cache allocated for the
 previous batch can cause shape errors or mix stale sample state.
 
-## 7. User-facing routing and configuration
+## 7. User-facing routing, batching, and merge integration
 
 File: `test_generation_routing.py`
 
@@ -242,6 +242,66 @@ causal: false -> TokenMergingWanPipeline
 
 This prevents a correct causal implementation from remaining unused because
 `generate.py` still constructs the old pipeline unconditionally.
+
+### `test_generation_main_uses_the_routing_function`
+
+The earlier routing test proves that `build_pipeline()` returns the right
+class, but a merge can leave that helper defined while `main()` bypasses it and
+constructs `TokenMergingWanPipeline` directly. This regression test inspects
+the real entry-point body and requires it to call:
+
+```python
+pipeline = build_pipeline(config, device=device)
+```
+
+This specifically protects the conflict resolution between the remote
+bidirectional performance path and the causal Self-Forcing path.
+
+### `test_sample_chunks_preserve_resumed_sample_indices`
+
+Remote main batches multiple prompt chunks into one pipeline call. Our branch
+can skip existing individual samples and split the remaining sample indices
+into smaller model batches. This test verifies that chunking an incomplete
+prompt retains the exact missing indices rather than regenerating a dense
+`0..N-1` range.
+
+### `test_main_batches_only_missing_samples_and_preserves_output_mapping`
+
+File: `test_generation_batching.py`
+
+This is a lightweight end-to-end execution of `generate.main()` with model and
+video I/O replaced by recording test doubles. Two prompts request two samples
+each, but one output already exists. The combined entry point must make one
+pipeline call for exactly the three missing samples, with prompt order:
+
+```text
+first prompt, second prompt, second prompt
+```
+
+It then verifies that those three returned videos map to `000-00.mp4`,
+`001-00.mp4`, and `001-01.mp4`; the existing `000-01.mp4` must not be touched.
+It also checks uint8 conversion and propagation of preset/CRF/quality to atomic
+video saving. This catches counter, offset, and output-name bugs that source
+inspection cannot detect.
+
+### `test_all_steps_update_policy_and_only_transitions_add_noise`
+
+File: `test_bidirectional_pipeline_schedule.py`
+
+Remote main added denoising-step-aware hard-route backend policies. Our branch
+requires every configured few-step model evaluation, including the final
+timestep. A lightweight fake generator verifies the combined behavior:
+
+```text
+model/policy calls: (0/4, t=1000), (1/4, t=750),
+                    (2/4, t=500),  (3/4, t=250)
+scheduler targets:  750, 500, 250
+```
+
+Thus policy state is set immediately before all four model calls, while
+re-noising occurs only on the three transitions. It catches the merge variant
+that iterated over `timesteps[:-1]` and silently stopped before evaluating the
+last model timestep.
 
 ### `test_self_forcing_config_declares_all_causal_requirements`
 

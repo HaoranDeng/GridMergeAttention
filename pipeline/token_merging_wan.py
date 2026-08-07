@@ -45,18 +45,18 @@ class TokenMergingWanPipeline(torch.nn.Module):
         noisy_image_or_video = noise
         pred_image_or_video = None
 
-        for index, current_timestep in enumerate(self.denoising_step_list):
+        timesteps = self.denoising_step_list.to(device=noise.device)
+        num_denoise_steps = len(timesteps)
+        timestep_shape = noise.shape[:2]
+        for index, current_timestep in enumerate(timesteps):
+            self.generator.model.set_token_merging_denoise_step(index, num_denoise_steps)
             _, pred_image_or_video = self.generator(
                 noisy_image_or_video=noisy_image_or_video,
                 conditional_dict=conditional_dict,
-                timestep=torch.ones(noise.shape[:2], dtype=torch.long, device=noise.device) * current_timestep,
+                timestep=current_timestep.expand(timestep_shape),
             )
-            if index + 1 < len(self.denoising_step_list):
-                next_timestep = self.denoising_step_list[index + 1] * torch.ones(
-                    noise.shape[:2],
-                    dtype=torch.long,
-                    device=noise.device,
-                )
+            if index + 1 < num_denoise_steps:
+                next_timestep = timesteps[index + 1].expand(timestep_shape)
                 noisy_image_or_video = self.scheduler.add_noise(
                     pred_image_or_video.flatten(0, 1),
                     torch.randn_like(pred_image_or_video.flatten(0, 1)),
@@ -67,7 +67,7 @@ class TokenMergingWanPipeline(torch.nn.Module):
             raise ValueError("denoising_step_list must contain at least one step.")
 
         video = self.vae.decoder(pred_image_or_video)
-        video = (video * 0.5 + 0.5).clamp(0, 1)
+        video.mul_(0.5).add_(0.5).clamp_(0, 1)
         if return_latents:
             return video, pred_image_or_video
         return video

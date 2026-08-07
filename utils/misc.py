@@ -4,12 +4,23 @@ import torch
 import imageio
 
 
-def save_video(path, video, fps=16):
-    """Save (T, H, W, C) frames in [0, 255] as mp4. Uses imageio (torchvision write_video is unavailable on some builds)."""
+def save_video(path, video, fps=16, preset="ultrafast", crf=23, quality=None):
+    """Save (T, H, W, C) frames in [0, 255] as mp4."""
     if isinstance(video, torch.Tensor):
         video = video.cpu().numpy()
-    video = np.clip(video, 0, 255).astype(np.uint8)
-    writer = imageio.get_writer(path, fps=fps, codec="libx264", quality=8)
+    if video.dtype != np.uint8:
+        video = np.clip(video, 0, 255).astype(np.uint8)
+    kwargs = {"fps": fps, "codec": "libx264"}
+    if quality is not None:
+        kwargs["quality"] = quality
+    output_params = []
+    if preset:
+        output_params += ["-preset", str(preset)]
+    if crf is not None:
+        output_params += ["-crf", str(crf)]
+    if output_params:
+        kwargs["output_params"] = output_params
+    writer = imageio.get_writer(path, **kwargs)
     for frame in video:
         writer.append_data(frame)
     writer.close()

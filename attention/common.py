@@ -83,6 +83,9 @@ def video_to_blocks(x, f_tied, h_reduce, w_reduce, height, width):
     if frames % f_tied:
         raise ValueError("number of frames must be divisible by f_tied.")
 
+    if f_tied == 1 and h_reduce == 1 and w_reduce == 1:
+        return x.reshape(batch, frames, height, width, heads, dim)
+
     return rearrange(
         x,
         "b (outer ft hr row wr col) head dim -> b (outer hr wr) (ft row) col head dim",
@@ -96,6 +99,10 @@ def video_to_blocks(x, f_tied, h_reduce, w_reduce, height, width):
 
 def blocks_to_video(x, f_tied, h_reduce, w_reduce):
     """[B, outer, row, col, heads, dim] -> [B, F*H*W, heads, dim]."""
+    if f_tied == 1 and h_reduce == 1 and w_reduce == 1:
+        batch, outer, row, col, heads, dim = x.shape
+        return x.reshape(batch, outer * row * col, heads, dim)
+
     return rearrange(
         x,
         "b (outer hr wr) (ft row) col head dim -> b (outer ft hr row wr col) head dim",
@@ -251,11 +258,11 @@ def soft_merge_weights(merge_logits, dtype):
     return merge_weights, merge_logprob
 
 
-def biased_sdpa(query, key, value, bias, valid=None):
+def biased_sdpa(query, key, value, bias, valid=None, scale=1.0):
     """Attention over compressed tokens with a per-key additive bias.
 
     query: [G, Q, D], key/value: [G, K, D], bias: [G, K].
-    The attention logits are query @ key.T - bias.
+    The attention logits are scale * query @ key.T - bias.
     """
     attn_bias = -bias.float()
     if valid is not None:
@@ -268,6 +275,6 @@ def biased_sdpa(query, key, value, bias, valid=None):
         attn_mask=attn_bias.to(query.dtype).unsqueeze(1).unsqueeze(2),
         dropout_p=0.0,
         is_causal=False,
-        scale=1.0,
+        scale=scale,
     )
     return out.squeeze(1)

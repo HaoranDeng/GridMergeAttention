@@ -7,6 +7,7 @@ wiring and the dedicated Self-Forcing configuration used by the shell script.
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 import unittest
 from unittest import mock
@@ -59,6 +60,39 @@ class GenerationRoutingTests(unittest.TestCase):
             self.assertIs(selected, bidirectional_sentinel)
             bidirectional_constructor.assert_called_once()
 
+    def test_generation_main_uses_the_routing_function(self) -> None:
+        """Defining ``build_pipeline`` is insufficient if main bypasses it."""
+
+        generate = import_module_cpu_safely("generate")
+        main_source = inspect.getsource(generate.main)
+        self.assertIn("pipeline = build_pipeline(config, device=device)", main_source)
+        self.assertNotIn(
+            "pipeline = TokenMergingWanPipeline(config, device=device)",
+            main_source,
+        )
+
+    def test_sample_chunks_preserve_resumed_sample_indices(self) -> None:
+        """Prompt batching must not recreate samples already skipped on resume."""
+
+        generate = import_module_cpu_safely("generate")
+        chunks = list(
+            generate.iter_sample_chunks(
+                [
+                    (4, "first", [1, 3, 4]),
+                    (9, "second", [0]),
+                ],
+                sample_batch_size=2,
+            )
+        )
+        self.assertEqual(
+            chunks,
+            [
+                (4, "first", [1, 3]),
+                (4, "first", [4]),
+                (9, "second", [0]),
+            ],
+        )
+
     def test_self_forcing_config_declares_all_causal_requirements(self) -> None:
         """The dedicated config must not rely on absent MonarchRT defaults."""
 
@@ -94,4 +128,3 @@ class GenerationRoutingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
-
