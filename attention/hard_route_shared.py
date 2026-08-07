@@ -12,7 +12,7 @@ from .hard_route import (
     hard_route_merge_weights,
 )
 from .hard_route_triton import (
-    triton_grid_outer_exact_local_biased_attention,
+    triton_grid_biased_attention,
     triton_hard_route_merge,
     triton_hard_route_merge_c4,
     triton_hard_route_shared_merge_c3_route_layout,
@@ -24,7 +24,7 @@ from .hard_route_triton import (
 
 _SHARED_SEED_ROWS_CACHE = {}
 _DEFAULT_C4_MERGE_BACKEND = "triton_c4_direct_route_j32_w2_exp2merge_bf16bias_cached"
-_DEFAULT_EXACT_R4_ROUTING_BACKEND = "triton_grid_outer_exact_r4_m128_n64_w4_s3_exp2"
+_DEFAULT_FULL_CORE_ROUTING_BACKEND = "triton_grid_m128_n32_s1_exp2"
 
 
 def shared_seed_rows(
@@ -579,8 +579,8 @@ def _merge_shared(q, seed_rows, k, v, backend, scale):
     return _merge(seed_queries, k, v, backend, scale)
 
 
-def _default_c4_exact_r4_attention(q, k, v, scale, seed):
-    """Fast path for the default hard C4 + exact R4 inference configuration."""
+def _default_c4_full_core_attention(q, k, v, scale, seed):
+    """Fast path for default hard C4 with full compressed core attention."""
     seed_rows = cached_shared_seed_rows(
         q.device,
         k.size(1),
@@ -599,16 +599,16 @@ def _default_c4_exact_r4_attention(q, k, v, scale, seed):
         v,
         scale=scale,
     )
-    return triton_grid_outer_exact_local_biased_attention(
+    return triton_grid_biased_attention(
         q,
         merged_keys,
         merged_values,
         routing_bias,
-        local_radius=4,
         block_m=128,
-        block_n=64,
+        block_n=32,
         scale=scale,
-        num_stages=3,
+        num_stages=1,
+        use_exp2=True,
     )
 
 
@@ -638,9 +638,9 @@ def hard_route_shared_attention(
         num_merge_tokens == 4
         and seed_mode == "fast_random_with_ith"
         and hard_route_backend == _DEFAULT_C4_MERGE_BACKEND
-        and hard_route_routing_backend == _DEFAULT_EXACT_R4_ROUTING_BACKEND
+        and hard_route_routing_backend == _DEFAULT_FULL_CORE_ROUTING_BACKEND
     ):
-        return _default_c4_exact_r4_attention(q, k, v, scale, seed)
+        return _default_c4_full_core_attention(q, k, v, scale, seed)
 
     include_ith = validate_block_seed_mode(seed_mode, "shared multi-token merging")
     fast_with_include = seed_mode == "fast_random_with_ith"
