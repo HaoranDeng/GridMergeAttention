@@ -22,7 +22,7 @@ def _triton_merge_kv_transpose(seed_queries, k, v, scale, use_c4_kernel=False, b
     value_for_kernel = rearrange(v, "b f k l h d -> b f l k h d").contiguous()
 
     if use_c4_kernel:
-        merged_keys, merged_values, routing_bias, cluster_has_keys = triton_hard_route_merge_c4(
+        result = triton_hard_route_merge_c4(
             seed_queries_for_kernel,
             key_for_kernel,
             value_for_kernel,
@@ -30,14 +30,14 @@ def _triton_merge_kv_transpose(seed_queries, k, v, scale, use_c4_kernel=False, b
             block_j_target=block_j_target,
         )
     else:
-        merged_keys, merged_values, routing_bias, cluster_has_keys = triton_hard_route_merge(
+        result = triton_hard_route_merge(
             seed_queries_for_kernel,
             key_for_kernel,
             value_for_kernel,
             scale=scale,
         )
+    merged_keys, merged_values, routing_bias = result[:3]
     routing_bias = rearrange(routing_bias, "b h a f l i c -> b h a f i l c")
-    del cluster_has_keys
     return merged_keys, merged_values, routing_bias
 
 

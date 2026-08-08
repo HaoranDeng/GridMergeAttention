@@ -109,11 +109,11 @@ def _merge_kv(seed_queries, k, v, backend, scale):
     if backend == "sdpa":
         return hard_route_merge_kv_pytorch(seed_queries, k, v, scale)
     if backend == "triton":
-        return triton_hard_route_merge(seed_queries, k, v, scale=scale)
+        return triton_hard_route_merge(seed_queries, k, v, scale=scale)[:3]
     if backend == "triton_c4":
-        return triton_hard_route_merge_c4(seed_queries, k, v, scale=scale)
+        return triton_hard_route_merge_c4(seed_queries, k, v, scale=scale)[:3]
     if backend == "triton_c4_j16":
-        return triton_hard_route_merge_c4(seed_queries, k, v, scale=scale, block_j_target=16)
+        return triton_hard_route_merge_c4(seed_queries, k, v, scale=scale, block_j_target=16)[:3]
     raise ValueError(
         f"unsupported hard_route_backend={backend!r}; expected 'sdpa', 'triton', "
         "'triton_c4', 'triton_c4_j16', or a direct-route C4 backend."
@@ -158,7 +158,7 @@ def _flatten_compressed_kv(merged_keys, merged_values, routing_bias):
 def _run_reference_path(q, k, v, scale, seed_rows, hard_route_backend, hard_route_routing_backend):
     """Readable path: gather seed queries, merge KV, then run full attention."""
     seed_queries = gather_seed_queries(q, seed_rows)
-    merged_keys, merged_values, routing_bias, _ = _merge_kv(
+    merged_keys, merged_values, routing_bias = _merge_kv(
         seed_queries,
         k,
         v,
