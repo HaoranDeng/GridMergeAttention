@@ -358,6 +358,7 @@ if triton is not None:
         USE_ASSIGNED_LOGIT: tl.constexpr,
         USE_MASK_ASSIGN: tl.constexpr,
         SEED_KEY: tl.constexpr,
+        SEED_KEY_BIAS_MATCH: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -551,6 +552,19 @@ if triton is not None:
             merged_value = tl.dot(weights.to(value_block.dtype), value_block)
             expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
             routing_bias = expected_logit - log_denom
+            if SEED_KEY_BIAS_MATCH:
+                seed_for_bias = seed0
+                if seed_idx == 1:
+                    seed_for_bias = seed1
+                if seed_idx == 2:
+                    seed_for_bias = seed2
+                if seed_idx == 3:
+                    seed_for_bias = seed3
+                seed_self_logit = (
+                    tl.sum(seed_for_bias.to(tl.float32) * seed_for_bias.to(tl.float32), axis=1)
+                    * SCORE_SCALE
+                )
+                routing_bias = routing_bias + seed_self_logit - expected_logit
             if not FORCE_SEED_KEYS:
                 has_keys = tl.sum(tl.where(active, 1, 0), axis=1) > 0
                 routing_bias = tl.where(has_keys, routing_bias, 0.0)
@@ -604,6 +618,7 @@ if triton is not None:
         USE_ASSIGNED_LOGIT: tl.constexpr,
         USE_MASK_ASSIGN: tl.constexpr,
         SEED_KEY: tl.constexpr,
+        SEED_KEY_BIAS_MATCH: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -709,18 +724,18 @@ if triton is not None:
                 seed_row = seed_row2
             if seed_idx == 3:
                 seed_row = seed_row3
+            seed = tl.load(
+                query_ptr
+                + query_base
+                + (((seed_row[:, None] * J + query_offsets[:, None]) * H + head) * D_HEAD
+                   + dim_offsets[None, :]),
+                mask=valid_query[:, None] & valid_dim[None, :],
+                other=0.0,
+            )
 
             if USE_ASSIGNED_LOGIT:
                 logits = best_logits
                 if FORCE_SEED_KEYS:
-                    seed = tl.load(
-                        query_ptr
-                        + query_base
-                        + (((seed_row[:, None] * J + query_offsets[:, None]) * H + head) * D_HEAD
-                           + dim_offsets[None, :]),
-                        mask=valid_query[:, None] & valid_dim[None, :],
-                        other=0.0,
-                    )
                     forced_key = tl.load(
                         key_base + seed_idx * H * D_HEAD + dim_offsets,
                         mask=(seed_idx < L) & valid_dim,
@@ -733,14 +748,6 @@ if triton is not None:
                         logits,
                     )
             else:
-                seed = tl.load(
-                    query_ptr
-                    + query_base
-                    + (((seed_row[:, None] * J + query_offsets[:, None]) * H + head) * D_HEAD
-                       + dim_offsets[None, :]),
-                    mask=valid_query[:, None] & valid_dim[None, :],
-                    other=0.0,
-                )
                 logits = tl.dot(seed, tl.trans(key_block), input_precision=LOGIT_INPUT_PRECISION) * SCORE_SCALE
                 logits = tl.where(valid_logits, logits, -float("inf"))
 
@@ -777,6 +784,12 @@ if triton is not None:
             merged_value = tl.dot(weights.to(value_block.dtype), value_block)
             expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
             routing_bias = expected_logit - log_denom
+            if SEED_KEY_BIAS_MATCH:
+                seed_self_logit = (
+                    tl.sum(seed.to(tl.float32) * seed.to(tl.float32), axis=1)
+                    * SCORE_SCALE
+                )
+                routing_bias = routing_bias + seed_self_logit - expected_logit
             if not FORCE_SEED_KEYS:
                 has_keys = tl.sum(tl.where(active, 1, 0), axis=1) > 0
                 routing_bias = tl.where(has_keys, routing_bias, 0.0)
@@ -2229,6 +2242,7 @@ def triton_hard_route_merge_c4_direct_route(
     use_recompute_merge=False,
     use_stripe_assign=False,
     use_seed_key=False,
+    use_seed_key_bias_match=False,
     assume_contiguous=False,
 ):
     """Exact non-shared C=4 merge that writes routing-ready K/V/bias.
@@ -2356,6 +2370,8 @@ def triton_hard_route_merge_c4_direct_route(
         raise ValueError("seed-key routing cannot be combined with stripe C4 merge.")
     if use_seed_key and not inline_local_seed:
         raise ValueError("seed-key routing currently requires inline_local_seed=True.")
+    if use_seed_key_bias_match and not use_seed_key:
+        raise ValueError("seed-key bias matching requires use_seed_key=True.")
     if use_key_outer_kernel and (
         (not inline_local_seed)
         or block_j != 32
@@ -2481,6 +2497,7 @@ def triton_hard_route_merge_c4_direct_route(
         USE_ASSIGNED_LOGIT=bool(use_assigned_logit),
         USE_MASK_ASSIGN=bool(use_mask_assign),
         SEED_KEY=bool(use_seed_key),
+        SEED_KEY_BIAS_MATCH=bool(use_seed_key_bias_match),
         **launch_kwargs,
     )
     return merged_key, merged_value, routing_bias, None
