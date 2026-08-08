@@ -360,6 +360,7 @@ if triton is not None:
         USE_MASK_ASSIGN: tl.constexpr,
         SEED_KEY: tl.constexpr,
         TOP_KV: tl.constexpr,
+        TOP_KEY: tl.constexpr,
         TOP_VALUE: tl.constexpr,
         SEED_VALUE: tl.constexpr,
         SEED_KEY_BIAS_MATCH: tl.constexpr,
@@ -558,7 +559,7 @@ if triton is not None:
             else:
                 log_denom = row_max + tl.log(safe_denom)
 
-            if TOP_KV or TOP_VALUE:
+            if TOP_KV or TOP_KEY or TOP_VALUE:
                 top_key = tl.max(
                     tl.where(active & (logits == row_max[:, None]), key_offsets[None, :], 0),
                     axis=1,
@@ -575,6 +576,14 @@ if triton is not None:
                     mask=valid_query[:, None] & valid_dim[None, :],
                     other=0.0,
                 )
+                routing_bias = row_max - log_denom
+            elif TOP_KEY:
+                merged_key = tl.load(
+                    key_base + top_key[:, None] * H * D_HEAD + dim_offsets[None, :],
+                    mask=valid_query[:, None] & valid_dim[None, :],
+                    other=0.0,
+                )
+                merged_value = tl.dot(weights.to(value_block.dtype), value_block)
                 routing_bias = row_max - log_denom
             elif TOP_VALUE:
                 merged_value = tl.load(
@@ -619,7 +628,7 @@ if triton is not None:
                 (route_token * ROUTE_GROUPS + route_group[:, None]) * D_HEAD
                 + dim_offsets[None, :]
             )
-            if TOP_KV:
+            if TOP_KV or TOP_KEY:
                 tl.store(
                     merged_key_ptr + route_offset,
                     merged_key,
@@ -710,6 +719,7 @@ if triton is not None:
         USE_MASK_ASSIGN: tl.constexpr,
         SEED_KEY: tl.constexpr,
         TOP_KV: tl.constexpr,
+        TOP_KEY: tl.constexpr,
         TOP_VALUE: tl.constexpr,
         SEED_VALUE: tl.constexpr,
         SEED_KEY_BIAS_MATCH: tl.constexpr,
@@ -878,7 +888,7 @@ if triton is not None:
             else:
                 log_denom = row_max + tl.log(safe_denom)
 
-            if TOP_KV or TOP_VALUE:
+            if TOP_KV or TOP_KEY or TOP_VALUE:
                 top_key = tl.max(
                     tl.where(active & (logits == row_max[:, None]), key_offsets[None, :], 0),
                     axis=1,
@@ -895,6 +905,14 @@ if triton is not None:
                     mask=valid_query[:, None] & valid_dim[None, :],
                     other=0.0,
                 )
+                routing_bias = row_max - log_denom
+            elif TOP_KEY:
+                merged_key = tl.load(
+                    key_base + top_key[:, None] * H * D_HEAD + dim_offsets[None, :],
+                    mask=valid_query[:, None] & valid_dim[None, :],
+                    other=0.0,
+                )
+                merged_value = tl.dot(weights.to(value_block.dtype), value_block)
                 routing_bias = row_max - log_denom
             elif TOP_VALUE:
                 merged_value = tl.load(
@@ -932,7 +950,7 @@ if triton is not None:
                 (route_token * ROUTE_GROUPS + route_group[:, None]) * D_HEAD
                 + dim_offsets[None, :]
             )
-            if TOP_KV:
+            if TOP_KV or TOP_KEY:
                 tl.store(
                     merged_key_ptr + route_offset,
                     merged_key,
@@ -2412,6 +2430,7 @@ def triton_hard_route_merge_c4_direct_route(
     use_seed_key_lsq_scale=False,
     use_seed_key_affine_scale=False,
     use_top_kv=False,
+    use_top_key=False,
     use_top_value=False,
     use_seed_value=False,
     key_scale_dtype=None,
@@ -2564,6 +2583,16 @@ def triton_hard_route_merge_c4_direct_route(
         raise ValueError("top-KV routing is not implemented for stripe C4 merge.")
     if use_top_kv and use_key_outer_kernel:
         raise ValueError("top-KV routing is not implemented for key-outer C4 merge.")
+    if use_top_key and not force_seed_keys:
+        raise ValueError("top-key routing requires force_seed_keys=True.")
+    if use_top_key and use_seed_key:
+        raise ValueError("top-key routing writes compressed keys and cannot be combined with seed-key routing.")
+    if use_top_key and (use_top_kv or use_top_value or use_seed_value):
+        raise ValueError("top-key, top-KV, top-value, and seed-value are alternative approximations.")
+    if use_top_key and use_stripe_assign:
+        raise ValueError("top-key routing is not implemented for stripe C4 merge.")
+    if use_top_key and use_key_outer_kernel:
+        raise ValueError("top-key routing is not implemented for key-outer C4 merge.")
     if use_seed_value and not force_seed_keys:
         raise ValueError("representative seed-value routing requires force_seed_keys=True.")
     if use_seed_value and key_columns < 4:
@@ -2721,6 +2750,7 @@ def triton_hard_route_merge_c4_direct_route(
         USE_MASK_ASSIGN=bool(use_mask_assign),
         SEED_KEY=bool(use_seed_key),
         TOP_KV=bool(use_top_kv),
+        TOP_KEY=bool(use_top_key),
         TOP_VALUE=bool(use_top_value),
         SEED_VALUE=bool(use_seed_value),
         SEED_KEY_BIAS_MATCH=bool(use_seed_key_bias_match),
