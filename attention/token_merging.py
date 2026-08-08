@@ -179,7 +179,7 @@ def token_merging_attn(
         )
         return blocks_to_video(out, f_tied, h_reduce, w_reduce)
 
-    out = torch.empty_like(v_blocks)
+    out = torch.empty_like(q_blocks)
     for start in range(0, q_blocks.size(1), query_outer_chunk):
         end = min(start + query_outer_chunk, q_blocks.size(1))
         if num_merge_tokens > 1:
