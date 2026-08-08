@@ -105,8 +105,6 @@ def make_seed_rows(q_chunk, k_blocks, query_outer_offset, args):
         query_outer_offset,
         args.num_merge_tokens,
         args.seed,
-        True,
-        args.seed_mode == "fast_random_with_ith",
         args.seed_mode,
     )
 

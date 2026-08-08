@@ -86,8 +86,6 @@ def _cached_seed_rows(
     query_rows,
     num_seeds,
     seed,
-    include_ith,
-    fast_with_include,
     seed_mode,
 ):
     cache_key = (
@@ -100,8 +98,6 @@ def _cached_seed_rows(
         int(query_rows),
         int(num_seeds),
         int(seed),
-        bool(include_ith),
-        bool(fast_with_include),
         str(seed_mode),
     )
     seed_rows = _SEED_ROWS_CACHE.get(cache_key)
@@ -134,8 +130,6 @@ def _build_seed_rows(
     query_outer_offset,
     num_merge_tokens,
     seed,
-    include_ith,
-    fast_with_include,
     seed_mode,
 ):
     return _cached_seed_rows(
@@ -148,8 +142,6 @@ def _build_seed_rows(
         q.size(2),
         num_merge_tokens,
         seed,
-        include_ith,
-        fast_with_include,
         seed_mode,
     )
 
@@ -228,11 +220,7 @@ def _merge_seed_clusters(seed_queries, k, v, backend, scale):
     )
 
 
-def _direct_route_merge(q, seed_rows, k, v, backend, scale):
-    config = _parse_direct_route_backend(backend)
-    if not config.supported:
-        return None
-
+def _direct_route_merge(q, seed_rows, k, v, config, scale):
     return triton_hard_route_merge_c4_direct_route(
         q,
         seed_rows,
@@ -252,6 +240,7 @@ def _direct_route_merge(q, seed_rows, k, v, backend, scale):
         use_assigned_logit=config.use_assigned_logit,
     )
 
+
 def hard_route_compressed_attention(query, key, value, bias, backend, scale):
     backend = (backend or "sdpa").lower()
     if backend == "sdpa":
@@ -262,6 +251,7 @@ def hard_route_compressed_attention(query, key, value, bias, backend, scale):
         f"unsupported hard_route_routing_backend={backend!r}; expected 'sdpa', "
         "'triton', or a direct-route backend."
     )
+
 
 def hard_route_direct_compressed_attention(q, key, value, bias, backend, scale, output=None):
     backend = (backend or "").lower()
@@ -300,31 +290,6 @@ def _restore_attention_blocks(out, q):
     )
 
 
-def _seed_rows_for_backend(
-    q,
-    k,
-    query_outer_offset,
-    num_merge_tokens,
-    seed,
-    include_ith,
-    fast_with_include,
-    seed_mode,
-    inline_local_seed,
-):
-    if inline_local_seed:
-        return None
-    return _build_seed_rows(
-        q,
-        k,
-        query_outer_offset,
-        num_merge_tokens,
-        seed,
-        include_ith,
-        fast_with_include,
-        seed_mode,
-    )
-
-
 def _run_reference_path(q, k, v, scale, seed_rows, hard_route_backend, hard_route_routing_backend):
     """Readable PyTorch/reference path: gather seeds, merge KV, then attend."""
     query = rearrange(q, "b a i j h d -> (b h a j) i d")
@@ -350,10 +315,10 @@ def _run_reference_path(q, k, v, scale, seed_rows, hard_route_backend, hard_rout
     return _restore_attention_blocks(out, q)
 
 
-def _run_direct_path(q, k, v, scale, seed_rows, hard_route_backend, hard_route_routing_backend, output):
+def _run_direct_path(q, k, v, scale, seed_rows, direct_config, hard_route_routing_backend, output):
     """Optimized C4 path: Triton merge writes routing-ready token-major KV."""
     q = q.contiguous()
-    key, value, bias, _ = _direct_route_merge(q, seed_rows, k, v, hard_route_backend, scale)
+    key, value, bias, _ = _direct_route_merge(q, seed_rows, k, v, direct_config, scale)
     direct_out = hard_route_direct_compressed_attention(
         q,
         key,
@@ -395,25 +360,23 @@ def hard_route_attention(
     # k/v: [B, F, K, L, H, D]
     # A fixed (a, f, j, k) block has I queries x L keys. This path merges
     # the L keys into several hard-assigned merged tokens instead of one.
-    include_ith = validate_block_seed_mode(seed_mode, "multi-token merging")
-    fast_with_include = seed_mode == "fast_random_with_ith"
+    validate_block_seed_mode(seed_mode, "multi-token merging")
     direct_backend = _parse_direct_route_backend(hard_route_backend)
     if direct_backend.inline_local_seed and seed_mode != "local_with_ith":
         raise ValueError("inline-local-seed hard-route backend requires seed_mode='local_with_ith'.")
     if num_merge_tokens > k.size(3):
         raise ValueError("num_merge_tokens cannot exceed key columns per block.")
 
-    seed_rows = _seed_rows_for_backend(
-        q,
-        k,
-        query_outer_offset,
-        num_merge_tokens,
-        seed,
-        include_ith,
-        fast_with_include,
-        seed_mode,
-        direct_backend.inline_local_seed,
-    )
+    seed_rows = None
+    if not direct_backend.inline_local_seed:
+        seed_rows = _build_seed_rows(
+            q,
+            k,
+            query_outer_offset,
+            num_merge_tokens,
+            seed,
+            seed_mode,
+        )
 
     if direct_backend.supported:
         return _run_direct_path(
@@ -422,7 +385,7 @@ def hard_route_attention(
             v,
             scale,
             seed_rows,
-            hard_route_backend,
+            direct_backend,
             hard_route_routing_backend,
             output,
         )
@@ -434,8 +397,6 @@ def hard_route_attention(
             query_outer_offset,
             num_merge_tokens,
             seed,
-            include_ith,
-            fast_with_include,
             seed_mode,
         )
     return _run_reference_path(

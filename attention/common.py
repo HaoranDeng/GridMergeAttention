@@ -224,39 +224,6 @@ def seed_indices_for_mode(base, num_choices, num_seeds, include_seed, seed_mode)
     raise ValueError(f"unsupported seed_mode={seed_mode!r}.")
 
 
-def random_seed_rows(
-    query_outer,
-    key_outer,
-    key_rows,
-    query_columns,
-    query_rows,
-    num_seeds,
-    seed,
-    include_ith=False,
-    fast_with_include=False,
-):
-    """Deterministic pseudo-random query-row seeds for each block."""
-    if num_seeds > query_rows:
-        raise ValueError("num_merge_tokens cannot exceed query rows per block.")
-
-    device = query_outer.device
-    key_row = torch.arange(key_rows, device=device).view(1, 1, key_rows, 1)
-    query_col = torch.arange(query_columns, device=device).view(1, 1, 1, query_columns)
-    base = (
-        query_outer.view(-1, 1, 1, 1) * 73856093
-        + key_outer.view(1, -1, 1, 1) * 19349663
-        + key_row * 83492791
-        + query_col * 2654435761
-        + int(seed)
-    )
-    ith_seed = None
-    if include_ith:
-        ith_seed = key_row.expand(query_outer.numel(), key_outer.numel(), key_rows, query_columns)
-        if fast_with_include:
-            return fast_seed_indices_with_include(base, query_rows, num_seeds, ith_seed)
-    return seed_indices_from_base(base, query_rows, num_seeds, include_seed=ith_seed)
-
-
 def seed_rows_by_mode(
     query_outer,
     key_outer,
@@ -283,39 +250,6 @@ def seed_rows_by_mode(
     )
     ith_seed = key_row.expand(query_outer.numel(), key_outer.numel(), key_rows, query_columns)
     return seed_indices_for_mode(base, query_rows, num_seeds, ith_seed, seed_mode)
-
-
-def random_seed_columns(
-    query_outer,
-    key_outer,
-    query_rows,
-    key_columns,
-    query_columns,
-    num_seeds,
-    seed,
-    include_ith=False,
-    fast_with_include=False,
-):
-    """Deterministic pseudo-random query-column seeds for transposed blocks."""
-    if num_seeds > query_columns:
-        raise ValueError("num_merge_tokens cannot exceed query columns per block.")
-
-    device = query_outer.device
-    query_row = torch.arange(query_rows, device=device).view(1, 1, query_rows, 1)
-    key_col = torch.arange(key_columns, device=device).view(1, 1, 1, key_columns)
-    base = (
-        query_outer.view(-1, 1, 1, 1) * 73856093
-        + key_outer.view(1, -1, 1, 1) * 19349663
-        + query_row * 83492791
-        + key_col * 2654435761
-        + int(seed)
-    )
-    ith_seed = None
-    if include_ith:
-        ith_seed = key_col.expand(query_outer.numel(), key_outer.numel(), query_rows, key_columns)
-        if fast_with_include:
-            return fast_seed_indices_with_include(base, query_columns, num_seeds, ith_seed)
-    return seed_indices_from_base(base, query_columns, num_seeds, include_seed=ith_seed)
 
 
 def seed_columns_by_mode(

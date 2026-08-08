@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from omegaconf import OmegaConf
 
 import wan.modules.model as wan_model
-from attention.common import random_seed_columns, random_seed_rows
+from attention.common import seed_columns_by_mode, seed_rows_by_mode
 from attention.hard_route import assign_keys_to_seeds
 from utils.misc import set_seed
 from utils.wan_wrapper import WanDiffusionWrapper, WanTextEncoder
@@ -62,6 +62,10 @@ def summarize(values, include_bits=False):
     if include_bits:
         out["mean_bits"] = float(x.mean() / math.log(2.0))
     return out
+
+
+def seed_mode_from_include_ith(include_ith):
+    return "random_with_ith" if include_ith else "random"
 
 
 def flatten_video(x):
@@ -194,7 +198,7 @@ def hard_route_distribution(
 
     query_outer = torch.tensor([frame], device=q_grid.device)
     key_outer = torch.arange(frames, device=q_grid.device)
-    seed_rows = random_seed_rows(
+    seed_rows = seed_rows_by_mode(
         query_outer,
         key_outer,
         rows,
@@ -202,7 +206,7 @@ def hard_route_distribution(
         rows,
         num_merge_tokens,
         seed=0,
-        include_ith=include_ith,
+        seed_mode=seed_mode_from_include_ith(include_ith),
     )[0, :, :, col]
 
     seed_queries = q_grid[frame, seed_rows, col, head].float() * sqrt_scale
@@ -255,7 +259,7 @@ def select_route_distribution(
 
     query_outer = torch.tensor([frame], device=q_grid.device)
     key_outer = torch.arange(frames, device=q_grid.device)
-    seed_rows = random_seed_rows(
+    seed_rows = seed_rows_by_mode(
         query_outer,
         key_outer,
         rows,
@@ -263,7 +267,7 @@ def select_route_distribution(
         rows,
         num_merge_tokens,
         seed=0,
-        include_ith=include_ith,
+        seed_mode=seed_mode_from_include_ith(include_ith),
     )[0, :, :, col]
 
     seed_queries = q_grid[frame, seed_rows, col, head].float() * sqrt_scale
@@ -313,7 +317,7 @@ def hard_route_transpose_distribution(
 
     query_outer = torch.tensor([frame], device=q_grid.device)
     key_outer = torch.arange(frames, device=q_grid.device)
-    seed_cols = random_seed_columns(
+    seed_cols = seed_columns_by_mode(
         query_outer,
         key_outer,
         rows,
@@ -321,7 +325,7 @@ def hard_route_transpose_distribution(
         width,
         num_merge_tokens,
         seed=0,
-        include_ith=include_ith,
+        seed_mode=seed_mode_from_include_ith(include_ith),
     )[0, :, row]
 
     seed_queries = q_grid[frame, row, seed_cols, head].float() * sqrt_scale
@@ -379,7 +383,7 @@ def select_route_transpose_distribution(
 
     query_outer = torch.tensor([frame], device=q_grid.device)
     key_outer = torch.arange(frames, device=q_grid.device)
-    seed_cols = random_seed_columns(
+    seed_cols = seed_columns_by_mode(
         query_outer,
         key_outer,
         rows,
@@ -387,7 +391,7 @@ def select_route_transpose_distribution(
         width,
         num_merge_tokens,
         seed=0,
-        include_ith=include_ith,
+        seed_mode=seed_mode_from_include_ith(include_ith),
     )[0, :, row]
 
     seed_queries = q_grid[frame, row, seed_cols, head].float() * sqrt_scale

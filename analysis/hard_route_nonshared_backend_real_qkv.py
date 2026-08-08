@@ -12,6 +12,25 @@ from pipeline import TokenMergingWanPipeline
 from utils.misc import set_seed
 
 
+DIRECT_MERGE_BASE = "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
+DIRECT_ROUTING_BACKEND = "triton_direct_m32_n16_w1_s1_exp2_tokenmajor"
+
+
+def direct_merge_backend(*suffixes):
+    suffix = "_".join([*suffixes, "tokenmajor", "inline_local_seed"])
+    return f"{DIRECT_MERGE_BASE}_{suffix}"
+
+
+def exact_backend(hard_route_backend, seed_mode=None):
+    config = {
+        "hard_route_backend": hard_route_backend,
+        "hard_route_routing_backend": DIRECT_ROUTING_BACKEND,
+    }
+    if seed_mode is not None:
+        config["seed_mode"] = seed_mode
+    return config
+
+
 class Stats:
     def __init__(self):
         self.calls = 0
@@ -85,37 +104,26 @@ def exact_variants():
             "hard_route_backend": "triton",
             "hard_route_routing_backend": "triton",
         },
-        "hard_c4_full_core_tokenmajor": {
-            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_tokenmajor_inline_local_seed",
-            "hard_route_routing_backend": "triton_direct_m32_n16_w1_s1_exp2_tokenmajor",
-            "seed_mode": "local_with_ith",
-        },
-        "hard_c4_keyouter_f2_tokenmajor": {
-            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_f2_tokenmajor_inline_local_seed",
-            "hard_route_routing_backend": "triton_direct_m32_n16_w1_s1_exp2_tokenmajor",
-            "seed_mode": "local_with_ith",
-        },
-        "hard_c4_bestlogit_tokenmajor": {
-            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_bestlogit_tokenmajor_inline_local_seed",
-            "hard_route_routing_backend": "triton_direct_m32_n16_w1_s1_exp2_tokenmajor",
-            "seed_mode": "local_with_ith",
-        },
-        "hard_c4_keyouter_f2_bestlogit_tokenmajor": {
-            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_f2_bestlogit_tokenmajor_inline_local_seed",
-            "hard_route_routing_backend": "triton_direct_m32_n16_w1_s1_exp2_tokenmajor",
-            "seed_mode": "local_with_ith",
-        },
-        "hard_c4_keyouter_f4_tokenmajor": {
-            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_f4_tokenmajor_inline_local_seed",
-            "hard_route_routing_backend": "triton_direct_m32_n16_w1_s1_exp2_tokenmajor",
-            "seed_mode": "local_with_ith",
-        },
-        "hard_c4_keyouter_f4_bestlogit_tokenmajor": {
-            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_f4_bestlogit_tokenmajor_inline_local_seed",
-            "hard_route_routing_backend": "triton_direct_m32_n16_w1_s1_exp2_tokenmajor",
-            "seed_mode": "local_with_ith",
-        },
+        "hard_c4_full_core_tokenmajor": exact_backend(
+            direct_merge_backend(), seed_mode="local_with_ith"
+        ),
+        "hard_c4_keyouter_f2_tokenmajor": exact_backend(
+            direct_merge_backend("f2"), seed_mode="local_with_ith"
+        ),
+        "hard_c4_bestlogit_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit"), seed_mode="local_with_ith"
+        ),
+        "hard_c4_keyouter_f2_bestlogit_tokenmajor": exact_backend(
+            direct_merge_backend("f2", "bestlogit"), seed_mode="local_with_ith"
+        ),
+        "hard_c4_keyouter_f4_tokenmajor": exact_backend(
+            direct_merge_backend("f4"), seed_mode="local_with_ith"
+        ),
+        "hard_c4_keyouter_f4_bestlogit_tokenmajor": exact_backend(
+            direct_merge_backend("f4", "bestlogit"), seed_mode="local_with_ith"
+        ),
     }
+
 
 def sync():
     if torch.cuda.is_available():
