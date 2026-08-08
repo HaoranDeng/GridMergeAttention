@@ -334,6 +334,25 @@ check before launching another speed/quality sweep.
   Only revisit it if the logits can be produced with a tensor-core-friendly
   tiling that preserves the second-stage full attention semantics.
 
+### Early Representative-Key K Approximations
+
+- Result: no acceptable speed/error tradeoff.
+- Change tested: replace the softmax-merged K with simpler representative-key
+  choices such as `repkey`, `top2key`, or `tail4`, while still running full
+  compressed attention after token merging.
+- Evidence: AMDHPC smoke runs
+  `analysis/hard_c4_repkey_smoke_20260807/metrics.json`,
+  `analysis/hard_c4_top2key_smoke_20260807/metrics.json`, and
+  `analysis/hard_c4_tail4_smoke_20260807/metrics.json`. `repkey` was only
+  roughly tied with dense speed and increased dense rel-L2 from about 0.155 to
+  0.181 in that smoke; `top2key` and `tail4` were slower than the direct-route
+  baseline in the same setup.
+- Why not repeat directly: these variants reduce or alter the K merge, but the
+  quality loss or extra scheduling cost erased the benefit.
+- Rule: do not rerun the exact `repkey`, `top2key`, or `tail4` representative-K
+  variants. More constrained K approximations must be separately justified and
+  measured against dense error.
+
 ## Current Best Direction
 
 The best accepted direction so far is still:
