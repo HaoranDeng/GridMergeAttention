@@ -29,6 +29,7 @@ _DIRECT_ROUTE_KEY_OUTER_BLOCKS = {
 _DIRECT_ROUTE_FLAG_SUFFIXES = (
     ("_seedkey", "use_seed_key"),
     ("_stripe", "use_stripe_assign"),
+    ("_recompute", "use_recompute_merge"),
     ("_bestlogit", "use_assigned_logit"),
     ("_maskassign", "use_mask_assign"),
     ("_packkvbias", ("use_packed_kv", "use_packed_bias")),
@@ -55,6 +56,7 @@ class DirectRouteMergeConfig:
     use_mask_assign: bool = False
     use_packed_bias: bool = False
     use_packed_kv: bool = False
+    use_recompute_merge: bool = False
     use_stripe_assign: bool = False
     use_seed_key: bool = False
 
@@ -114,6 +116,7 @@ def parse_direct_route_backend(backend):
         "use_mask_assign": False,
         "use_packed_bias": False,
         "use_packed_kv": False,
+        "use_recompute_merge": False,
         "use_stripe_assign": False,
         "use_seed_key": False,
     }
@@ -179,6 +182,7 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         use_mask_assign=config.use_mask_assign,
         pack_kv=config.use_packed_kv,
         pack_bias=config.use_packed_bias,
+        use_recompute_merge=config.use_recompute_merge,
         use_stripe_assign=config.use_stripe_assign,
         use_seed_key=config.use_seed_key,
         assume_contiguous=assume_contiguous and config.inline_local_seed,

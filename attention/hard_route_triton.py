@@ -603,6 +603,244 @@ if triton is not None:
                 tl.store(routing_bias_ptr + bias_offset, routing_bias, mask=valid_query)
 
     @triton.jit
+    def _hard_route_merge_c4_direct_route_recompute_kernel(
+        query_ptr,
+        seed_rows_ptr,
+        key_ptr,
+        value_ptr,
+        merged_key_ptr,
+        merged_value_ptr,
+        routing_bias_ptr,
+        A: tl.constexpr,
+        F: tl.constexpr,
+        Q_ROWS: tl.constexpr,
+        K_ROWS: tl.constexpr,
+        J: tl.constexpr,
+        H: tl.constexpr,
+        L: tl.constexpr,
+        D_HEAD: tl.constexpr,
+        ROUTE_GROUPS: tl.constexpr,
+        BLOCK_J: tl.constexpr,
+        BLOCK_L: tl.constexpr,
+        BLOCK_D: tl.constexpr,
+        SCORE_SCALE: tl.constexpr,
+        USE_EXP2: tl.constexpr,
+        FORCE_SEED_KEYS: tl.constexpr,
+        LOGIT_INPUT_PRECISION: tl.constexpr,
+        INLINE_LOCAL_SEED: tl.constexpr,
+        USE_ASSIGNED_LOGIT: tl.constexpr,
+        PACK_KV: tl.constexpr,
+        PACK_BIAS: tl.constexpr,
+        PACKED_WIDTH: tl.constexpr,
+        SEED_KEY: tl.constexpr,
+    ):
+        group_id = tl.program_id(0)
+        query_col_block = tl.program_id(1)
+
+        head = group_id % H
+        tmp = group_id // H
+        key_row = tmp % K_ROWS
+        tmp = tmp // K_ROWS
+        key_outer = tmp % F
+        tmp = tmp // F
+        query_outer = tmp % A
+        batch = tmp // A
+
+        query_offsets = query_col_block * BLOCK_J + tl.arange(0, BLOCK_J)
+        key_offsets = tl.arange(0, BLOCK_L)
+        dim_offsets = tl.arange(0, BLOCK_D)
+        valid_query = query_offsets < J
+        valid_key = key_offsets < L
+        valid_dim = dim_offsets < D_HEAD
+        valid_logits = valid_query[:, None] & valid_key[None, :]
+
+        key_base = key_ptr + (((batch * F + key_outer) * K_ROWS + key_row) * L * H + head) * D_HEAD
+        key_block = tl.load(
+            key_base + key_offsets[:, None] * H * D_HEAD + dim_offsets[None, :],
+            mask=valid_key[:, None] & valid_dim[None, :],
+            other=0.0,
+        )
+
+        if INLINE_LOCAL_SEED:
+            seed1 = tl.where(key_row > 0, key_row - 1, 1)
+            seed2 = tl.where(
+                key_row == 0,
+                2,
+                tl.where(key_row == Q_ROWS - 1, Q_ROWS - 3, key_row + 1),
+            )
+            seed3 = tl.where(
+                key_row <= 1,
+                3,
+                tl.where(key_row >= Q_ROWS - 2, Q_ROWS - 4, key_row - 2),
+            )
+            seed_row0 = tl.full((BLOCK_J,), key_row, tl.int64)
+            seed_row1 = tl.full((BLOCK_J,), seed1, tl.int64)
+            seed_row2 = tl.full((BLOCK_J,), seed2, tl.int64)
+            seed_row3 = tl.full((BLOCK_J,), seed3, tl.int64)
+        else:
+            seed_rows_base = (
+                seed_rows_ptr
+                + ((((query_outer * F + key_outer) * K_ROWS + key_row) * J + query_offsets) * 4)
+            )
+            seed_row0 = tl.load(seed_rows_base, mask=valid_query, other=0)
+            seed_row1 = tl.load(seed_rows_base + 1, mask=valid_query, other=0)
+            seed_row2 = tl.load(seed_rows_base + 2, mask=valid_query, other=0)
+            seed_row3 = tl.load(seed_rows_base + 3, mask=valid_query, other=0)
+
+        query_base = (batch * A + query_outer) * Q_ROWS * J * H * D_HEAD
+        best_logits = tl.full((BLOCK_J, BLOCK_L), -float("inf"), tl.float32)
+        assignments = tl.zeros((BLOCK_J, BLOCK_L), tl.int32)
+
+        for seed_idx in tl.static_range(0, 4):
+            seed_row = seed_row0
+            if seed_idx == 1:
+                seed_row = seed_row1
+            if seed_idx == 2:
+                seed_row = seed_row2
+            if seed_idx == 3:
+                seed_row = seed_row3
+
+            seed = tl.load(
+                query_ptr
+                + query_base
+                + (((seed_row[:, None] * J + query_offsets[:, None]) * H + head) * D_HEAD
+                   + dim_offsets[None, :]),
+                mask=valid_query[:, None] & valid_dim[None, :],
+                other=0.0,
+            )
+            logits = tl.dot(seed, tl.trans(key_block), input_precision=LOGIT_INPUT_PRECISION) * SCORE_SCALE
+            logits = tl.where(valid_logits, logits, -float("inf"))
+            update = logits > best_logits
+            best_logits = tl.where(update, logits, best_logits)
+            assignments = tl.where(update, seed_idx, assignments)
+
+        if FORCE_SEED_KEYS:
+            assignments = tl.where(
+                valid_logits & (key_offsets[None, :] < 4),
+                key_offsets[None, :],
+                assignments,
+            )
+
+        route_group = (((batch * H + head) * A + query_outer) * J + query_offsets)
+        route_token_base = (key_outer * K_ROWS + key_row) * 4
+        value_base = value_ptr + (((batch * F + key_outer) * K_ROWS + key_row) * L * H + head) * D_HEAD
+        value_block = tl.load(
+            value_base + key_offsets[:, None] * H * D_HEAD + dim_offsets[None, :],
+            mask=valid_key[:, None] & valid_dim[None, :],
+            other=0.0,
+        )
+
+        for seed_idx in tl.static_range(0, 4):
+            seed_row = seed_row0
+            if seed_idx == 1:
+                seed_row = seed_row1
+            if seed_idx == 2:
+                seed_row = seed_row2
+            if seed_idx == 3:
+                seed_row = seed_row3
+
+            seed = tl.load(
+                query_ptr
+                + query_base
+                + (((seed_row[:, None] * J + query_offsets[:, None]) * H + head) * D_HEAD
+                   + dim_offsets[None, :]),
+                mask=valid_query[:, None] & valid_dim[None, :],
+                other=0.0,
+            )
+            seed_logits = tl.dot(seed, tl.trans(key_block), input_precision=LOGIT_INPUT_PRECISION) * SCORE_SCALE
+            seed_logits = tl.where(valid_logits, seed_logits, -float("inf"))
+            logits = seed_logits
+            if USE_ASSIGNED_LOGIT:
+                logits = best_logits
+                if FORCE_SEED_KEYS:
+                    logits = tl.where(
+                        valid_logits & (key_offsets[None, :] == seed_idx),
+                        seed_logits,
+                        logits,
+                    )
+
+            assigned_to_seed = assignments == seed_idx
+            if FORCE_SEED_KEYS:
+                forced_key = key_offsets[None, :] == seed_idx
+                not_forced_key = key_offsets[None, :] >= 4
+                active = valid_logits & (forced_key | (not_forced_key & assigned_to_seed))
+            else:
+                has_seed = tl.sum(tl.where(assigned_to_seed & valid_logits, 1, 0), axis=1) > 0
+                forced_first_key = (~has_seed[:, None]) & (key_offsets[None, :] == 0)
+                active = valid_logits & (assigned_to_seed | forced_first_key)
+
+            row_max = tl.max(tl.where(active, logits, -float("inf")), axis=1)
+            if USE_EXP2:
+                probs = tl.where(
+                    active,
+                    tl.exp2((logits - row_max[:, None]) * 1.4426950408889634),
+                    0.0,
+                )
+            else:
+                probs = tl.where(active, tl.exp(logits - row_max[:, None]), 0.0)
+            denom = tl.sum(probs, axis=1)
+            if FORCE_SEED_KEYS:
+                safe_denom = tl.where(valid_query, denom, 1.0)
+            else:
+                safe_denom = tl.where(denom > 0.0, denom, 1.0)
+            weights = probs / safe_denom[:, None]
+            if USE_EXP2:
+                log_denom = row_max + tl.log2(safe_denom) * 0.6931471805599453
+            else:
+                log_denom = row_max + tl.log(safe_denom)
+
+            merged_value = tl.dot(weights.to(value_block.dtype), value_block)
+            expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
+            routing_bias = expected_logit - log_denom
+            if not FORCE_SEED_KEYS:
+                has_keys = tl.sum(tl.where(active, 1, 0), axis=1) > 0
+                routing_bias = tl.where(has_keys, routing_bias, 0.0)
+
+            route_token = route_token_base + seed_idx
+            if PACK_KV:
+                merged_key = tl.dot(weights.to(key_block.dtype), key_block)
+                route_offset = (
+                    (route_token * ROUTE_GROUPS + route_group[:, None]) * PACKED_WIDTH
+                    + dim_offsets[None, :]
+                )
+                tl.store(
+                    merged_key_ptr + route_offset,
+                    merged_key,
+                    mask=valid_query[:, None] & valid_dim[None, :],
+                )
+                tl.store(
+                    merged_key_ptr + route_offset + D_HEAD,
+                    merged_value,
+                    mask=valid_query[:, None] & valid_dim[None, :],
+                )
+                if PACK_BIAS:
+                    bias_offset = (
+                        (route_token * ROUTE_GROUPS + route_group) * PACKED_WIDTH
+                        + 2 * D_HEAD
+                    )
+                    tl.store(merged_key_ptr + bias_offset, routing_bias, mask=valid_query)
+            else:
+                route_offset = (
+                    (route_token * ROUTE_GROUPS + route_group[:, None]) * D_HEAD
+                    + dim_offsets[None, :]
+                )
+                if not SEED_KEY:
+                    merged_key = tl.dot(weights.to(key_block.dtype), key_block)
+                    tl.store(
+                        merged_key_ptr + route_offset,
+                        merged_key,
+                        mask=valid_query[:, None] & valid_dim[None, :],
+                    )
+                tl.store(
+                    merged_value_ptr + route_offset,
+                    merged_value,
+                    mask=valid_query[:, None] & valid_dim[None, :],
+                )
+            if not PACK_BIAS:
+                bias_offset = route_token * ROUTE_GROUPS + route_group
+                tl.store(routing_bias_ptr + bias_offset, routing_bias, mask=valid_query)
+
+    @triton.jit
     def _hard_route_merge_c4_stripe_direct_route_kernel(
         query_ptr,
         seed_rows_ptr,
@@ -1916,6 +2154,7 @@ def triton_hard_route_merge_c4_direct_route(
     use_mask_assign=False,
     pack_kv=False,
     pack_bias=False,
+    use_recompute_merge=False,
     use_stripe_assign=False,
     use_seed_key=False,
     assume_contiguous=False,
@@ -2045,6 +2284,12 @@ def triton_hard_route_merge_c4_direct_route(
         raise ValueError("pack_kv is only implemented for the non-keyouter direct C4 kernel.")
     if pack_bias and use_stripe_assign:
         raise ValueError("pack_bias is not implemented for stripe C4 merge.")
+    if use_recompute_merge and use_stripe_assign:
+        raise ValueError("recompute merge is not implemented for stripe C4 merge.")
+    if use_recompute_merge and use_key_outer_kernel:
+        raise ValueError("recompute merge is not implemented for key-outer C4 merge.")
+    if use_recompute_merge and use_mask_assign:
+        raise ValueError("recompute merge uses assignment indices; do not combine it with maskassign.")
     if use_stripe_assign and use_key_outer_kernel:
         raise ValueError("stripe C4 merge is only implemented for the non-keyouter direct C4 kernel.")
     if use_stripe_assign and (use_assigned_logit or use_mask_assign):
@@ -2152,7 +2397,12 @@ def triton_hard_route_merge_c4_direct_route(
     launch_kwargs = {"num_warps": int(num_warps)}
     if num_stages is not None:
         launch_kwargs["num_stages"] = int(num_stages)
-    _hard_route_merge_c4_direct_route_kernel[grid](
+    merge_kernel = (
+        _hard_route_merge_c4_direct_route_recompute_kernel
+        if use_recompute_merge
+        else _hard_route_merge_c4_direct_route_kernel
+    )
+    merge_kernel[grid](
         query,
         seed_rows,
         key,

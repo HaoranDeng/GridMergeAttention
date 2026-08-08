@@ -229,6 +229,9 @@ def exact_variants():
         "hard_c4_bestlogit_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit"), seed_mode="local_with_ith"
         ),
+        "hard_c4_bestlogit_recompute_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "recompute"), seed_mode="local_with_ith"
+        ),
         "hard_c4_bestlogit_tokenmajor_sdpa": exact_backend(
             direct_merge_backend("bestlogit"),
             seed_mode="local_with_ith",
@@ -251,8 +254,15 @@ def exact_variants():
         "hard_c4_bestlogit_packkv_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "packkv"), seed_mode="local_with_ith"
         ),
+        "hard_c4_bestlogit_recompute_packkv_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "recompute", "packkv"), seed_mode="local_with_ith"
+        ),
         "hard_c4_bestlogit_packkvbias_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "packkvbias"), seed_mode="local_with_ith"
+        ),
+        "hard_c4_bestlogit_recompute_packkvbias_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "recompute", "packkvbias"),
+            seed_mode="local_with_ith",
         ),
         "hard_c4_bestlogit_packkv_tokenmajor_n32_s1": exact_backend(
             direct_merge_backend("bestlogit", "packkv"),
