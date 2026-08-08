@@ -89,11 +89,9 @@ For understanding or changing the algorithm, start from
 `hard_route_pytorch.py`. The main helpers are:
 
 - `assign_keys_to_seeds`: hard-assign every key to one seed query.
-- `assigned_key_log_softmax`: run softmax inside each assigned key cluster.
+- `masked_cluster_log_softmax`: run softmax inside each assigned key cluster.
 - `hard_route_merge_weights`: combines assignment, masked softmax, and
   entropy routing-bias construction.
-- `score_regular_blocks` / `merge_regular_blocks`: the regular `30q x 52k`
-  PyTorch merge steps.
 - `hard_route_merge_kv_pytorch`: regular `30q x 52k` PyTorch reference merge.
 - `hard_route_merge_kv_transpose_pytorch`: transposed `52q x 30k` reference
   merge.
@@ -126,32 +124,12 @@ The `bestlogit` suffix reuses the already computed winning seed/key logit when
 forming each assigned cluster. It keeps the same assignment and full compressed
 attention semantics as the full-core path.
 
-The current readable backend surface is intentionally small:
-
-- `bestlogit`: exact hard-route merge, with less redundant merge-kernel math.
-- `maxbias`: a routing-bias approximation candidate. It is not no-bias; every
-  compressed token still keeps a per-token bias.
-- `recomputevalue`: materialize exact compressed K and routing bias, skip the
-  merged-V intermediate, and recompute exact merged V inside the full
-  compressed-attention routing kernel. This preserves the hard C4 math and is
-  a memory-traffic experiment.
-- `mergeweights`: materialize exact compressed K and routing bias, store the
-  per-key merge weights instead of materialized merged V, and reconstruct V
-  from original V inside the full compressed-attention routing kernel. This is
-  a memory-traffic experiment; it keeps grid-local compression and full
-  compressed attention.
-- `compactweights`: like `mergeweights`, but stores one assigned seed id and
-  one merge weight per original key instead of a full `C x key_count` weight
-  row. Compressed K is still materialized; only V is reconstructed in routing.
-- `mergeweightskv`: store only the per-key merge weights and routing bias,
-  then reconstruct both compressed K and compressed V inside the full
-  compressed-attention routing kernel. This is the most aggressive exact
-  intermediate-traffic experiment for hard C4; it still keeps grid-local
-  compression and full compressed attention.
-- `compactweightskv`: like `mergeweightskv`, but stores one assigned seed id
-  and one merge weight per original key instead of a full `C x key_count`
-  weight row per seed. This keeps the same grid-local full-attention math while
-  reducing merge-weight traffic for hard C4.
+For new optimization work, treat the PyTorch file as the readable reference and
+the `bestlogit` C4 direct-route backend as the current optimized baseline.
+Older backend suffixes for representative keys, compact merge weights,
+seed-key approximations, global/shared compression, no-bias routing, and
+windowed routing are either removed from the main docs or tracked as negative
+results in `../docs/negative_results.md`.
 
 Older representative-key/value, global/shared, no-bias, and windowed-routing
 experiments are not part of the readable path. They are tracked only as

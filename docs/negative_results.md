@@ -122,6 +122,62 @@ check before launching another speed/quality sweep.
   Only revisit SDPA routing if the compressed KV/bias layout changes enough to
   remove the transpose and mask overhead.
 
+### Augmented-Bias SDPA Routing
+
+- Result: compiles and preserves the same dense-vs-hard error, but is much
+  slower than the current direct-route Triton path.
+- Change tested: represent the routing bias as an extra Q/K channel
+  (`q_aug=[q,1]`, `k_aug=[k,-bias/scale]`) and call PyTorch SDPA without an
+  additive mask.
+- Evidence: corrected real Wan benchmark Slurm job `366946` measured dense at
+  about 22.60 ms/call, current `hard_c4_bestlogit_tokenmajor` at about
+  23.34 ms/call, and augmented-bias SDPA at about 71.48 ms/call. The rel-L2
+  versus dense stayed about 0.155913. A synthetic smoke job `366945` similarly
+  measured about 0.204 ms/call for current direct routing versus about
+  0.635 ms/call for augmented-bias SDPA.
+- Why not repeat directly: avoiding the explicit SDPA mask is not enough. This
+  path still materializes augmented K, changes layout, and loses the custom
+  token-major direct-routing kernel.
+- Rule: do not absorb routing bias into augmented Q/K for the main PyTorch SDPA
+  routing path. Keep the bias-preserving direct-route Triton path unless a new
+  design avoids both mask overhead and extra augmented-K materialization.
+
+### Seed-Key Approximate Merged K
+
+- Result: faster, but the output error is too high for the accuracy-preserving
+  path.
+- Change tested: replace the softmax-merged K with seed-query-derived K
+  approximations such as `seedkey`, `seedkeymatch`, and `seedkeyproj`, while
+  still running full compressed attention after token merging.
+- Evidence: corrected Wan benchmark Slurm job `366947` measured dense at about
+  22.77 ms/call and current hard C4 at about 23.60 ms/call with rel-L2
+  0.155913 versus dense. `seedkey_n32_s1` was faster at about 14.06 ms/call,
+  but rel-L2 rose to about 0.604. `seedkeymatch` had rel-L2 about 0.480, and
+  `seedkeyproj` had rel-L2 about 0.359.
+- Why not repeat directly: the speedup comes from changing the compressed K
+  too aggressively, not from a safe memory-traffic reduction.
+- Rule: do not replace merged K with seed-query, bias-matched seed-key, or
+  scalar-projected seed-key approximations in the main hard C4 path.
+
+### Compact/Merge-Weight Reconstruction Variants
+
+- Result: no speedup in synthetic smoke, with tiny numerical differences for
+  K/V reconstruction variants.
+- Change tested: avoid materializing some compressed K/V tensors by storing
+  merge weights or compact assignments, then reconstructing V or K/V in the
+  full compressed-attention routing kernel.
+- Evidence: corrected smoke job `366948` measured current bestlogit at about
+  0.199 ms/call, versus about 0.236-0.241 ms/call for value-only
+  `compactweights`/`mergeweights`. Corrected smoke job `366951` measured
+  current bestlogit at about 0.255 ms/call, versus about 0.286 ms/call for
+  `compactweightskv` and about 0.423 ms/call for `mergeweightskv`.
+- Why not repeat directly: the variants reduce materialized tensors but add
+  reconstruction work and less favorable routing memory access, which erased
+  the traffic savings in smoke tests.
+- Rule: do not rerun the same compact/merge-weight reconstruction variants as
+  main candidates unless the design changes enough to avoid source K/V
+  reconstruction overhead.
+
 ### Token-Major Routing `m16`, `n64`, and Stage Sweeps
 
 - Result: no useful speedup with unchanged error.
