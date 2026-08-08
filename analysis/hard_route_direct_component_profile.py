@@ -11,6 +11,7 @@ from attention.common import blocks_to_video, video_to_blocks
 from attention.hard_route import (
     _build_seed_rows,
     _direct_route_merge,
+    _parse_direct_route_backend,
     hard_route_direct_compressed_attention,
     uses_inline_local_seed_backend,
 )
@@ -113,6 +114,7 @@ def install_probe(stats, args):
     import wan.modules.model as wan_model
 
     state = {"calls_current_prompt": 0, "warmed": False}
+    direct_merge_config = _parse_direct_route_backend(args.hard_route_backend)
 
     def run_dense(q, k, v, self):
         return wan_model.flash_attention(q=q, k=k, v=v, window_size=self.window_size)
@@ -149,7 +151,7 @@ def install_probe(stats, args):
                         seed_rows,
                         k_merge_blocks,
                         v_merge_blocks,
-                        args.hard_route_backend,
+                        direct_merge_config,
                         scale,
                     )
                 )
@@ -161,7 +163,7 @@ def install_probe(stats, args):
                     seed_rows,
                     k_merge_blocks,
                     v_merge_blocks,
-                    args.hard_route_backend,
+                    direct_merge_config,
                     scale,
                 )
 

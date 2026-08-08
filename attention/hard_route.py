@@ -59,6 +59,10 @@ def _parse_direct_route_backend(backend):
             backend = backend[: -len("_f2")]
             key_outer_block = 2
             changed = True
+        if backend.endswith("_f3"):
+            backend = backend[: -len("_f3")]
+            key_outer_block = 3
+            changed = True
         if backend.endswith("_f4"):
             backend = backend[: -len("_f4")]
             key_outer_block = 4

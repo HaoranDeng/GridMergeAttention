@@ -116,6 +116,12 @@ def exact_variants():
         "hard_c4_keyouter_f2_bestlogit_tokenmajor": exact_backend(
             direct_merge_backend("f2", "bestlogit"), seed_mode="local_with_ith"
         ),
+        "hard_c4_keyouter_f3_tokenmajor": exact_backend(
+            direct_merge_backend("f3"), seed_mode="local_with_ith"
+        ),
+        "hard_c4_keyouter_f3_bestlogit_tokenmajor": exact_backend(
+            direct_merge_backend("f3", "bestlogit"), seed_mode="local_with_ith"
+        ),
         "hard_c4_keyouter_f4_tokenmajor": exact_backend(
             direct_merge_backend("f4"), seed_mode="local_with_ith"
         ),
