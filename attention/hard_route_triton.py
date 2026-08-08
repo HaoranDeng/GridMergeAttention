@@ -584,7 +584,15 @@ if triton is not None:
             else:
                 log_denom = row_max + tl.log(safe_denom)
 
-            if TOP_KV or TOP_KEY or TOP3_SEED_VALUE or TOP3_VALUE or TOP2_SEED_VALUE or TOP2_VALUE or TOP_VALUE:
+            if (
+                TOP_KV
+                or TOP_KEY
+                or TOP3_SEED_VALUE
+                or TOP3_VALUE
+                or TOP2_SEED_VALUE
+                or TOP2_VALUE
+                or TOP_VALUE
+            ):
                 top_key = tl.max(
                     tl.where(active & (logits == row_max[:, None]), key_offsets[None, :], 0),
                     axis=1,

@@ -89,6 +89,7 @@ For understanding or changing the algorithm, start from
 `hard_route_pytorch.py`. The main helpers are:
 
 - `assign_keys_to_seeds`: hard-assign every key to one seed query.
+- `masked_log_softmax`: run softmax inside each assigned key cluster.
 - `hard_cluster_weights`: combines assignment, masked softmax, and entropy
   routing-bias construction.
 - `hard_route_merge_kv_pytorch`: regular `30q x 52k` PyTorch reference merge.
