@@ -517,6 +517,20 @@ check before launching another speed/quality sweep.
   tile-size conclusion; `j32` is still the best balance for 52 query columns.
 - Rule: keep `j32_w2` for the main simplemerge path.
 
+### Simplemerge Merge Warp Count
+
+- Result: no real-QKV speed improvement over the default two-warp merge kernel.
+- Change tested: keep corrected bestlogit/simplemerge semantics and only change
+  the direct C4 merge kernel launch from `w2` to `w1` or `w4`.
+- Evidence: Slurm job `366987` smoke-tested random hard C4 tensors and showed
+  `w1` slightly faster than `w2`, but real Wan QKV Slurm job `366988` reversed
+  that result. On real QKV, default `w2` measured about 22.85 ms/call,
+  `w1` about 23.48 ms/call, and `w4` about 31.69 ms/call; all had identical
+  dense rel-L2 about 0.09417.
+- Why not repeat directly: the toy-shape occupancy signal did not hold on the
+  real Wan tensor schedule, and `w4` increases resource pressure substantially.
+- Rule: keep merge `w2` for the default simplemerge path.
+
 ## Current Best Direction
 
 The best accepted direction so far is still:
