@@ -16,15 +16,19 @@ DIRECT_MERGE_BASE = "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbia
 DIRECT_ROUTING_BACKEND = "triton_direct_m32_n16_w1_s1_exp2_tokenmajor"
 
 
+def direct_routing_backend(block_n=16, num_warps=1):
+    return f"triton_direct_m32_n{int(block_n)}_w{int(num_warps)}_s1_exp2_tokenmajor"
+
+
 def direct_merge_backend(*suffixes):
     suffix = "_".join([*suffixes, "tokenmajor", "inline_local_seed"])
     return f"{DIRECT_MERGE_BASE}_{suffix}"
 
 
-def exact_backend(hard_route_backend, seed_mode=None):
+def exact_backend(hard_route_backend, seed_mode=None, routing_backend=None):
     config = {
         "hard_route_backend": hard_route_backend,
-        "hard_route_routing_backend": DIRECT_ROUTING_BACKEND,
+        "hard_route_routing_backend": routing_backend or DIRECT_ROUTING_BACKEND,
     }
     if seed_mode is not None:
         config["seed_mode"] = seed_mode
@@ -107,6 +111,16 @@ def exact_variants():
         "hard_c4_full_core_tokenmajor": exact_backend(
             direct_merge_backend(), seed_mode="local_with_ith"
         ),
+        "hard_c4_full_core_tokenmajor_n64_w1": exact_backend(
+            direct_merge_backend(),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=64, num_warps=1),
+        ),
+        "hard_c4_full_core_tokenmajor_n64_w2": exact_backend(
+            direct_merge_backend(),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=64, num_warps=2),
+        ),
         "hard_c4_keyouter_f2_tokenmajor": exact_backend(
             direct_merge_backend("f2"), seed_mode="local_with_ith"
         ),
@@ -142,6 +156,16 @@ def exact_variants():
         ),
         "hard_c4_keyouter_f6_tokenmajor": exact_backend(
             direct_merge_backend("f6"), seed_mode="local_with_ith"
+        ),
+        "hard_c4_keyouter_f6_tokenmajor_n64_w1": exact_backend(
+            direct_merge_backend("f6"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=64, num_warps=1),
+        ),
+        "hard_c4_keyouter_f6_tokenmajor_n64_w2": exact_backend(
+            direct_merge_backend("f6"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=64, num_warps=2),
         ),
         "hard_c4_keyouter_f6_bestlogit_tokenmajor": exact_backend(
             direct_merge_backend("f6", "bestlogit"), seed_mode="local_with_ith"

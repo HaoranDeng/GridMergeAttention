@@ -23,6 +23,8 @@ _DIRECT_ROUTE_C4_BASE = "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16k
 _DIRECT_ROUTE_ATTENTION_CONFIGS = {
     "triton_direct_m32_n16_w1_s1_exp2": (32, 16, 1),
     "triton_direct_m32_n32_w1_s1_exp2": (32, 32, 1),
+    "triton_direct_m32_n64_w1_s1_exp2": (32, 64, 1),
+    "triton_direct_m32_n64_w2_s1_exp2": (32, 64, 2),
 }
 _DIRECT_ROUTE_KEY_OUTER_BLOCKS = {
     "f2": 2,
