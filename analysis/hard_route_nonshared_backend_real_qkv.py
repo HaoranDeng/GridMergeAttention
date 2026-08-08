@@ -49,6 +49,10 @@ def _dtype_bytes(dtype):
     raise ValueError(f"unsupported dtype for estimate: {dtype}")
 
 
+def _packed_kvbias_width(dim):
+    return ((2 * int(dim) + 1 + 15) // 16) * 16
+
+
 def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant):
     """Estimate compressed K/V/bias traffic for one self-attention call."""
     merge_config = parse_direct_route_backend(variant["hard_route_backend"])
@@ -72,7 +76,11 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
     for start in range(0, int(frames), int(query_outer_chunk)):
         chunk_outer = min(int(query_outer_chunk), int(frames) - start)
         route_groups = int(batch) * int(heads) * chunk_outer * int(width)
-        chunk_bytes = route_tokens * route_groups * (dim * key_bytes + dim * value_bytes + bias_bytes)
+        if merge_config.use_packed_bias:
+            packed_width = _packed_kvbias_width(dim)
+            chunk_bytes = route_tokens * route_groups * packed_width * materialized_key_bytes
+        else:
+            chunk_bytes = route_tokens * route_groups * (dim * key_bytes + dim * value_bytes + bias_bytes)
         total_bytes += chunk_bytes
         max_chunk_bytes = max(max_chunk_bytes, chunk_bytes)
         if merge_config.use_seed_key:
@@ -90,6 +98,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         "value_dtype": "bf16" if merge_config.use_bf16_merged_value else "fp16",
         "bias_dtype": "bf16" if merge_config.use_bf16_routing_bias else "fp16",
         "packs_routing_bias": merge_config.use_packed_bias,
+        "packed_width": _packed_kvbias_width(dim) if merge_config.use_packed_bias else None,
         "writes_merged_key": not merge_config.use_seed_key,
     }
 
