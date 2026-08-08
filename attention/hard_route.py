@@ -187,14 +187,28 @@ def hard_route_merge_weights(seed_logits, dtype):
     return merge_weights, merge_logprob, cluster_has_keys
 
 
-def _torch_hard_route_merge(seed_queries, k, v, scale):
-    seed_logits = torch.einsum("bafkjchd,bfklhd->bhafkjcl", seed_queries, k).float()
-    seed_logits = seed_logits * float(scale)
-    merge_weights, merge_logprob, cluster_has_keys = hard_route_merge_weights(seed_logits, k.dtype)
+def _seed_key_logits(seed_queries, k, scale):
+    # seed_queries: [B, A, F, K, J, C, H, D]
+    # k:            [B, F, K, L, H, D]
+    # logits:       [B, H, A, F, K, J, C, L]
+    return torch.einsum("bafkjchd,bfklhd->bhafkjcl", seed_queries, k).float() * float(scale)
 
+
+def _merge_key_value(merge_weights, k, v):
     merged_keys = torch.einsum("bhafkjcl,bfklhd->bafjkchd", merge_weights, k)
     merged_values = torch.einsum("bhafkjcl,bfklhe->bafjkche", merge_weights, v)
-    routing_bias = (merge_weights * merge_logprob).sum(dim=-1)
+    return merged_keys, merged_values
+
+
+def _merge_entropy_bias(merge_weights, merge_logprob):
+    return (merge_weights * merge_logprob).sum(dim=-1)
+
+
+def _torch_hard_route_merge(seed_queries, k, v, scale):
+    seed_logits = _seed_key_logits(seed_queries, k, scale)
+    merge_weights, merge_logprob, cluster_has_keys = hard_route_merge_weights(seed_logits, k.dtype)
+    merged_keys, merged_values = _merge_key_value(merge_weights, k, v)
+    routing_bias = _merge_entropy_bias(merge_weights, merge_logprob)
     return merged_keys, merged_values, routing_bias, cluster_has_keys
 
 
