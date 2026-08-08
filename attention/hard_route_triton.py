@@ -457,7 +457,6 @@ if triton is not None:
         best_logits = tl.where(update, logits2, best_logits)
         assignments = tl.where(update, 2, assignments)
         update = logits3 > best_logits
-        best_logits = tl.where(update, logits3, best_logits)
         assignments = tl.where(update, 3, assignments)
         if FORCE_SEED_KEYS:
             assignments = tl.where(
@@ -465,8 +464,8 @@ if triton is not None:
                 key_offsets[None, :],
                 assignments,
             )
-        assigned_logits = best_logits
         if USE_ASSIGNED_LOGIT:
+            assigned_logits = tl.where(update, logits3, best_logits)
             if FORCE_SEED_KEYS:
                 assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 0), logits0, assigned_logits)
                 assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 1), logits1, assigned_logits)
@@ -666,15 +665,14 @@ if triton is not None:
             best_logits = tl.where(update, logits2, best_logits)
             assignments = tl.where(update, 2, assignments)
             update = logits3 > best_logits
-            best_logits = tl.where(update, logits3, best_logits)
             assignments = tl.where(update, 3, assignments)
             assignments = tl.where(
                 valid_logits & (key_offsets[None, :] < 4),
                 key_offsets[None, :],
                 assignments,
             )
-            assigned_logits = best_logits
             if USE_ASSIGNED_LOGIT:
+                assigned_logits = tl.where(update, logits3, best_logits)
                 assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 0), logits0, assigned_logits)
                 assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 1), logits1, assigned_logits)
                 assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 2), logits2, assigned_logits)
