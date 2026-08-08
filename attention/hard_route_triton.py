@@ -1255,6 +1255,125 @@ if triton is not None:
             mask=(query_offsets[:, None] < Q_ROWS) & (dim_offsets[None, :] < D_HEAD),
         )
 
+    @triton.jit
+    def _direct_route_seed_key_grouped_attention_kernel(
+        query_ptr,
+        value_ptr,
+        bias_ptr,
+        out_ptr,
+        A_OUTER: tl.constexpr,
+        Q_ROWS: tl.constexpr,
+        J_COLS: tl.constexpr,
+        H_HEADS: tl.constexpr,
+        KEY_OUTERS: tl.constexpr,
+        BASE_K_LEN: tl.constexpr,
+        D_HEAD: tl.constexpr,
+        BLOCK_M: tl.constexpr,
+        BLOCK_N: tl.constexpr,
+        BLOCK_D: tl.constexpr,
+        SCORE_SCALE: tl.constexpr,
+        USE_EXP2: tl.constexpr,
+        GROUPS: tl.constexpr,
+    ):
+        group_id = tl.program_id(0)
+        query_block_id = tl.program_id(1)
+
+        query_col = group_id % J_COLS
+        tmp = group_id // J_COLS
+        query_outer = tmp % A_OUTER
+        tmp = tmp // A_OUTER
+        head = tmp % H_HEADS
+        batch = tmp // H_HEADS
+
+        query_offsets = query_block_id * BLOCK_M + tl.arange(0, BLOCK_M)
+        base_offsets = tl.arange(0, BLOCK_N)
+        dim_offsets = tl.arange(0, BLOCK_D)
+
+        query_base = query_ptr + batch * A_OUTER * Q_ROWS * J_COLS * H_HEADS * D_HEAD
+        out_base = out_ptr + batch * A_OUTER * Q_ROWS * J_COLS * H_HEADS * D_HEAD
+
+        q = tl.load(
+            query_base
+            + (((query_outer * Q_ROWS + query_offsets[:, None]) * J_COLS + query_col)
+               * H_HEADS + head) * D_HEAD
+            + dim_offsets[None, :],
+            mask=(query_offsets[:, None] < Q_ROWS) & (dim_offsets[None, :] < D_HEAD),
+            other=0.0,
+        )
+
+        max_score = tl.full((BLOCK_M,), -float("inf"), tl.float32)
+        normalizer = tl.zeros((BLOCK_M,), tl.float32)
+        acc = tl.zeros((BLOCK_M, BLOCK_D), tl.float32)
+
+        for base_start in range(0, BASE_K_LEN, BLOCK_N):
+            base_tokens = base_start + base_offsets
+            key_row = base_tokens // 4
+            seed_idx = base_tokens % 4
+            seed1 = tl.where(key_row > 0, key_row - 1, 1)
+            seed2 = tl.where(
+                key_row == 0,
+                2,
+                tl.where(key_row == Q_ROWS - 1, Q_ROWS - 3, key_row + 1),
+            )
+            seed3 = tl.where(
+                key_row <= 1,
+                3,
+                tl.where(key_row >= Q_ROWS - 2, Q_ROWS - 4, key_row - 2),
+            )
+            seed_row = key_row
+            seed_row = tl.where(seed_idx == 1, seed1, seed_row)
+            seed_row = tl.where(seed_idx == 2, seed2, seed_row)
+            seed_row = tl.where(seed_idx == 3, seed3, seed_row)
+
+            k = tl.load(
+                query_base
+                + (((query_outer * Q_ROWS + seed_row[:, None]) * J_COLS + query_col)
+                   * H_HEADS + head) * D_HEAD
+                + dim_offsets[None, :],
+                mask=(base_tokens[:, None] < BASE_K_LEN) & (dim_offsets[None, :] < D_HEAD),
+                other=0.0,
+            )
+            seed_logits = tl.dot(q, tl.trans(k)) * SCORE_SCALE
+            valid_logits = (query_offsets[:, None] < Q_ROWS) & (base_tokens[None, :] < BASE_K_LEN)
+
+            for key_outer in range(0, KEY_OUTERS):
+                route_keys = key_outer * BASE_K_LEN + base_tokens
+                bias = tl.load(
+                    bias_ptr + route_keys * GROUPS + group_id,
+                    mask=base_tokens < BASE_K_LEN,
+                    other=float("inf"),
+                )
+                logits = seed_logits - bias[None, :]
+                logits = tl.where(valid_logits, logits, -float("inf"))
+
+                block_max = tl.max(logits, axis=1)
+                next_max = tl.maximum(max_score, block_max)
+                if USE_EXP2:
+                    p = tl.exp2((logits - next_max[:, None]) * 1.4426950408889634)
+                    alpha = tl.exp2((max_score - next_max) * 1.4426950408889634)
+                else:
+                    p = tl.exp(logits - next_max[:, None])
+                    alpha = tl.exp(max_score - next_max)
+
+                v = tl.load(
+                    value_ptr + (route_keys[:, None] * GROUPS + group_id) * D_HEAD + dim_offsets[None, :],
+                    mask=(base_tokens[:, None] < BASE_K_LEN) & (dim_offsets[None, :] < D_HEAD),
+                    other=0.0,
+                )
+                acc = acc * alpha[:, None] + tl.dot(p.to(v.dtype), v)
+                normalizer = normalizer * alpha + tl.sum(p, axis=1)
+                max_score = next_max
+
+        out = acc / normalizer[:, None]
+        tl.store(
+            out_base
+            + (((query_outer * Q_ROWS + query_offsets[:, None]) * J_COLS + query_col)
+               * H_HEADS + head) * D_HEAD
+            + dim_offsets[None, :],
+            out,
+            mask=(query_offsets[:, None] < Q_ROWS) & (dim_offsets[None, :] < D_HEAD),
+        )
+
 
 def triton_biased_attention(
     query,
@@ -1535,6 +1654,8 @@ def triton_direct_route_seed_key_attention(
         raise ValueError("query/value/bias shapes are inconsistent for seed-key direct-route attention.")
     if key_len % (query_rows * 4) != 0:
         raise ValueError("seed-key direct-route attention expects K_LEN = key_outer * query_rows * 4.")
+    key_outers = key_len // (query_rows * 4)
+    base_key_len = query_rows * 4
 
     block_d = triton.next_power_of_2(dim)
     if block_d > 128:
@@ -1552,7 +1673,7 @@ def triton_direct_route_seed_key_attention(
     meta = {"num_warps": int(num_warps)}
     if num_stages is not None:
         meta["num_stages"] = int(num_stages)
-    _direct_route_seed_key_attention_kernel[grid](
+    _direct_route_seed_key_grouped_attention_kernel[grid](
         query,
         value,
         bias,
@@ -1561,8 +1682,8 @@ def triton_direct_route_seed_key_attention(
         Q_ROWS=query_rows,
         J_COLS=query_columns,
         H_HEADS=heads,
-        K_ROWS=query_rows,
-        K_LEN=key_len,
+        KEY_OUTERS=key_outers,
+        BASE_K_LEN=base_key_len,
         D_HEAD=dim,
         BLOCK_M=block_m,
         BLOCK_N=block_n,

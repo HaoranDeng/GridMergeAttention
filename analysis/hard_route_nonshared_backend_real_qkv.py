@@ -76,7 +76,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         total_bytes += chunk_bytes
         max_chunk_bytes = max(max_chunk_bytes, chunk_bytes)
         if merge_config.use_seed_key:
-            seed_key_query_read_bytes += route_tokens * route_groups * dim * materialized_key_bytes
+            seed_key_query_read_bytes += int(height) * 4 * route_groups * dim * materialized_key_bytes
         chunk_count += 1
 
     return {
