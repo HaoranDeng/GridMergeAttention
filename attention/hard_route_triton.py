@@ -613,10 +613,11 @@ if triton is not None:
                     if seed_idx == 3:
                         expected_logit = expected3
 
-                    top_logit0 = tl.sum(seed0.to(tl.float32) * merged_key.to(tl.float32), axis=1) * SCORE_SCALE
-                    top_logit1 = tl.sum(seed1.to(tl.float32) * merged_key.to(tl.float32), axis=1) * SCORE_SCALE
-                    top_logit2 = tl.sum(seed2.to(tl.float32) * merged_key.to(tl.float32), axis=1) * SCORE_SCALE
-                    top_logit3 = tl.sum(seed3.to(tl.float32) * merged_key.to(tl.float32), axis=1) * SCORE_SCALE
+                    selected_top_key = key_offsets[None, :] == top_key[:, None]
+                    top_logit0 = tl.max(tl.where(selected_top_key, logits0, -float("inf")), axis=1)
+                    top_logit1 = tl.max(tl.where(selected_top_key, logits1, -float("inf")), axis=1)
+                    top_logit2 = tl.max(tl.where(selected_top_key, logits2, -float("inf")), axis=1)
+                    top_logit3 = tl.max(tl.where(selected_top_key, logits3, -float("inf")), axis=1)
                     sum_x = top_logit0 + top_logit1 + top_logit2 + top_logit3
                     sum_y = expected0 + expected1 + expected2 + expected3
                     numerator = (
