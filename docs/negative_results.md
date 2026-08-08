@@ -87,6 +87,22 @@ check before launching another speed/quality sweep.
 - Rule: keep `m32_n16` as the token-major routing tile unless a different
   routing kernel structure is introduced.
 
+### Current Fast Path with `j64` Merge Tile
+
+- Result: slower than the current `j32` merge tile.
+- Change tested: replace the current non-shared C4 merge tile with
+  `triton_c4_direct_route_j64_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot`
+  while keeping token-major output, local-with-ith seed initialization, routing
+  bias, and full compressed attention.
+- Evidence: `analysis/hard_c4_j64_nohead_20260808/metrics.json` on AMDHPC
+  measured about 26.32 ms/call for j64 head-major and 25.84 ms/call for j64
+  no-headmajor, versus 24.84 ms/call for current j32 head-major and 24.46
+  ms/call for current j32 no-headmajor, with unchanged output error.
+- Why not repeat directly: the wider tile covers all 52 key columns in one
+  program, but the lower occupancy / higher register pressure outweighs the
+  reduced tiling overhead.
+- Rule: keep `j32_w2` for the current token-major hard C4 merge path.
+
 ## Current Best Direction
 
 The best accepted direction so far is still:
@@ -98,7 +114,8 @@ The best accepted direction so far is still:
   merge kernel,
 - token-major intermediate compressed-KV layout, which preserves the same
   full-attention math but makes merge stores more contiguous,
-- head-major K/V layout for slightly lower merge overhead,
+- no-headmajor K/V input for the current token-major `m32_n16` path, which was
+  slightly faster than the head-major variant while producing identical error,
 - direct-route Triton kernels to avoid unnecessary reshape/copy overhead.
 
 This direction improves the old hard C4 implementation substantially, but it
