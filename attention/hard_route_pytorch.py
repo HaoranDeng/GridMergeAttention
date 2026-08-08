@@ -1,6 +1,10 @@
 import torch
 
 
+def _inactive_logits_like(logits):
+    return torch.finfo(logits.dtype).min
+
+
 def seed_key_logits(seed_queries, key, scale):
     """Score every seed query against every key in the same block.
 
@@ -56,10 +60,16 @@ def assign_keys_to_seeds(seed_logits):
     return assigned | ((~cluster_has_key).unsqueeze(-1) & key0)
 
 
+def mask_unassigned_keys(logits, assigned):
+    """Keep only the keys owned by each seed cluster."""
+    logits = logits.float()
+    return logits.masked_fill(~assigned, _inactive_logits_like(logits))
+
+
 def masked_log_softmax_over_keys(logits, key_mask):
     """Log-softmax over keys, ignoring keys that are not assigned to a seed."""
-    logits = logits.float().masked_fill(~key_mask, torch.finfo(torch.float32).min)
-    logprob = torch.log_softmax(logits, dim=-1)
+    masked_logits = mask_unassigned_keys(logits, key_mask)
+    logprob = masked_logits - torch.logsumexp(masked_logits, dim=-1, keepdim=True)
     return logprob.masked_fill(~key_mask, 0.0)
 
 
@@ -77,20 +87,31 @@ def hard_route_merge_weights(seed_logits, dtype):
     return merge_weights, merge_logprob, assigned.any(dim=-1)
 
 
-def hard_route_merge_stats(seed_logits, dtype):
-    """Return merge weights and routing bias without materializing log-probs."""
+def hard_route_merge_weights_and_bias(seed_logits, dtype):
+    """Core hard-route merge math used by the readable PyTorch reference.
+
+    This is the operation the Triton kernels accelerate:
+      1. assign each key to the seed query with the largest seed/key score,
+      2. run a softmax over only the keys owned by that seed,
+      3. reuse those weights both for KV merging and for the routing bias.
+    """
     assigned = assign_keys_to_seeds(seed_logits)
     logits = seed_logits.float()
-    active_logits = logits.masked_fill(~assigned, torch.finfo(torch.float32).min)
+    active_logits = mask_unassigned_keys(logits, assigned)
 
     log_denom = torch.logsumexp(active_logits, dim=-1, keepdim=True)
-    weights = torch.exp(logits - log_denom).masked_fill(~assigned, 0.0).to(dtype)
+    weights = torch.exp(active_logits - log_denom).masked_fill(~assigned, 0.0).to(dtype)
 
     weights_for_bias = weights.float()
     expected_logit = (weights_for_bias * logits).sum(dim=-1)
     weight_sum = weights_for_bias.sum(dim=-1)
     routing_bias = expected_logit - log_denom.squeeze(-1) * weight_sum
     return weights, routing_bias, assigned.any(dim=-1)
+
+
+def hard_route_merge_stats(seed_logits, dtype):
+    """Backward-compatible alias for old analysis scripts."""
+    return hard_route_merge_weights_and_bias(seed_logits, dtype)
 
 
 def merge_kv_from_weights(merge_weights, key, value):
@@ -121,7 +142,7 @@ def hard_route_merge_kv_pytorch(seed_queries, key, value, scale):
     bias:         [B, H, A, F, K, J, C]
     """
     logits = seed_key_logits(seed_queries, key, scale)
-    weights, routing_bias, cluster_has_keys = hard_route_merge_stats(logits, key.dtype)
+    weights, routing_bias, cluster_has_keys = hard_route_merge_weights_and_bias(logits, key.dtype)
     merged_keys, merged_values = merge_kv_from_weights(weights, key, value)
     return merged_keys, merged_values, routing_bias, cluster_has_keys
 
@@ -133,7 +154,7 @@ def hard_route_merge_kv_transpose_pytorch(seed_queries, key, value, scale):
     J queries x K keys, so seed query columns compress key rows.
     """
     logits = seed_key_logits_transpose(seed_queries, key, scale)
-    weights, routing_bias, _ = hard_route_merge_stats(logits, key.dtype)
+    weights, routing_bias, _ = hard_route_merge_weights_and_bias(logits, key.dtype)
     merged_keys, merged_values = merge_kv_from_weights_transpose(weights, key, value)
     return merged_keys, merged_values, routing_bias
 
@@ -141,7 +162,9 @@ def hard_route_merge_kv_transpose_pytorch(seed_queries, key, value, scale):
 __all__ = [
     "assign_keys_to_seeds",
     "hard_route_merge_weights",
+    "hard_route_merge_weights_and_bias",
     "hard_route_merge_stats",
+    "mask_unassigned_keys",
     "hard_route_merge_kv_pytorch",
     "hard_route_merge_kv_transpose_pytorch",
     "masked_log_softmax_over_keys",
