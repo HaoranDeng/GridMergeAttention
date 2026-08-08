@@ -174,6 +174,9 @@ def _direct_route_merge(q, seed_rows, k, v, backend, scale):
     if backend.endswith("_f2"):
         backend = backend[: -len("_f2")]
         key_outer_block = 2
+    use_assigned_logit = backend.endswith("_bestlogit")
+    if use_assigned_logit:
+        backend = backend[: -len("_bestlogit")]
 
     if (
         not token_major_output
@@ -197,6 +200,7 @@ def _direct_route_merge(q, seed_rows, k, v, backend, scale):
         logit_input_precision="tf32",
         inline_local_seed=inline_local_seed,
         key_outer_block=key_outer_block,
+        use_assigned_logit=use_assigned_logit,
     )
 
 def hard_route_compressed_attention(query, key, value, bias, backend, scale):

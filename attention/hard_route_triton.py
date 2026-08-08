@@ -355,6 +355,7 @@ if triton is not None:
         FORCE_SEED_KEYS: tl.constexpr,
         LOGIT_INPUT_PRECISION: tl.constexpr,
         INLINE_LOCAL_SEED: tl.constexpr,
+        USE_ASSIGNED_LOGIT: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -456,6 +457,7 @@ if triton is not None:
         best_logits = tl.where(update, logits2, best_logits)
         assignments = tl.where(update, 2, assignments)
         update = logits3 > best_logits
+        best_logits = tl.where(update, logits3, best_logits)
         assignments = tl.where(update, 3, assignments)
         if FORCE_SEED_KEYS:
             assignments = tl.where(
@@ -463,6 +465,13 @@ if triton is not None:
                 key_offsets[None, :],
                 assignments,
             )
+        assigned_logits = best_logits
+        if USE_ASSIGNED_LOGIT:
+            if FORCE_SEED_KEYS:
+                assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 0), logits0, assigned_logits)
+                assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 1), logits1, assigned_logits)
+                assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 2), logits2, assigned_logits)
+                assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 3), logits3, assigned_logits)
 
         route_group = (((batch * H + head) * A + query_outer) * J + query_offsets)
         route_token_base = (key_outer * K_ROWS + key_row) * 4
@@ -473,13 +482,16 @@ if triton is not None:
             other=0.0,
         )
         for seed_idx in tl.static_range(0, 4):
-            logits = logits0
-            if seed_idx == 1:
-                logits = logits1
-            if seed_idx == 2:
-                logits = logits2
-            if seed_idx == 3:
-                logits = logits3
+            if USE_ASSIGNED_LOGIT:
+                logits = assigned_logits
+            else:
+                logits = logits0
+                if seed_idx == 1:
+                    logits = logits1
+                if seed_idx == 2:
+                    logits = logits2
+                if seed_idx == 3:
+                    logits = logits3
 
             assigned_to_seed = assignments == seed_idx
             if FORCE_SEED_KEYS:
@@ -1218,6 +1230,7 @@ def triton_hard_route_merge_c4_direct_route(
     logit_input_precision="ieee",
     inline_local_seed=False,
     key_outer_block=1,
+    use_assigned_logit=False,
 ):
     """Exact non-shared C=4 merge that writes routing-ready K/V/bias.
 
@@ -1294,6 +1307,8 @@ def triton_hard_route_merge_c4_direct_route(
     key_outer_block = int(key_outer_block)
     if key_outer_block not in (1, 2):
         raise ValueError(f"key_outer_block must be 1 or 2, got {key_outer_block}.")
+    if use_assigned_logit and not force_seed_keys:
+        raise ValueError("use_assigned_logit currently requires force_seed_keys=True.")
     if key_outer_block == 2 and (
         (not inline_local_seed)
         or block_j != 32
@@ -1374,6 +1389,7 @@ def triton_hard_route_merge_c4_direct_route(
         FORCE_SEED_KEYS=bool(force_seed_keys),
         LOGIT_INPUT_PRECISION=logit_input_precision,
         INLINE_LOCAL_SEED=bool(inline_local_seed),
+        USE_ASSIGNED_LOGIT=bool(use_assigned_logit),
         **launch_kwargs,
     )
     return merged_key, merged_value, routing_bias, None
