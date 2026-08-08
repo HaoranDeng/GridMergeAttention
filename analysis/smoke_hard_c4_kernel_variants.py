@@ -102,17 +102,8 @@ def main():
         # smoke job times out, partial JSON will still cover these.
         "hard_c4_bestlogit_prelogit_tokenmajor",
         "hard_c4_bestlogit_prelogitfp32_tokenmajor",
-        "hard_c4_bestlogit_packkbias_tokenmajor",
-        "hard_c4_bestlogit_packkbiascompact_tokenmajor",
-        "hard_c4_bestlogit_packkvbiascompact_tokenmajor",
-        # Older packing/recompute experiments are lower priority but still
-        # useful to keep as regression checks.
-        "hard_c4_bestlogit_packkv_tokenmajor",
-        "hard_c4_bestlogit_packkvbias_tokenmajor",
+        # Recompute is lower priority but still useful as a regression check.
         "hard_c4_bestlogit_recompute_tokenmajor",
-        "hard_c4_bestlogit_recompute_packkv_tokenmajor",
-        "hard_c4_bestlogit_recompute_packkvbias_tokenmajor",
-        "hard_c4_bestlogit_recompute_packkvbiascompact_tokenmajor",
     ]
     selected_names = parse_variant_names(args.variants)
     if selected_names:

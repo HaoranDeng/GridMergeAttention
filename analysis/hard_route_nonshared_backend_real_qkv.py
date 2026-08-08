@@ -309,89 +309,11 @@ def exact_variants():
         "hard_c4_bestlogit_maskassign_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "maskassign"), seed_mode="local_with_ith"
         ),
-        "hard_c4_packkv_tokenmajor": exact_backend(
-            direct_merge_backend("packkv"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_packkv_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "packkv"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_recompute_packkv_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "recompute", "packkv"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_packkvbias_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "packkvbias"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_packkvbiascompact_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "packkvbiascompact"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_packkbiascompact_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "packkbiascompact"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_packkbias_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "packkbias"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_recompute_packkvbias_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "recompute", "packkvbias"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_recompute_packkvbiascompact_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "recompute", "packkvbiascompact"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_packkv_tokenmajor_n32_s1": exact_backend(
-            direct_merge_backend("bestlogit", "packkv"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=32),
-        ),
-        "hard_c4_bestlogit_packkvbias_tokenmajor_n32_s1": exact_backend(
-            direct_merge_backend("bestlogit", "packkvbias"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=32),
-        ),
-        "hard_c4_bestlogit_packkvbiascompact_tokenmajor_n32_s1": exact_backend(
-            direct_merge_backend("bestlogit", "packkvbiascompact"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=32),
-        ),
-        "hard_c4_bestlogit_maskassign_packkv_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "maskassign", "packkv"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_maskassign_packkvbias_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "maskassign", "packkvbias"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_maskassign_packkvbiascompact_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "maskassign", "packkvbiascompact"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_maskassign_packkv_tokenmajor_n32_s1": exact_backend(
-            direct_merge_backend("bestlogit", "maskassign", "packkv"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=32),
-        ),
-        "hard_c4_bestlogit_maskassign_packkvbias_tokenmajor_n32_s1": exact_backend(
-            direct_merge_backend("bestlogit", "maskassign", "packkvbias"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=32),
-        ),
-        "hard_c4_bestlogit_maskassign_packkvbiascompact_tokenmajor_n32_s1": exact_backend(
-            direct_merge_backend("bestlogit", "maskassign", "packkvbiascompact"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=32),
-        ),
         "hard_c4_stripe_tokenmajor": exact_backend(
             direct_merge_backend("stripe"), seed_mode="local_with_ith"
         ),
         "hard_c4_stripe_tokenmajor_n32_s1": exact_backend(
             direct_merge_backend("stripe"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=32),
-        ),
-        "hard_c4_stripe_packkv_tokenmajor": exact_backend(
-            direct_merge_backend("stripe", "packkv"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_stripe_packkv_tokenmajor_n32_s1": exact_backend(
-            direct_merge_backend("stripe", "packkv"),
             seed_mode="local_with_ith",
             routing_backend=direct_routing_backend(block_n=32),
         ),

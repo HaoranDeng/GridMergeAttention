@@ -181,6 +181,8 @@ def parse_direct_route_backend(backend):
         supported = False
     if options["block_l_target"] not in {0, 64, 128}:
         supported = False
+    if options["use_packed_kv"] or options["use_packed_key_bias"]:
+        supported = False
 
     return DirectRouteMergeConfig(
         supported=supported,

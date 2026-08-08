@@ -297,6 +297,24 @@ check before launching another speed/quality sweep.
   Exact-52 tiling would require a different kernel design that uses
   power-of-two blocks plus masks.
 
+### Packed Token-Major K/V/Bias Layouts
+
+- Result: unsafe or slower on the real Wan hard C4 shape.
+- Change tested: packed token-major variants such as `packkv`, `packkvbias`,
+  `packkvbiascompact`, `packkbias`, and `packkbiascompact`.
+- Evidence: Slurm job `366724` ran real-shape smoke tests with
+  `B=1, A=10, F=21, rows=30, columns=52, heads=12, dim=128`.
+  `packkv`, `packkvbias`, `packkvbiascompact`, and `packkbias` triggered HIP
+  illegal memory accesses. `packkbiascompact` completed, but measured about
+  14.94 ms versus about 10.95 ms for the current bestlogit token-major
+  baseline in the same smoke.
+- Why not repeat directly: toy-shape smoke can pass, but the real Wan layout
+  exposes indexing/backend issues. The only safe packed-key-bias compact path
+  was still substantially slower and did not reduce total intermediate bytes.
+- Rule: do not use packed K/V/bias hard C4 backends for the main path. Focus
+  on designs that reduce materialized intermediate data rather than just
+  packing the same K/V/bias tensors.
+
 ## Current Best Direction
 
 The best accepted direction so far is still:
