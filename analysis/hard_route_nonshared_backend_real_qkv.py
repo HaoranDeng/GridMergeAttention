@@ -506,20 +506,43 @@ def parse_variant_names(text):
     return [name for name in (text or "").replace(",", " ").split() if name]
 
 
-def load_smoke_variant_errors(path):
-    """Return {variant_name: error} entries from a previous smoke JSON."""
+def load_smoke_variant_filter(path):
+    """Return smoke-derived skip reasons and optional success allow-list.
+
+    A complete smoke JSON only filters variants that explicitly recorded an
+    error. An incomplete smoke JSON may have been left behind by a hard kernel
+    failure, so only variants already present and successful in that partial
+    file are considered safe to run in the longer real-QKV benchmark.
+    """
     if not path:
-        return {}
+        return {}, None
     smoke_path = Path(path)
     if not smoke_path.exists():
-        return {}
+        return {}, None
     payload = json.loads(smoke_path.read_text(encoding="utf-8"))
     results = payload.get("results", {})
-    return {
+    errors = {
         name: str(result["error"])
         for name, result in results.items()
         if isinstance(result, dict) and result.get("error")
     }
+    if payload.get("complete", True):
+        return errors, None
+
+    succeeded = {
+        name
+        for name, result in results.items()
+        if isinstance(result, dict) and not result.get("error")
+    }
+    return errors, succeeded
+
+
+def smoke_skip_reason(name, smoke_variant_errors, smoke_success_names):
+    if name in smoke_variant_errors:
+        return smoke_variant_errors[name]
+    if smoke_success_names is not None and name not in smoke_success_names:
+        return "missing from incomplete smoke JSON"
+    return None
 
 
 def sync():
@@ -552,7 +575,9 @@ def install_probe(stats, args):
 
     all_variants = exact_variants()
     selected = parse_variant_names(args.variants)
-    smoke_variant_errors = load_smoke_variant_errors(args.skip_variant_errors_from_json)
+    smoke_variant_errors, smoke_success_names = load_smoke_variant_filter(
+        args.skip_variant_errors_from_json
+    )
     skipped_from_smoke = {}
     if selected:
         variants = {}
@@ -561,8 +586,8 @@ def install_probe(stats, args):
             variant = resolve_variant(name, all_variants)
             if variant is None:
                 missing.append(name)
-            elif name in smoke_variant_errors:
-                skipped_from_smoke[name] = smoke_variant_errors[name]
+            elif reason := smoke_skip_reason(name, smoke_variant_errors, smoke_success_names):
+                skipped_from_smoke[name] = reason
             else:
                 variants[name] = variant
         if missing:
@@ -570,8 +595,8 @@ def install_probe(stats, args):
     else:
         variants = {}
         for name, variant in all_variants.items():
-            if name in smoke_variant_errors:
-                skipped_from_smoke[name] = smoke_variant_errors[name]
+            if reason := smoke_skip_reason(name, smoke_variant_errors, smoke_success_names):
+                skipped_from_smoke[name] = reason
             else:
                 variants[name] = variant
     if not args.skip_baseline and "hard_c4_baseline" not in variants:
