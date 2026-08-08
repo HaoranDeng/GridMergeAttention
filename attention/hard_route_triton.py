@@ -484,7 +484,7 @@ if triton is not None:
             if USE_MASK_ASSIGN:
                 assigned_logits = best_logits
             else:
-                assigned_logits = tl.where(update, logits3, best_logits)
+                assigned_logits = best_logits
             if FORCE_SEED_KEYS:
                 assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 0), logits0, assigned_logits)
                 assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 1), logits1, assigned_logits)
