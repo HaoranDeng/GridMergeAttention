@@ -116,6 +116,7 @@ def main():
         "shape_kv": list(shape_kv),
         "warmup": args.warmup,
         "repeats": args.repeats,
+        "variant_names": names,
         "results": results,
         "complete": False,
     }

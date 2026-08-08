@@ -571,40 +571,46 @@ def parse_variant_names(text):
 
 
 def load_smoke_variant_filter(path):
-    """Return smoke-derived skip reasons and optional success allow-list.
+    """Return smoke-derived skip reasons and optional partial-smoke metadata.
 
     A complete smoke JSON only filters variants that explicitly recorded an
     error. An incomplete smoke JSON may have been left behind by a hard kernel
-    failure, so only variants already present and successful in that partial
-    file are considered safe to run in the longer real-QKV benchmark.
+    failure. In that case, only variants that were part of the smoke run and
+    did not finish successfully are skipped. Variants outside the smoke list
+    are allowed to run and handle their own warmup errors.
     """
     if not path:
-        return {}, None
+        return {}, None, None
     smoke_path = Path(path)
     if not smoke_path.exists():
-        return {}, None
+        return {}, None, None
     payload = json.loads(smoke_path.read_text(encoding="utf-8"))
     results = payload.get("results", {})
+    intended = set(payload.get("variant_names") or [])
     errors = {
         name: str(result["error"])
         for name, result in results.items()
         if isinstance(result, dict) and result.get("error")
     }
     if payload.get("complete", True):
-        return errors, None
+        return errors, None, intended or None
 
     succeeded = {
         name
         for name, result in results.items()
         if isinstance(result, dict) and not result.get("error")
     }
-    return errors, succeeded
+    return errors, succeeded, intended or None
 
 
-def smoke_skip_reason(name, smoke_variant_errors, smoke_success_names):
+def smoke_skip_reason(name, smoke_variant_errors, smoke_success_names, smoke_intended_names):
     if name in smoke_variant_errors:
         return smoke_variant_errors[name]
-    if smoke_success_names is not None and name not in smoke_success_names:
+    if (
+        smoke_success_names is not None
+        and (smoke_intended_names is None or name in smoke_intended_names)
+        and name not in smoke_success_names
+    ):
         return "missing from incomplete smoke JSON"
     return None
 
@@ -639,7 +645,7 @@ def install_probe(stats, args):
 
     all_variants = exact_variants()
     selected = parse_variant_names(args.variants)
-    smoke_variant_errors, smoke_success_names = load_smoke_variant_filter(
+    smoke_variant_errors, smoke_success_names, smoke_intended_names = load_smoke_variant_filter(
         args.skip_variant_errors_from_json
     )
     skipped_from_smoke = {}
@@ -650,7 +656,12 @@ def install_probe(stats, args):
             variant = resolve_variant(name, all_variants)
             if variant is None:
                 missing.append(name)
-            elif reason := smoke_skip_reason(name, smoke_variant_errors, smoke_success_names):
+            elif reason := smoke_skip_reason(
+                name,
+                smoke_variant_errors,
+                smoke_success_names,
+                smoke_intended_names,
+            ):
                 skipped_from_smoke[name] = reason
             else:
                 variants[name] = variant
@@ -659,7 +670,12 @@ def install_probe(stats, args):
     else:
         variants = {}
         for name, variant in all_variants.items():
-            if reason := smoke_skip_reason(name, smoke_variant_errors, smoke_success_names):
+            if reason := smoke_skip_reason(
+                name,
+                smoke_variant_errors,
+                smoke_success_names,
+                smoke_intended_names,
+            ):
                 skipped_from_smoke[name] = reason
             else:
                 variants[name] = variant
