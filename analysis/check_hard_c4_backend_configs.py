@@ -201,6 +201,14 @@ def main():
                 "use_indirect_top3_value": True,
             },
         ),
+        "top3seedvalue_indirecttop3seedvalue": (
+            backend("bestlogit", "top3seedvalue", "indirecttop3seedvalue"),
+            {
+                "use_assigned_logit": True,
+                "use_top3_seed_value": True,
+                "use_indirect_top3_seed_value": True,
+            },
+        ),
         "seedvalue": (
             backend("bestlogit", "seedvalue"),
             {"use_assigned_logit": True, "use_seed_value": True},
