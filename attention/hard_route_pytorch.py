@@ -15,30 +15,29 @@ FLOAT_NEG_INF = torch.finfo(torch.float32).min
 
 
 def assign_keys_to_seeds(seed_key_logits):
-    """Assign each key to exactly one seed.
+    """Hard-assign each key to exactly one seed query.
 
     seed_key_logits: [..., C, L]
       C: number of seed queries in one block
       L: number of keys in one block
 
-    The output has the same shape. A True entry means this key belongs to that
-    seed's cluster. Empty clusters are given key 0 so the number of compressed
-    tokens stays fixed.
+    Returns a boolean mask with the same shape. Empty seed clusters are given
+    key 0 so every block still produces exactly C compressed tokens.
     """
     best_seed = seed_key_logits.argmax(dim=-2, keepdim=True)
-    assigned = torch.zeros_like(seed_key_logits, dtype=torch.bool)
-    assigned.scatter_(dim=-2, index=best_seed, value=True)
+    key_cluster_mask = torch.zeros_like(seed_key_logits, dtype=torch.bool)
+    key_cluster_mask.scatter_(dim=-2, index=best_seed, value=True)
 
-    empty_seed = ~assigned.any(dim=-1, keepdim=True)
-    assigned[..., :1] |= empty_seed
-    return assigned
+    empty_seed = ~key_cluster_mask.any(dim=-1, keepdim=True)
+    key_cluster_mask[..., :1] |= empty_seed
+    return key_cluster_mask
 
 
-def assigned_key_log_softmax(seed_key_logits, assigned):
+def assigned_key_log_softmax(seed_key_logits, key_cluster_mask):
     """Run log-softmax only over the keys assigned to each seed."""
-    masked_logits = seed_key_logits.float().masked_fill(~assigned, FLOAT_NEG_INF)
+    masked_logits = seed_key_logits.float().masked_fill(~key_cluster_mask, FLOAT_NEG_INF)
     log_weights = masked_logits - torch.logsumexp(masked_logits, dim=-1, keepdim=True)
-    return log_weights.masked_fill(~assigned, 0.0)
+    return log_weights.masked_fill(~key_cluster_mask, 0.0)
 
 
 def hard_route_merge_weights(seed_key_logits, dtype):
@@ -46,11 +45,13 @@ def hard_route_merge_weights(seed_key_logits, dtype):
 
     seed_key_logits: [..., C, L]
     merge_weights:  [..., C, L], zero outside each seed cluster
-    routing_bias:   [..., C], equal to sum_l alpha_l log(alpha_l)
+    routing_bias:   [..., C], equal to sum_l alpha_l log(alpha_l).
+                    The second attention stage subtracts this value, which
+                    adds the entropy term from the variational objective.
     """
-    assigned = assign_keys_to_seeds(seed_key_logits)
-    log_weights = assigned_key_log_softmax(seed_key_logits, assigned)
-    merge_weights = log_weights.exp().masked_fill(~assigned, 0.0)
+    key_cluster_mask = assign_keys_to_seeds(seed_key_logits)
+    log_weights = assigned_key_log_softmax(seed_key_logits, key_cluster_mask)
+    merge_weights = log_weights.exp().masked_fill(~key_cluster_mask, 0.0)
     routing_bias = (merge_weights * log_weights).sum(dim=-1)
     return merge_weights.to(dtype), routing_bias
 
@@ -90,6 +91,14 @@ def merge_transpose_blocks(merge_weights, key, value):
     return merged_key, merged_value
 
 
+def _hard_route_merge(seed_queries, key, value, scale, score_fn, merge_fn):
+    """Shared reference merge body used by regular and transposed layouts."""
+    seed_key_logits = score_fn(seed_queries, key, scale)
+    merge_weights, routing_bias = hard_route_merge_weights(seed_key_logits, key.dtype)
+    merged_key, merged_value = merge_fn(merge_weights, key, value)
+    return merged_key, merged_value, routing_bias
+
+
 def hard_route_merge_kv_pytorch(seed_queries, key, value, scale):
     """Reference merge for the regular layout.
 
@@ -101,10 +110,14 @@ def hard_route_merge_kv_pytorch(seed_queries, key, value, scale):
     merged K/V:   [B, A, F, J, K, C, H, D]
     bias:         [B, H, A, F, K, J, C]
     """
-    seed_key_logits = score_regular_blocks(seed_queries, key, scale)
-    merge_weights, routing_bias = hard_route_merge_weights(seed_key_logits, key.dtype)
-    merged_key, merged_value = merge_regular_blocks(merge_weights, key, value)
-    return merged_key, merged_value, routing_bias
+    return _hard_route_merge(
+        seed_queries,
+        key,
+        value,
+        scale,
+        score_regular_blocks,
+        merge_regular_blocks,
+    )
 
 
 def hard_route_merge_kv_transpose_pytorch(seed_queries, key, value, scale):
@@ -113,10 +126,14 @@ def hard_route_merge_kv_transpose_pytorch(seed_queries, key, value, scale):
     The regular block is 30 queries x 52 keys. The transposed block is
     52 queries x 30 keys: seed query columns compress key rows.
     """
-    seed_key_logits = score_transpose_blocks(seed_queries, key, scale)
-    merge_weights, routing_bias = hard_route_merge_weights(seed_key_logits, key.dtype)
-    merged_key, merged_value = merge_transpose_blocks(merge_weights, key, value)
-    return merged_key, merged_value, routing_bias
+    return _hard_route_merge(
+        seed_queries,
+        key,
+        value,
+        scale,
+        score_transpose_blocks,
+        merge_transpose_blocks,
+    )
 
 
 __all__ = [

@@ -289,10 +289,39 @@ def _direct_attention_config(backend, allowed_group_blocks=(1,)):
     if config is None:
         return None
 
-    block_m, block_n, num_warps, num_stages, group_block = config
+    block_m, block_n, num_warps, num_stages, _group_block = config
     if group_block not in allowed_group_blocks:
         return None
     return block_m, block_n, num_warps, num_stages, group_block
+
+
+def _call_direct_attention_kernel(
+    kernel,
+    backend,
+    args,
+    scale,
+    output,
+    assume_contiguous,
+    allowed_group_blocks=(1,),
+    **kernel_kwargs,
+):
+    config = _direct_attention_config(backend, allowed_group_blocks=allowed_group_blocks)
+    if config is None:
+        return None
+
+    block_m, block_n, num_warps, num_stages, group_block = config
+    return kernel(
+        *args,
+        block_m=block_m,
+        block_n=block_n,
+        scale=scale,
+        num_warps=num_warps,
+        num_stages=num_stages,
+        use_exp2=True,
+        out=output,
+        assume_contiguous=assume_contiguous,
+        **kernel_kwargs,
+    )
 
 
 def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguous=False):
@@ -367,24 +396,14 @@ def direct_seed_key_attention(
     output=None,
     assume_contiguous=False,
 ):
-    config = _direct_attention_config(backend)
-    if config is None:
-        return None
-
-    block_m, block_n, num_warps, num_stages, group_block = config
-    return triton_direct_route_seed_key_attention(
-        q,
-        value,
-        bias,
+    return _call_direct_attention_kernel(
+        triton_direct_route_seed_key_attention,
+        backend,
+        (q, value, bias),
+        scale,
+        output,
+        assume_contiguous,
         key_scale=key_scale,
-        block_m=block_m,
-        block_n=block_n,
-        scale=scale,
-        num_warps=num_warps,
-        num_stages=num_stages,
-        use_exp2=True,
-        out=output,
-        assume_contiguous=assume_contiguous,
     )
 
 
@@ -402,28 +421,15 @@ def direct_top_key_attention(
     output=None,
     assume_contiguous=False,
 ):
-    config = _direct_attention_config(backend)
-    if config is None:
-        return None
-
-    block_m, block_n, num_warps, num_stages, group_block = config
-    return triton_direct_route_top_key_attention(
-        q,
-        source_key,
-        source_value,
-        key_index,
-        value,
-        bias,
+    return _call_direct_attention_kernel(
+        triton_direct_route_top_key_attention,
+        backend,
+        (q, source_key, source_value, key_index, value, bias),
+        scale,
+        output,
+        assume_contiguous,
         key_scale=key_scale,
-        block_m=block_m,
-        block_n=block_n,
-        scale=scale,
-        num_warps=num_warps,
-        num_stages=num_stages,
-        use_exp2=True,
         indirect_seed_value=indirect_seed_value,
-        out=output,
-        assume_contiguous=assume_contiguous,
     )
 
 
@@ -444,31 +450,18 @@ def direct_indirect_value_attention(
     output=None,
     assume_contiguous=False,
 ):
-    config = _direct_attention_config(backend)
-    if config is None:
-        return None
-
-    block_m, block_n, num_warps, num_stages, group_block = config
-    return triton_direct_route_indirect_value_attention(
-        q,
-        key,
-        source_value,
-        value_index,
-        value_weight,
-        bias,
-        block_m=block_m,
-        block_n=block_n,
-        scale=scale,
-        num_warps=num_warps,
-        num_stages=num_stages,
-        use_exp2=True,
+    return _call_direct_attention_kernel(
+        triton_direct_route_indirect_value_attention,
+        backend,
+        (q, key, source_value, value_index, value_weight, bias),
+        scale,
+        output,
+        assume_contiguous,
         indirect_seed_value=indirect_seed_value,
         indirect_top3_seed_value=indirect_top3_seed_value,
         indirect_top3_value=indirect_top3_value,
         indirect_top2_value=indirect_top2_value,
         indirect_top2_seed_value=indirect_top2_seed_value,
-        out=output,
-        assume_contiguous=assume_contiguous,
     )
 
 
@@ -483,25 +476,13 @@ def direct_recompute_value_attention(
     output=None,
     assume_contiguous=False,
 ):
-    config = _direct_attention_config(backend)
-    if config is None:
-        return None
-
-    block_m, block_n, num_warps, num_stages, group_block = config
-    return triton_direct_route_recompute_value_attention(
-        q,
-        key,
-        source_key,
-        source_value,
-        bias,
-        block_m=block_m,
-        block_n=block_n,
-        scale=scale,
-        num_warps=num_warps,
-        num_stages=num_stages,
-        use_exp2=True,
-        out=output,
-        assume_contiguous=assume_contiguous,
+    return _call_direct_attention_kernel(
+        triton_direct_route_recompute_value_attention,
+        backend,
+        (q, key, source_key, source_value, bias),
+        scale,
+        output,
+        assume_contiguous,
     )
 
 
@@ -516,25 +497,13 @@ def direct_weight_value_attention(
     output=None,
     assume_contiguous=False,
 ):
-    config = _direct_attention_config(backend)
-    if config is None:
-        return None
-
-    block_m, block_n, num_warps, num_stages, group_block = config
-    return triton_direct_route_weight_value_attention(
-        q,
-        key,
-        source_value,
-        value_weight,
-        bias,
-        block_m=block_m,
-        block_n=block_n,
-        scale=scale,
-        num_warps=num_warps,
-        num_stages=num_stages,
-        use_exp2=True,
-        out=output,
-        assume_contiguous=assume_contiguous,
+    return _call_direct_attention_kernel(
+        triton_direct_route_weight_value_attention,
+        backend,
+        (q, key, source_value, value_weight, bias),
+        scale,
+        output,
+        assume_contiguous,
     )
 
 
@@ -549,25 +518,13 @@ def direct_weight_kv_attention(
     output=None,
     assume_contiguous=False,
 ):
-    config = _direct_attention_config(backend)
-    if config is None:
-        return None
-
-    block_m, block_n, num_warps, num_stages, group_block = config
-    return triton_direct_route_weight_kv_attention(
-        q,
-        source_key,
-        source_value,
-        merge_weight,
-        bias,
-        block_m=block_m,
-        block_n=block_n,
-        scale=scale,
-        num_warps=num_warps,
-        num_stages=num_stages,
-        use_exp2=True,
-        out=output,
-        assume_contiguous=assume_contiguous,
+    return _call_direct_attention_kernel(
+        triton_direct_route_weight_kv_attention,
+        backend,
+        (q, source_key, source_value, merge_weight, bias),
+        scale,
+        output,
+        assume_contiguous,
     )
 
 
@@ -583,26 +540,13 @@ def direct_compact_weight_kv_attention(
     output=None,
     assume_contiguous=False,
 ):
-    config = _direct_attention_config(backend)
-    if config is None:
-        return None
-
-    block_m, block_n, num_warps, num_stages, group_block = config
-    return triton_direct_route_compact_weight_kv_attention(
-        q,
-        source_key,
-        source_value,
-        assignment,
-        merge_weight,
-        bias,
-        block_m=block_m,
-        block_n=block_n,
-        scale=scale,
-        num_warps=num_warps,
-        num_stages=num_stages,
-        use_exp2=True,
-        out=output,
-        assume_contiguous=assume_contiguous,
+    return _call_direct_attention_kernel(
+        triton_direct_route_compact_weight_kv_attention,
+        backend,
+        (q, source_key, source_value, assignment, merge_weight, bias),
+        scale,
+        output,
+        assume_contiguous,
     )
 
 
@@ -618,26 +562,13 @@ def direct_compact_weight_value_attention(
     output=None,
     assume_contiguous=False,
 ):
-    config = _direct_attention_config(backend)
-    if config is None:
-        return None
-
-    block_m, block_n, num_warps, num_stages, group_block = config
-    return triton_direct_route_compact_weight_value_attention(
-        q,
-        key,
-        source_value,
-        assignment,
-        merge_weight,
-        bias,
-        block_m=block_m,
-        block_n=block_n,
-        scale=scale,
-        num_warps=num_warps,
-        num_stages=num_stages,
-        use_exp2=True,
-        out=output,
-        assume_contiguous=assume_contiguous,
+    return _call_direct_attention_kernel(
+        triton_direct_route_compact_weight_value_attention,
+        backend,
+        (q, key, source_value, assignment, merge_weight, bias),
+        scale,
+        output,
+        assume_contiguous,
     )
 
 
