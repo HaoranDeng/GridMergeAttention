@@ -634,6 +634,7 @@ if triton is not None:
         LOGIT_INPUT_PRECISION: tl.constexpr,
         INLINE_LOCAL_SEED: tl.constexpr,
         USE_ASSIGNED_LOGIT: tl.constexpr,
+        USE_MASK_ASSIGN: tl.constexpr,
         PACK_KV: tl.constexpr,
         PACK_BIAS: tl.constexpr,
         PACKED_WIDTH: tl.constexpr,
