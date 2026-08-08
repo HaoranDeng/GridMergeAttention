@@ -171,6 +171,11 @@ def install_probe(stats, args):
             end = min(start + args.query_outer_chunk, q_blocks.size(1))
             q_chunk = q_blocks[:, start:end]
             out_slice = out_blocks[:, start:end]
+            if record and not q_chunk.is_contiguous():
+                q_chunk, seconds = timed(q_chunk.contiguous)
+                variant_stats.add_time("q_chunk_contiguous", seconds)
+            else:
+                q_chunk = q_chunk.contiguous()
 
             if record:
                 seed_rows, seconds = timed(lambda: make_seed_rows(q_chunk, k_blocks, start, args, variant))
@@ -183,6 +188,7 @@ def install_probe(stats, args):
                         v_merge_blocks,
                         direct_merge_config,
                         scale,
+                        assume_contiguous=True,
                     )
                 )
                 variant_stats.add_time("direct_merge", seconds)
@@ -195,6 +201,7 @@ def install_probe(stats, args):
                     v_merge_blocks,
                     direct_merge_config,
                     scale,
+                    assume_contiguous=True,
                 )
 
             if merge_out is None:
@@ -212,6 +219,7 @@ def install_probe(stats, args):
                         variant["hard_route_routing_backend"],
                         scale,
                         output=output,
+                        assume_contiguous=True,
                     )
                 )
                 variant_stats.add_time("direct_routing", seconds)
@@ -227,6 +235,7 @@ def install_probe(stats, args):
                     variant["hard_route_routing_backend"],
                     scale,
                     output=output,
+                    assume_contiguous=True,
                 )
                 if routed is not out_slice:
                     out_slice.copy_(routed)
