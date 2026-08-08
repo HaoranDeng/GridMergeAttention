@@ -9,10 +9,6 @@ from .common import (
 )
 from .hard_route_backend import (
     direct_compressed_attention,
-    direct_compressed_attention_packed_key_bias,
-    direct_compressed_attention_packed_kv,
-    direct_compressed_attention_packed_kvbias,
-    direct_precomputed_logits_attention,
     direct_seed_key_attention,
     merge_kv_direct_c4,
     parse_direct_route_backend,
@@ -21,7 +17,6 @@ from .hard_route_backend import (
 from .hard_route_pytorch import (
     assign_keys_to_seeds,
     hard_route_merge_kv_pytorch,
-    hard_route_merge_weights,
 )
 from .hard_route_triton import (
     triton_biased_attention,
@@ -189,47 +184,6 @@ def _route_direct_outputs(q, key, value, bias, direct_config, routing_backend, s
             output=output,
             assume_contiguous=True,
         )
-    if direct_config.use_precomputed_logits:
-        return direct_precomputed_logits_attention(
-            q,
-            key,
-            value,
-            routing_backend,
-            scale,
-            output=output,
-            assume_contiguous=True,
-        )
-    if direct_config.use_packed_key_bias:
-        return direct_compressed_attention_packed_key_bias(
-            q,
-            key,
-            value,
-            routing_backend,
-            scale,
-            output=output,
-            assume_contiguous=True,
-            compact_packed_key_bias=direct_config.use_compact_packed_key_bias,
-        )
-    if direct_config.use_packed_kv:
-        if direct_config.use_packed_bias:
-            return direct_compressed_attention_packed_kvbias(
-                q,
-                key,
-                routing_backend,
-                scale,
-                output=output,
-                assume_contiguous=True,
-                compact_packed_bias=direct_config.use_compact_packed_bias,
-            )
-        return direct_compressed_attention_packed_kv(
-            q,
-            key,
-            bias,
-            routing_backend,
-            scale,
-            output=output,
-            assume_contiguous=True,
-        )
     return direct_compressed_attention(
         q,
         key,
@@ -284,10 +238,6 @@ def _run_direct_path(q, k, v, scale, seed_rows, direct_config, hard_route_routin
 
     if direct_config.use_seed_key:
         raise ValueError("seed-key hard-route backend requires a triton_direct_*_tokenmajor routing backend.")
-    if direct_config.use_packed_kv:
-        raise ValueError(
-            "packed-KV hard-route backend requires a triton_direct_*_tokenmajor routing backend."
-        )
 
     return _run_direct_fallback_attention(q, key, value, bias, hard_route_routing_backend, scale)
 
@@ -363,6 +313,5 @@ __all__ = [
     "assign_keys_to_seeds",
     "hard_route_attention",
     "hard_route_compressed_attention",
-    "hard_route_merge_weights",
     "uses_inline_local_seed_backend",
 ]

@@ -315,6 +315,25 @@ check before launching another speed/quality sweep.
   on designs that reduce materialized intermediate data rather than just
   packing the same K/V/bias tensors.
 
+### Precomputed-Logit Materialization
+
+- Result: much slower than both dense attention and the current hard C4
+  bestlogit path.
+- Change tested: during the hard C4 merge, write precomputed
+  `q @ merged_key - routing_bias` logits and then run the second-stage softmax
+  over those logits instead of reading materialized merged K.
+- Evidence: Slurm jobs `366738` and `366739`. On real Wan QKV, dense attention
+  measured 23.34 ms/call, current bestlogit hard C4 measured 24.46 ms/call,
+  and precomputed-logit hard C4 measured 161.69 ms/call for fp16 logits and
+  165.36 ms/call for fp32 logits. The dense-vs-hard error was also slightly
+  worse than the current bestlogit path.
+- Why not repeat directly: it reduces intermediate bytes on paper, but the
+  precompute step loses the tensor-core-friendly full compressed-attention dot
+  product and replaces it with many scalar reductions during merge.
+- Rule: do not use precomputed-logit materialization for the main hard C4 path.
+  Only revisit it if the logits can be produced with a tensor-core-friendly
+  tiling that preserves the second-stage full attention semantics.
+
 ## Current Best Direction
 
 The best accepted direction so far is still:

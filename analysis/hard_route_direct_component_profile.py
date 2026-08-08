@@ -11,8 +11,6 @@ from attention.common import blocks_to_video, video_to_blocks
 from attention.hard_route import _build_seed_rows, hard_route_compressed_attention
 from attention.hard_route_backend import (
     direct_compressed_attention,
-    direct_compressed_attention_packed_kv,
-    direct_compressed_attention_packed_kvbias,
     direct_seed_key_attention,
     merge_kv_direct_c4,
     parse_direct_route_backend,
@@ -156,31 +154,6 @@ def route_compressed_tokens(q_chunk, merged_key, merged_value, routing_bias, var
         )
         if routed is None:
             raise ValueError("seed-key profiling requires a triton_direct_*_tokenmajor routing backend.")
-        return routed
-
-    if config.use_packed_kv:
-        if config.use_packed_bias:
-            routed = direct_compressed_attention_packed_kvbias(
-                q_chunk,
-                merged_key,
-                routing_backend,
-                scale,
-                output=output,
-                assume_contiguous=True,
-                compact_packed_bias=config.use_compact_packed_bias,
-            )
-        else:
-            routed = direct_compressed_attention_packed_kv(
-                q_chunk,
-                merged_key,
-                routing_bias,
-                routing_backend,
-                scale,
-                output=output,
-                assume_contiguous=True,
-            )
-        if routed is None:
-            raise ValueError("packed-KV profiling requires a triton_direct_*_tokenmajor routing backend.")
         return routed
 
     routed = direct_compressed_attention(

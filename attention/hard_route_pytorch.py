@@ -50,14 +50,12 @@ def _masked_logits(seed_logits, assigned):
     return seed_logits.float().masked_fill(~assigned, FP32_MIN)
 
 
-def _masked_softmax(seed_logits, assigned):
+def _assigned_key_softmax(seed_logits, assigned):
     """Softmax over only the keys assigned to each seed."""
     active_logits = _masked_logits(seed_logits, assigned)
     log_denom = torch.logsumexp(active_logits, dim=-1, keepdim=True)
-    logprob = active_logits - log_denom
-    weights = logprob.exp().masked_fill(~assigned, 0.0)
-    logprob = logprob.masked_fill(~assigned, 0.0)
-    return weights, logprob, log_denom.squeeze(-1)
+    weights = (active_logits - log_denom).exp().masked_fill(~assigned, 0.0)
+    return weights, log_denom.squeeze(-1)
 
 
 def hard_route_merge_weights_and_bias(seed_logits, dtype):
@@ -70,7 +68,7 @@ def hard_route_merge_weights_and_bias(seed_logits, dtype):
     """
     assigned = assign_keys_to_seeds(seed_logits)
     logits = seed_logits.float()
-    weights, _, log_denom = _masked_softmax(logits, assigned)
+    weights, log_denom = _assigned_key_softmax(logits, assigned)
 
     merge_weights = weights.to(dtype)
     weights_fp32 = merge_weights.float()
@@ -121,43 +119,11 @@ def hard_route_merge_kv_transpose_pytorch(seed_queries, key, value, scale):
     return merged_keys, merged_values, routing_bias
 
 
-def mask_unassigned_keys(logits, assigned):
-    """Compatibility helper: keep only assigned keys in fp32 logits."""
-    return _masked_logits(logits, assigned)
-
-
-def masked_log_softmax_over_keys(logits, key_mask):
-    """Compatibility helper for old analysis scripts."""
-    _, logprob, _ = _masked_softmax(logits, key_mask.to(torch.bool))
-    return logprob
-
-
-def hard_route_merge_weights(seed_logits, dtype):
-    """Compatibility helper returning only merge weights and log-probs."""
-    assigned = assign_keys_to_seeds(seed_logits)
-    weights, logprob, _ = _masked_softmax(seed_logits, assigned)
-    return weights.to(dtype), logprob, assigned.any(dim=-1)
-
-
-def hard_route_merge_stats(seed_logits, dtype):
-    """Compatibility alias for old analysis scripts."""
-    return hard_route_merge_weights_and_bias(seed_logits, dtype)
-
-
-merge_kv_from_weights = _merge_regular
-merge_kv_from_weights_transpose = _merge_transpose
-
-
 __all__ = [
     "assign_keys_to_seeds",
-    "hard_route_merge_weights",
     "hard_route_merge_weights_and_bias",
-    "hard_route_merge_stats",
-    "mask_unassigned_keys",
     "hard_route_merge_kv_pytorch",
     "hard_route_merge_kv_transpose_pytorch",
-    "masked_log_softmax_over_keys",
-    "merge_kv_from_weights",
     "seed_key_logits",
     "seed_key_logits_transpose",
 ]

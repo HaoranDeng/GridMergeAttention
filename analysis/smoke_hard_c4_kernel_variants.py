@@ -98,10 +98,6 @@ def main():
     variants = exact_variants()
     names = [
         "hard_c4_bestlogit_tokenmajor",
-        # Highest-value same-math memory-layout candidates first. If the
-        # smoke job times out, partial JSON will still cover these.
-        "hard_c4_bestlogit_prelogit_tokenmajor",
-        "hard_c4_bestlogit_prelogitfp32_tokenmajor",
         # Recompute is lower priority but still useful as a regression check.
         "hard_c4_bestlogit_recompute_tokenmajor",
     ]

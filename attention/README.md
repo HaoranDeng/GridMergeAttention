@@ -124,4 +124,6 @@ compressed KV using the dot-product-plus-entropy score.
 
 The shared/group-shared compression paths, global compression paths, no-bias
 paths, and local/windowed second-stage routing paths were removed from the code.
-They are tracked as rejected directions in `../docs/negative_results.md`.
+Packed K/V/bias intermediates and precomputed-logit materialization were also
+removed after they proved unsafe or slower on the real Wan hard C4 shape. These
+rejected directions are tracked in `../docs/negative_results.md`.
