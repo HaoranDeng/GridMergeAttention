@@ -11,6 +11,7 @@ from attention.common import blocks_to_video, video_to_blocks
 from attention.hard_route import _build_seed_rows
 from attention.hard_route_backend import (
     direct_compressed_attention,
+    direct_compressed_attention_packed_kv,
     merge_kv_direct_c4,
     parse_direct_route_backend,
     uses_inline_local_seed_backend,
@@ -215,7 +216,46 @@ def install_probe(stats, args):
 
             if record:
                 routed, seconds = timed(
-                    lambda: direct_compressed_attention(
+                    lambda: (
+                        direct_compressed_attention_packed_kv(
+                            q_chunk,
+                            merged_key,
+                            routing_bias,
+                            variant["hard_route_routing_backend"],
+                            scale,
+                            output=output,
+                            assume_contiguous=True,
+                        )
+                        if direct_merge_config.use_packed_kv
+                        else direct_compressed_attention(
+                            q_chunk,
+                            merged_key,
+                            merged_value,
+                            routing_bias,
+                            variant["hard_route_routing_backend"],
+                            scale,
+                            output=output,
+                            assume_contiguous=True,
+                        )
+                    )
+                )
+                variant_stats.add_time("direct_routing", seconds)
+                if routed is not out_slice:
+                    _, seconds = timed(lambda: out_slice.copy_(routed))
+                    variant_stats.add_time("output_copy", seconds)
+            else:
+                if direct_merge_config.use_packed_kv:
+                    routed = direct_compressed_attention_packed_kv(
+                        q_chunk,
+                        merged_key,
+                        routing_bias,
+                        variant["hard_route_routing_backend"],
+                        scale,
+                        output=output,
+                        assume_contiguous=True,
+                    )
+                else:
+                    routed = direct_compressed_attention(
                         q_chunk,
                         merged_key,
                         merged_value,
@@ -225,22 +265,6 @@ def install_probe(stats, args):
                         output=output,
                         assume_contiguous=True,
                     )
-                )
-                variant_stats.add_time("direct_routing", seconds)
-                if routed is not out_slice:
-                    _, seconds = timed(lambda: out_slice.copy_(routed))
-                    variant_stats.add_time("output_copy", seconds)
-            else:
-                routed = direct_compressed_attention(
-                    q_chunk,
-                    merged_key,
-                    merged_value,
-                    routing_bias,
-                    variant["hard_route_routing_backend"],
-                    scale,
-                    output=output,
-                    assume_contiguous=True,
-                )
                 if routed is not out_slice:
                     out_slice.copy_(routed)
 
