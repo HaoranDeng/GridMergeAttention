@@ -1,10 +1,6 @@
 import torch
 
 
-def _inactive_logits_like(logits):
-    return torch.finfo(logits.dtype).min
-
-
 def seed_key_logits(seed_queries, key, scale):
     """Score every seed query against every key in the same block.
 
@@ -41,36 +37,41 @@ def assign_keys_to_seeds(seed_logits):
     return: [..., C, L] boolean mask. Exactly one seed owns each key, except
     empty seed clusters are kept alive by assigning key 0 to that seed too.
     """
-    num_seeds = seed_logits.size(-2)
-    num_keys = seed_logits.size(-1)
+    best_seed = seed_logits.argmax(dim=-2, keepdim=True)
+    assigned = torch.zeros_like(seed_logits, dtype=torch.bool)
+    assigned.scatter_(dim=-2, index=best_seed, value=True)
 
-    best_seed = seed_logits.argmax(dim=-2)
-    assigned = torch.zeros(
-        *seed_logits.shape[:-2],
-        num_seeds,
-        num_keys,
-        dtype=torch.bool,
-        device=seed_logits.device,
-    )
-    assigned.scatter_(dim=-2, index=best_seed.unsqueeze(-2), value=True)
-
-    cluster_has_key = assigned.any(dim=-1)
-    key0 = torch.arange(num_keys, device=seed_logits.device) == 0
-    key0 = key0.view(*((1,) * cluster_has_key.ndim), num_keys)
-    return assigned | ((~cluster_has_key).unsqueeze(-1) & key0)
+    # Keep empty clusters numerically well-defined by forcing them to own key 0.
+    fallback_to_key0 = torch.zeros_like(assigned)
+    fallback_to_key0[..., 0] = True
+    empty_cluster = ~assigned.any(dim=-1, keepdim=True)
+    return assigned | (empty_cluster & fallback_to_key0)
 
 
 def mask_unassigned_keys(logits, assigned):
     """Keep only the keys owned by each seed cluster."""
     logits = logits.float()
-    return logits.masked_fill(~assigned, _inactive_logits_like(logits))
+    return logits.masked_fill(~assigned, torch.finfo(logits.dtype).min)
+
+
+def _assigned_key_softmax(seed_logits, assigned):
+    """Softmax over each seed's assigned keys only.
+
+    This returns fp32 weights/log-probs. Callers cast weights back to K/V dtype
+    before the KV merge, matching the original reference implementation.
+    """
+    active_logits = mask_unassigned_keys(seed_logits, assigned)
+    log_denom = torch.logsumexp(active_logits, dim=-1, keepdim=True)
+    logprob = active_logits - log_denom
+    weights = logprob.exp().masked_fill(~assigned, 0.0)
+    logprob = logprob.masked_fill(~assigned, 0.0)
+    return weights, logprob, log_denom.squeeze(-1)
 
 
 def masked_log_softmax_over_keys(logits, key_mask):
     """Log-softmax over keys, ignoring keys that are not assigned to a seed."""
-    masked_logits = mask_unassigned_keys(logits, key_mask)
-    logprob = masked_logits - torch.logsumexp(masked_logits, dim=-1, keepdim=True)
-    return logprob.masked_fill(~key_mask, 0.0)
+    _, logprob, _ = _assigned_key_softmax(logits, key_mask)
+    return logprob
 
 
 def hard_route_merge_weights(seed_logits, dtype):
@@ -82,9 +83,8 @@ def hard_route_merge_weights(seed_logits, dtype):
       cluster_has_keys: [..., C]
     """
     assigned = assign_keys_to_seeds(seed_logits)
-    merge_logprob = masked_log_softmax_over_keys(seed_logits, assigned)
-    merge_weights = merge_logprob.exp().masked_fill(~assigned, 0.0).to(dtype)
-    return merge_weights, merge_logprob, assigned.any(dim=-1)
+    weights, logprob, _ = _assigned_key_softmax(seed_logits, assigned)
+    return weights.to(dtype), logprob, assigned.any(dim=-1)
 
 
 def hard_route_merge_weights_and_bias(seed_logits, dtype):
@@ -97,16 +97,13 @@ def hard_route_merge_weights_and_bias(seed_logits, dtype):
     """
     assigned = assign_keys_to_seeds(seed_logits)
     logits = seed_logits.float()
-    active_logits = mask_unassigned_keys(logits, assigned)
+    weights, _, log_denom = _assigned_key_softmax(logits, assigned)
 
-    log_denom = torch.logsumexp(active_logits, dim=-1, keepdim=True)
-    weights = torch.exp(active_logits - log_denom).masked_fill(~assigned, 0.0).to(dtype)
-
-    weights_for_bias = weights.float()
+    merge_weights = weights.to(dtype)
+    weights_for_bias = merge_weights.float()
     expected_logit = (weights_for_bias * logits).sum(dim=-1)
-    weight_sum = weights_for_bias.sum(dim=-1)
-    routing_bias = expected_logit - log_denom.squeeze(-1) * weight_sum
-    return weights, routing_bias, assigned.any(dim=-1)
+    routing_bias = expected_logit - log_denom * weights_for_bias.sum(dim=-1)
+    return merge_weights, routing_bias, assigned.any(dim=-1)
 
 
 def hard_route_merge_stats(seed_logits, dtype):

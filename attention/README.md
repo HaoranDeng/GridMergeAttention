@@ -85,6 +85,16 @@ In `hard_route.py`, `hard_route_backend: sdpa` is the readable PyTorch
 reference merge. Triton backends implement the same two-stage algorithm but
 replace the merge and/or compressed-attention stages with kernels.
 
+For understanding or changing the algorithm, start from
+`hard_route_pytorch.py`. Its core path is intentionally written as:
+
+```text
+seed/key logits -> hard assignment -> masked softmax -> merge K/V -> routing bias
+```
+
+The Triton code should be treated as an optimization of that reference path,
+not as the source of the algorithm.
+
 The current recommended C4 config keeps the original index-matched query as one
 seed:
 
