@@ -233,7 +233,7 @@ def _merge_seed_clusters(seed_queries, k, v, backend, scale):
     )
 
 
-def _direct_route_merge(q, seed_rows, k, v, config, scale):
+def _direct_route_merge(q, seed_rows, k, v, config, scale, assume_contiguous=False):
     return triton_hard_route_merge_c4_direct_route(
         q,
         seed_rows,
@@ -251,7 +251,7 @@ def _direct_route_merge(q, seed_rows, k, v, config, scale):
         inline_local_seed=config.inline_local_seed,
         key_outer_block=config.key_outer_block,
         use_assigned_logit=config.use_assigned_logit,
-        assume_contiguous=config.inline_local_seed,
+        assume_contiguous=assume_contiguous and config.inline_local_seed,
     )
 
 
@@ -267,7 +267,16 @@ def hard_route_compressed_attention(query, key, value, bias, backend, scale):
     )
 
 
-def hard_route_direct_compressed_attention(q, key, value, bias, backend, scale, output=None):
+def hard_route_direct_compressed_attention(
+    q,
+    key,
+    value,
+    bias,
+    backend,
+    scale,
+    output=None,
+    assume_contiguous=False,
+):
     backend = (backend or "").lower()
     key_token_major = backend.endswith("_tokenmajor")
     if not key_token_major:
@@ -290,7 +299,7 @@ def hard_route_direct_compressed_attention(q, key, value, bias, backend, scale, 
         num_stages=1,
         use_exp2=True,
         out=output,
-        assume_contiguous=True,
+        assume_contiguous=assume_contiguous,
     )
 
 
@@ -333,7 +342,15 @@ def _run_reference_path(q, k, v, scale, seed_rows, hard_route_backend, hard_rout
 def _run_direct_path(q, k, v, scale, seed_rows, direct_config, hard_route_routing_backend, output):
     """Optimized C4 path: Triton merge writes routing-ready token-major KV."""
     q = q.contiguous()
-    key, value, bias, _ = _direct_route_merge(q, seed_rows, k, v, direct_config, scale)
+    key, value, bias, _ = _direct_route_merge(
+        q,
+        seed_rows,
+        k,
+        v,
+        direct_config,
+        scale,
+        assume_contiguous=True,
+    )
     direct_out = hard_route_direct_compressed_attention(
         q,
         key,
@@ -342,6 +359,7 @@ def _run_direct_path(q, k, v, scale, seed_rows, direct_config, hard_route_routin
         hard_route_routing_backend,
         scale,
         output=output if output is not None and output.is_contiguous() else None,
+        assume_contiguous=True,
     )
     if direct_out is not None:
         return direct_out
