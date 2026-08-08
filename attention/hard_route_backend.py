@@ -31,6 +31,7 @@ _DIRECT_ROUTE_FLAG_SUFFIXES = (
     ("_stripe", "use_stripe_assign"),
     ("_bestlogit", "use_assigned_logit"),
     ("_maskassign", "use_mask_assign"),
+    ("_packkvbias", ("use_packed_kv", "use_packed_bias")),
     ("_packkv", "use_packed_kv"),
     ("_bf16kv", ("use_bf16_merged_key", "use_bf16_merged_value")),
     ("_bf16k", "use_bf16_merged_key"),
@@ -52,6 +53,7 @@ class DirectRouteMergeConfig:
     use_bf16_merged_value: bool = False
     use_bf16_routing_bias: bool = False
     use_mask_assign: bool = False
+    use_packed_bias: bool = False
     use_packed_kv: bool = False
     use_stripe_assign: bool = False
     use_seed_key: bool = False
@@ -110,6 +112,7 @@ def parse_direct_route_backend(backend):
         "use_bf16_merged_value": False,
         "use_bf16_routing_bias": False,
         "use_mask_assign": False,
+        "use_packed_bias": False,
         "use_packed_kv": False,
         "use_stripe_assign": False,
         "use_seed_key": False,
@@ -175,6 +178,7 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         use_assigned_logit=config.use_assigned_logit,
         use_mask_assign=config.use_mask_assign,
         pack_kv=config.use_packed_kv,
+        pack_bias=config.use_packed_bias,
         use_stripe_assign=config.use_stripe_assign,
         use_seed_key=config.use_seed_key,
         assume_contiguous=assume_contiguous and config.inline_local_seed,
@@ -267,6 +271,36 @@ def direct_compressed_attention_packed_kv(
         use_exp2=True,
         out=output,
         assume_contiguous=assume_contiguous,
+        bias_in_packed_kv=False,
+    )
+
+
+def direct_compressed_attention_packed_kvbias(
+    q,
+    packed_kvbias,
+    backend,
+    scale,
+    output=None,
+    assume_contiguous=False,
+):
+    config = _parse_tokenmajor_attention_backend(backend)
+    if config is None:
+        return None
+
+    block_m, block_n, num_warps, num_stages = config
+    return triton_direct_route_biased_attention_packed_kv(
+        q,
+        packed_kvbias,
+        packed_kvbias,
+        block_m=block_m,
+        block_n=block_n,
+        scale=scale,
+        num_warps=num_warps,
+        num_stages=num_stages,
+        use_exp2=True,
+        out=output,
+        assume_contiguous=assume_contiguous,
+        bias_in_packed_kv=True,
     )
 
 
@@ -274,6 +308,7 @@ __all__ = [
     "DirectRouteMergeConfig",
     "direct_compressed_attention",
     "direct_compressed_attention_packed_kv",
+    "direct_compressed_attention_packed_kvbias",
     "direct_seed_key_attention",
     "merge_kv_direct_c4",
     "parse_direct_route_attention_backend",

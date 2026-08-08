@@ -89,6 +89,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         "key_dtype": "bf16" if merge_config.use_bf16_merged_key else "fp16",
         "value_dtype": "bf16" if merge_config.use_bf16_merged_value else "fp16",
         "bias_dtype": "bf16" if merge_config.use_bf16_routing_bias else "fp16",
+        "packs_routing_bias": merge_config.use_packed_bias,
         "writes_merged_key": not merge_config.use_seed_key,
     }
 
@@ -250,16 +251,33 @@ def exact_variants():
         "hard_c4_bestlogit_packkv_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "packkv"), seed_mode="local_with_ith"
         ),
+        "hard_c4_bestlogit_packkvbias_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "packkvbias"), seed_mode="local_with_ith"
+        ),
         "hard_c4_bestlogit_packkv_tokenmajor_n32_s1": exact_backend(
             direct_merge_backend("bestlogit", "packkv"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=32),
+        ),
+        "hard_c4_bestlogit_packkvbias_tokenmajor_n32_s1": exact_backend(
+            direct_merge_backend("bestlogit", "packkvbias"),
             seed_mode="local_with_ith",
             routing_backend=direct_routing_backend(block_n=32),
         ),
         "hard_c4_bestlogit_maskassign_packkv_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "maskassign", "packkv"), seed_mode="local_with_ith"
         ),
+        "hard_c4_bestlogit_maskassign_packkvbias_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "maskassign", "packkvbias"),
+            seed_mode="local_with_ith",
+        ),
         "hard_c4_bestlogit_maskassign_packkv_tokenmajor_n32_s1": exact_backend(
             direct_merge_backend("bestlogit", "maskassign", "packkv"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=32),
+        ),
+        "hard_c4_bestlogit_maskassign_packkvbias_tokenmajor_n32_s1": exact_backend(
+            direct_merge_backend("bestlogit", "maskassign", "packkvbias"),
             seed_mode="local_with_ith",
             routing_backend=direct_routing_backend(block_n=32),
         ),

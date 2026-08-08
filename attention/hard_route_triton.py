@@ -358,6 +358,8 @@ if triton is not None:
         USE_ASSIGNED_LOGIT: tl.constexpr,
         USE_MASK_ASSIGN: tl.constexpr,
         PACK_KV: tl.constexpr,
+        PACK_BIAS: tl.constexpr,
+        PACKED_WIDTH: tl.constexpr,
         SEED_KEY: tl.constexpr,
     ):
         group_id = tl.program_id(0)
@@ -560,7 +562,7 @@ if triton is not None:
             if PACK_KV:
                 merged_key = tl.dot(weights.to(key_block.dtype), key_block)
                 route_offset = (
-                    (route_token * ROUTE_GROUPS + route_group[:, None]) * (2 * D_HEAD)
+                    (route_token * ROUTE_GROUPS + route_group[:, None]) * PACKED_WIDTH
                     + dim_offsets[None, :]
                 )
                 tl.store(
@@ -573,6 +575,12 @@ if triton is not None:
                     merged_value,
                     mask=valid_query[:, None] & valid_dim[None, :],
                 )
+                if PACK_BIAS:
+                    bias_offset = (
+                        (route_token * ROUTE_GROUPS + route_group) * PACKED_WIDTH
+                        + 2 * D_HEAD
+                    )
+                    tl.store(merged_key_ptr + bias_offset, routing_bias, mask=valid_query)
             else:
                 route_offset = (
                     (route_token * ROUTE_GROUPS + route_group[:, None]) * D_HEAD
@@ -590,8 +598,9 @@ if triton is not None:
                     merged_value,
                     mask=valid_query[:, None] & valid_dim[None, :],
                 )
-            bias_offset = route_token * ROUTE_GROUPS + route_group
-            tl.store(routing_bias_ptr + bias_offset, routing_bias, mask=valid_query)
+            if not PACK_BIAS:
+                bias_offset = route_token * ROUTE_GROUPS + route_group
+                tl.store(routing_bias_ptr + bias_offset, routing_bias, mask=valid_query)
 
     @triton.jit
     def _hard_route_merge_c4_stripe_direct_route_kernel(
@@ -1047,6 +1056,8 @@ if triton is not None:
         CAST_Q_TO_FP16: tl.constexpr,
         GROUPS: tl.constexpr,
         PACKED_KV: tl.constexpr,
+        PACKED_BIAS: tl.constexpr,
+        PACKED_WIDTH: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_block_id = tl.program_id(1)
@@ -1084,7 +1095,7 @@ if triton is not None:
         for key_start in range(0, K_LEN, BLOCK_N):
             keys = key_start + key_offsets
             if PACKED_KV:
-                packed_base = (keys[:, None] * GROUPS + group_id) * (2 * D_HEAD)
+                packed_base = (keys[:, None] * GROUPS + group_id) * PACKED_WIDTH
                 k = tl.load(
                     key_ptr + packed_base + dim_offsets[None, :],
                     mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
@@ -1096,7 +1107,18 @@ if triton is not None:
                     mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
                     other=0.0,
                 )
-            bias = tl.load(bias_ptr + keys * GROUPS + group_id, mask=keys < K_LEN, other=float("inf"))
+            if PACKED_BIAS:
+                bias = tl.load(
+                    key_ptr + (keys * GROUPS + group_id) * PACKED_WIDTH + 2 * D_HEAD,
+                    mask=keys < K_LEN,
+                    other=float("inf"),
+                )
+            else:
+                bias = tl.load(
+                    bias_ptr + keys * GROUPS + group_id,
+                    mask=keys < K_LEN,
+                    other=float("inf"),
+                )
 
             logits = tl.dot(q_dot, tl.trans(k)) * SCORE_SCALE - bias[None, :]
             logits = tl.where(
@@ -1519,6 +1541,8 @@ def triton_direct_route_biased_attention(
         CAST_Q_TO_FP16=bool(key.dtype == torch.float16 and query.dtype != torch.float16),
         GROUPS=groups,
         PACKED_KV=False,
+        PACKED_BIAS=False,
+        PACKED_WIDTH=2 * dim,
         **meta,
     )
     return out
@@ -1536,6 +1560,7 @@ def triton_direct_route_biased_attention_packed_kv(
     use_exp2=True,
     out=None,
     assume_contiguous=False,
+    bias_in_packed_kv=False,
 ):
     """Direct-route attention for packed [K|V] token-major intermediates.
 
@@ -1557,13 +1582,16 @@ def triton_direct_route_biased_attention_packed_kv(
 
     batch, query_outer, query_rows, query_columns, heads, dim = query.shape
     key_len, groups, packed_dim = packed_kv.shape
+    expected_packed_dim = 2 * dim + int(bool(bias_in_packed_kv))
     expected_groups = batch * heads * query_outer * query_columns
     if groups != expected_groups:
         raise ValueError(
             "direct-route attention expects route-layout packed KV with "
             f"{expected_groups} groups, got {groups}."
         )
-    if packed_dim != 2 * dim or bias.shape != (key_len, groups):
+    if packed_dim != expected_packed_dim:
+        raise ValueError("query/packed_kv shapes are inconsistent for direct-route attention.")
+    if not bias_in_packed_kv and bias.shape != (key_len, groups):
         raise ValueError("query/packed_kv/bias shapes are inconsistent for direct-route attention.")
 
     block_d = triton.next_power_of_2(dim)
@@ -1602,6 +1630,8 @@ def triton_direct_route_biased_attention_packed_kv(
         CAST_Q_TO_FP16=bool(packed_kv.dtype == torch.float16 and query.dtype != torch.float16),
         GROUPS=groups,
         PACKED_KV=True,
+        PACKED_BIAS=bool(bias_in_packed_kv),
+        PACKED_WIDTH=expected_packed_dim,
         **meta,
     )
     return out
@@ -1885,6 +1915,7 @@ def triton_hard_route_merge_c4_direct_route(
     use_assigned_logit=False,
     use_mask_assign=False,
     pack_kv=False,
+    pack_bias=False,
     use_stripe_assign=False,
     use_seed_key=False,
     assume_contiguous=False,
@@ -1955,6 +1986,10 @@ def triton_hard_route_merge_c4_direct_route(
         merged_value_dtype = merged_dtype
     if pack_kv and merged_key_dtype != merged_value_dtype:
         raise ValueError("pack_kv requires merged_key_dtype and merged_value_dtype to match.")
+    if pack_bias and not pack_kv:
+        raise ValueError("pack_bias requires pack_kv=True.")
+    if pack_bias and bias_dtype != merged_key_dtype:
+        raise ValueError("pack_bias requires bias_dtype to match the packed KV dtype.")
     if use_seed_key:
         merged_key = query
         merged_value = _cached_empty(
@@ -1964,9 +1999,14 @@ def triton_hard_route_merge_c4_direct_route(
             merged_value_dtype,
         )
     elif pack_kv:
+        packed_dim = 2 * dim + int(bool(pack_bias))
         merged_key = _cached_empty(
-            "hard_route_c4_direct_route_packed_kv_token_major",
-            (route_tokens, route_groups, 2 * dim),
+            (
+                "hard_route_c4_direct_route_packed_kvbias_token_major"
+                if pack_bias
+                else "hard_route_c4_direct_route_packed_kv_token_major"
+            ),
+            (route_tokens, route_groups, packed_dim),
             key.device,
             merged_key_dtype,
         )
@@ -1986,7 +2026,7 @@ def triton_hard_route_merge_c4_direct_route(
         )
     routing_bias = _cached_empty(
         "hard_route_c4_direct_route_bias_token_major",
-        (route_tokens, route_groups),
+        (0,) if pack_bias else (route_tokens, route_groups),
         key.device,
         bias_dtype,
     )
@@ -2003,6 +2043,8 @@ def triton_hard_route_merge_c4_direct_route(
         raise ValueError("use_mask_assign is only implemented for the non-keyouter direct C4 kernel.")
     if pack_kv and use_key_outer_kernel:
         raise ValueError("pack_kv is only implemented for the non-keyouter direct C4 kernel.")
+    if pack_bias and use_stripe_assign:
+        raise ValueError("pack_bias is not implemented for stripe C4 merge.")
     if use_stripe_assign and use_key_outer_kernel:
         raise ValueError("stripe C4 merge is only implemented for the non-keyouter direct C4 kernel.")
     if use_stripe_assign and (use_assigned_logit or use_mask_assign):
@@ -2138,6 +2180,8 @@ def triton_hard_route_merge_c4_direct_route(
         USE_ASSIGNED_LOGIT=bool(use_assigned_logit),
         USE_MASK_ASSIGN=bool(use_mask_assign),
         PACK_KV=bool(pack_kv),
+        PACK_BIAS=bool(pack_bias),
+        PACKED_WIDTH=2 * dim + int(bool(pack_bias)),
         SEED_KEY=bool(use_seed_key),
         **launch_kwargs,
     )
