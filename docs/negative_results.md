@@ -457,6 +457,21 @@ check before launching another speed/quality sweep.
 - Rule: keep the entropy-preserving bestlogit/simplemerge merge for the main
   path. Use `maxbias` or `stripe` only as explicit low-quality ablations.
 
+### Simplemerge `j16` and `j64` Merge Tiles
+
+- Result: no speed improvement over the default `j32` simplemerge tile.
+- Change tested: keep corrected bestlogit/simplemerge semantics and only change
+  the merge tile from `j32` to `j16` or `j64`.
+- Evidence: Slurm job `366961` smoke-tested random hard C4 tensors on MI300X.
+  Default `hard_c4_bestlogit_simplemerge_tokenmajor` measured about
+  0.1438 ms/call. `j16` measured about 0.1453 ms/call and introduced a tiny
+  numerical difference versus the default; `j64` matched output but measured
+  about 0.1464 ms/call. Older real-QKV tests had already shown non-simplemerge
+  `j16`/`j64` slower than `j32`.
+- Why not repeat directly: the simplified kernel does not change the earlier
+  tile-size conclusion; `j32` is still the best balance for 52 query columns.
+- Rule: keep `j32_w2` for the main simplemerge path.
+
 ## Current Best Direction
 
 The best accepted direction so far is still:
