@@ -13,12 +13,12 @@ from .hard_route_triton import triton_hard_route_merge, triton_hard_route_merge_
 def _torch_merge(seed_queries, k, v, scale):
     seed_logits = torch.einsum("bafilchd,bfklhd->bhafilck", seed_queries, k).float()
     seed_logits = seed_logits * float(scale)
-    merge_weights, merge_logprob, cluster_has_keys = hard_route_merge_weights(seed_logits, k.dtype)
+    merge_weights, merge_logprob, _ = hard_route_merge_weights(seed_logits, k.dtype)
 
     merged_keys = torch.einsum("bhafilck,bfklhd->bafilchd", merge_weights, k)
     merged_values = torch.einsum("bhafilck,bfklhe->bafilche", merge_weights, v)
     routing_bias = (merge_weights * merge_logprob).sum(dim=-1)
-    return merged_keys, merged_values, routing_bias, cluster_has_keys
+    return merged_keys, merged_values, routing_bias
 
 
 def _triton_merge(seed_queries, k, v, scale, use_c4_kernel=False, block_j_target=8):
@@ -47,9 +47,8 @@ def _triton_merge(seed_queries, k, v, scale, use_c4_kernel=False, block_j_target
             scale=scale,
         )
     routing_bias = rearrange(routing_bias, "b h a f l i c -> b h a f i l c")
-    if cluster_has_keys is not None:
-        cluster_has_keys = rearrange(cluster_has_keys, "b h a f l i c -> b h a f i l c")
-    return merged_keys, merged_values, routing_bias, cluster_has_keys
+    del cluster_has_keys
+    return merged_keys, merged_values, routing_bias
 
 
 def _merge(seed_queries, k, v, backend, scale):
@@ -105,7 +104,7 @@ def hard_route_attention_transpose(
     )
     seed_queries = gather_seed_queries_transpose(q, seed_cols)
 
-    merged_keys, merged_values, routing_bias, cluster_has_keys = _merge(
+    merged_keys, merged_values, routing_bias = _merge(
         seed_queries,
         k,
         v,
@@ -117,7 +116,6 @@ def hard_route_attention_transpose(
     key = rearrange(merged_keys, "b a f i l c h d -> (b h a i) (f l c) d")
     value = rearrange(merged_values, "b a f i l c h d -> (b h a i) (f l c) d")
     bias = rearrange(routing_bias, "b h a f i l c -> (b h a i) (f l c)")
-    del cluster_has_keys
     out = hard_route_compressed_attention(
         query,
         key,

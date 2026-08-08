@@ -43,6 +43,12 @@ class DirectRouteMergeConfig:
     use_bf16_merged_kv: bool = False
 
 
+def _remove_suffix(text, suffix):
+    if text.endswith(suffix):
+        return text[: -len(suffix)], True
+    return text, False
+
+
 def uses_inline_local_seed_backend(backend):
     backend = str(backend or "").lower()
     return backend.endswith("_inline_local_seed")
@@ -51,13 +57,8 @@ def uses_inline_local_seed_backend(backend):
 def _parse_direct_route_backend(backend):
     """Parse compact backend suffixes used by the direct Triton C4 fast path."""
     backend = (backend or "").lower()
-    inline_local_seed = backend.endswith("_inline_local_seed")
-    if inline_local_seed:
-        backend = backend[: -len("_inline_local_seed")]
-
-    token_major_output = backend.endswith("_tokenmajor")
-    if token_major_output:
-        backend = backend[: -len("_tokenmajor")]
+    backend, inline_local_seed = _remove_suffix(backend, "_inline_local_seed")
+    backend, token_major_output = _remove_suffix(backend, "_tokenmajor")
 
     key_outer_block = 1
     use_assigned_logit = False
@@ -67,16 +68,16 @@ def _parse_direct_route_backend(backend):
         changed = False
         for suffix, block in _DIRECT_ROUTE_KEY_OUTER_BLOCKS.items():
             token = f"_{suffix}"
-            if backend.endswith(token):
-                backend = backend[: -len(token)]
+            backend, matched = _remove_suffix(backend, token)
+            if matched:
                 key_outer_block = block
                 changed = True
-        if backend.endswith("_bestlogit"):
-            backend = backend[: -len("_bestlogit")]
+        backend, matched = _remove_suffix(backend, "_bestlogit")
+        if matched:
             use_assigned_logit = True
             changed = True
-        if backend.endswith("_bf16kv"):
-            backend = backend[: -len("_bf16kv")]
+        backend, matched = _remove_suffix(backend, "_bf16kv")
+        if matched:
             use_bf16_merged_kv = True
             changed = True
 
@@ -160,64 +161,58 @@ def _build_seed_rows(
 
 
 def assign_keys_to_seeds(seed_logits):
-    # seed_logits: [B, H, A, F, K, J, C, L].
+    """Return a boolean [B, H, A, F, K, J, C, L] key-to-seed assignment mask."""
     num_seeds = seed_logits.size(-2)
     num_keys = seed_logits.size(-1)
 
-    assignments = seed_logits.argmax(dim=-2)
-    assignment_mask = torch.nn.functional.one_hot(
-        assignments,
+    best_seed = seed_logits.argmax(dim=-2)
+    assigned = torch.nn.functional.one_hot(
+        best_seed,
         num_classes=num_seeds,
     ).movedim(-1, -2).bool()
 
-    has_seed = assignment_mask.any(dim=-1)
+    has_key = assigned.any(dim=-1)
     key_idx = torch.arange(num_keys, device=seed_logits.device)
-    key_idx = key_idx.view(*((1,) * has_seed.ndim), num_keys)
-    # Empty clusters are rare; give each empty seed the first key without a
-    # Python loop. In this fallback only, key 0 may be shared by multiple seeds.
-    force_mask = (~has_seed).unsqueeze(-1) & (key_idx == 0)
+    key_idx = key_idx.view(*((1,) * has_key.ndim), num_keys)
 
-    return assignment_mask | force_mask
+    # Empty clusters are rare. Keep every seed alive by routing key 0 to any
+    # seed that received no key; key 0 can be shared only in this fallback.
+    force_first_key = (~has_key).unsqueeze(-1) & (key_idx == 0)
+    return assigned | force_first_key
+
+
+def _log_softmax_over_assigned_keys(logits, assigned):
+    masked_logits = logits.masked_fill(~assigned, torch.finfo(logits.dtype).min)
+    logprob = torch.log_softmax(masked_logits, dim=-1)
+    return logprob.masked_fill(~assigned, 0)
 
 
 def hard_route_merge_weights(seed_logits, dtype):
     """Assign each key to one seed, then softmax within each routed cluster."""
-    assignment_mask = assign_keys_to_seeds(seed_logits)
-    cluster_has_keys = assignment_mask.any(dim=-1)
-
-    masked_logits = seed_logits.masked_fill(~assignment_mask, torch.finfo(seed_logits.dtype).min)
-    merge_logprob = torch.log_softmax(masked_logits, dim=-1)
-    merge_weights = merge_logprob.exp().masked_fill(~assignment_mask, 0).to(dtype)
-    merge_logprob = merge_logprob.masked_fill(~assignment_mask, 0)
+    assigned = assign_keys_to_seeds(seed_logits)
+    merge_logprob = _log_softmax_over_assigned_keys(seed_logits, assigned)
+    merge_weights = merge_logprob.exp().masked_fill(~assigned, 0).to(dtype)
+    cluster_has_keys = assigned.any(dim=-1)
     return merge_weights, merge_logprob, cluster_has_keys
 
 
-def _seed_key_logits(seed_queries, k, scale):
+def _torch_hard_route_merge(seed_queries, k, v, scale):
     # seed_queries: [B, A, F, K, J, C, H, D]
-    # k:            [B, F, K, L, H, D]
-    # logits:       [B, H, A, F, K, J, C, L]
-    return torch.einsum("bafkjchd,bfklhd->bhafkjcl", seed_queries, k).float() * float(scale)
+    # k/v:          [B, F, K, L, H, D]
+    # seed_logits:  [B, H, A, F, K, J, C, L]
+    seed_logits = torch.einsum("bafkjchd,bfklhd->bhafkjcl", seed_queries, k)
+    seed_logits = seed_logits.float() * float(scale)
+    merge_weights, merge_logprob, cluster_has_keys = hard_route_merge_weights(seed_logits, k.dtype)
 
-
-def _merge_key_value(merge_weights, k, v):
+    # merged_*:    [B, A, F, J, K, C, H, D]
+    # routing_bias: [B, H, A, F, K, J, C]
     merged_keys = torch.einsum("bhafkjcl,bfklhd->bafjkchd", merge_weights, k)
     merged_values = torch.einsum("bhafkjcl,bfklhe->bafjkche", merge_weights, v)
-    return merged_keys, merged_values
-
-
-def _merge_entropy_bias(merge_weights, merge_logprob):
-    return (merge_weights * merge_logprob).sum(dim=-1)
-
-
-def _torch_hard_route_merge(seed_queries, k, v, scale):
-    seed_logits = _seed_key_logits(seed_queries, k, scale)
-    merge_weights, merge_logprob, cluster_has_keys = hard_route_merge_weights(seed_logits, k.dtype)
-    merged_keys, merged_values = _merge_key_value(merge_weights, k, v)
-    routing_bias = _merge_entropy_bias(merge_weights, merge_logprob)
+    routing_bias = (merge_weights * merge_logprob).sum(dim=-1)
     return merged_keys, merged_values, routing_bias, cluster_has_keys
 
 
-def _merge_seed_clusters(seed_queries, k, v, backend, scale):
+def _merge_kv_with_backend(seed_queries, k, v, backend, scale):
     backend = (backend or "sdpa").lower()
     if backend == "sdpa":
         return _torch_hard_route_merge(seed_queries, k, v, scale)
@@ -318,7 +313,7 @@ def _run_reference_path(q, k, v, scale, seed_rows, hard_route_backend, hard_rout
     """Readable PyTorch/reference path: gather seeds, merge KV, then attend."""
     query = rearrange(q, "b a i j h d -> (b h a j) i d")
     seed_queries = gather_seed_queries(q, seed_rows)
-    merged_keys, merged_values, routing_bias, _ = _merge_seed_clusters(
+    merged_keys, merged_values, routing_bias, _ = _merge_kv_with_backend(
         seed_queries,
         k,
         v,

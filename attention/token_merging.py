@@ -60,6 +60,13 @@ def _local_attention_impl(layout, num_merge_tokens):
     return gridmerge_one_transpose
 
 
+def _can_write_directly_to_output(layout, hard_route_routing_backend):
+    return (
+        layout == LAYOUT_HARD_ROUTE
+        and str(hard_route_routing_backend).startswith("triton_direct_")
+    )
+
+
 def _run_multi_token_chunk(
     attention_impl,
     layout,
@@ -75,7 +82,7 @@ def _run_multi_token_chunk(
     hard_route_routing_backend,
     out_slice,
 ):
-    args = [
+    common_args = (
         q_chunk,
         k_blocks,
         v_blocks,
@@ -84,14 +91,16 @@ def _run_multi_token_chunk(
         seed_mode,
         seed,
         query_outer_offset,
-    ]
-    if layout in HARD_ROUTE_LAYOUTS:
-        args.extend([hard_route_backend, hard_route_routing_backend])
+    )
 
-    if layout == LAYOUT_HARD_ROUTE and str(hard_route_routing_backend).startswith("triton_direct_"):
-        chunk = attention_impl(*args, output=out_slice)
+    if layout in HARD_ROUTE_LAYOUTS:
+        hard_route_args = (*common_args, hard_route_backend, hard_route_routing_backend)
+        if _can_write_directly_to_output(layout, hard_route_routing_backend):
+            chunk = attention_impl(*hard_route_args, output=out_slice)
+        else:
+            chunk = attention_impl(*hard_route_args)
     else:
-        chunk = attention_impl(*args)
+        chunk = attention_impl(*common_args)
 
     if chunk is not out_slice:
         out_slice.copy_(chunk)
