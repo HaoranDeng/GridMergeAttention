@@ -116,6 +116,20 @@ check before launching another speed/quality sweep.
 - Rule: do not set `query_outer_chunk=21` for the current hard C4 fast path
   unless the routing/merge kernel indexing is changed and revalidated.
 
+### Quantized Intermediate K/V
+
+- Result: rejected for the current optimization direction.
+- Change tested: store the compressed hard C4 intermediate K/V in fp8 before
+  the full compressed attention stage.
+- Evidence: `analysis/hard_c4_fp8_smoke_20260808/metrics.json` showed a speed
+  improvement in a smoke run, but it is a quantization method and it increased
+  dense-vs-hard output error.
+- Why not repeat: the current goal is same-precision memory-bound optimization,
+  not quantization. Reducing memory traffic should be attempted without lowering
+  K/V precision.
+- Rule: do not use fp8/quantized intermediate K/V for the main hard C4 path
+  unless quantization is explicitly reopened as a separate experiment.
+
 ## Current Best Direction
 
 The best accepted direction so far is still:
