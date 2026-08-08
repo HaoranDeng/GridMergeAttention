@@ -251,6 +251,7 @@ def _direct_route_merge(q, seed_rows, k, v, config, scale):
         inline_local_seed=config.inline_local_seed,
         key_outer_block=config.key_outer_block,
         use_assigned_logit=config.use_assigned_logit,
+        assume_contiguous=config.inline_local_seed,
     )
 
 
@@ -289,6 +290,7 @@ def hard_route_direct_compressed_attention(q, key, value, bias, backend, scale, 
         num_stages=1,
         use_exp2=True,
         out=output,
+        assume_contiguous=True,
     )
 
 

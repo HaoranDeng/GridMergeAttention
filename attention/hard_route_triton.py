@@ -988,6 +988,7 @@ def triton_direct_route_biased_attention(
     num_stages=1,
     use_exp2=True,
     out=None,
+    assume_contiguous=False,
 ):
     """Fused routing attention that reads/writes hard-route block layout.
 
@@ -1002,10 +1003,11 @@ def triton_direct_route_biased_attention(
     if query.dtype not in (torch.float16, torch.bfloat16):
         raise RuntimeError("hard_route_routing_backend='triton_direct_*' requires fp16 or bf16 tensors.")
 
-    query = query.contiguous()
-    key = key.contiguous()
-    value = value.contiguous()
-    bias = bias.contiguous()
+    if not assume_contiguous:
+        query = query.contiguous()
+        key = key.contiguous()
+        value = value.contiguous()
+        bias = bias.contiguous()
 
     batch, query_outer, query_rows, query_columns, heads, dim = query.shape
     key_len, groups, key_dim = key.shape
@@ -1241,6 +1243,7 @@ def triton_hard_route_merge_c4_direct_route(
     inline_local_seed=False,
     key_outer_block=1,
     use_assigned_logit=False,
+    assume_contiguous=False,
 ):
     """Exact non-shared C=4 merge that writes routing-ready K/V/bias.
 
@@ -1260,15 +1263,18 @@ def triton_hard_route_merge_c4_direct_route(
     if query.dtype not in (torch.float16, torch.bfloat16):
         raise RuntimeError("hard_route_backend='triton_c4_direct_route' requires fp16 or bf16 tensors.")
 
-    query = query.contiguous()
+    if not assume_contiguous:
+        query = query.contiguous()
     if seed_rows is None:
         if not inline_local_seed:
             raise ValueError("seed_rows is required unless inline_local_seed=True.")
         seed_rows = _cached_empty("hard_route_inline_seed_placeholder", (1,), query.device, torch.int64)
     else:
-        seed_rows = seed_rows.contiguous()
-    key = key.contiguous()
-    value = value.contiguous()
+        if not assume_contiguous:
+            seed_rows = seed_rows.contiguous()
+    if not assume_contiguous:
+        key = key.contiguous()
+        value = value.contiguous()
 
     batch, query_outer, query_rows, query_columns, heads, dim = query.shape
     key_outer = key.size(1)
