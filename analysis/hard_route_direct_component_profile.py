@@ -15,6 +15,7 @@ from attention.hard_route_backend import (
     direct_recompute_value_attention,
     direct_seed_key_attention,
     direct_top_key_attention,
+    direct_weight_value_attention,
     merge_kv_direct_c4,
     parse_direct_route_backend,
     uses_inline_local_seed_backend,
@@ -251,6 +252,22 @@ def route_compressed_tokens(
         )
         if routed is None:
             raise ValueError("recompute-value profiling requires a triton_direct_*_tokenmajor routing backend.")
+        return routed
+
+    if config.use_merge_weight_value:
+        routed = direct_weight_value_attention(
+            q_chunk,
+            merged_key,
+            source_value,
+            key_scale,
+            routing_bias,
+            routing_backend,
+            scale,
+            output=output,
+            assume_contiguous=True,
+        )
+        if routed is None:
+            raise ValueError("merge-weight value profiling requires a triton_direct_*_tokenmajor routing backend.")
         return routed
 
     routed = direct_compressed_attention(

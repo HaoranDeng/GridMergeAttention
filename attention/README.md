@@ -190,6 +190,11 @@ model still runs full compressed attention over every compressed token.
   merged-V intermediate, and recompute exact merged V inside the full
   compressed-attention routing kernel. This preserves the hard C4 math and is
   a memory-traffic experiment.
+- `mergeweights`: materialize exact compressed K and routing bias, store the
+  per-key merge weights instead of materialized merged V, and reconstruct V
+  from original V inside the full compressed-attention routing kernel. This is
+  a memory-traffic experiment; it keeps grid-local compression and full
+  compressed attention.
 
 These variants are benchmark candidates only. Keep the `bestlogit` path above
 as the default until a real-QKV benchmark shows a clear speed gain with

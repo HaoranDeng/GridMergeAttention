@@ -13,6 +13,7 @@ from .hard_route_backend import (
     direct_recompute_value_attention,
     direct_seed_key_attention,
     direct_top_key_attention,
+    direct_weight_value_attention,
     merge_kv_direct_c4,
     parse_direct_route_backend,
 )
@@ -35,6 +36,7 @@ _DIRECT_ROUTE_ONLY_FLAGS = (
     ("use_indirect_top2_value", "indirect top-2 value"),
     ("use_indirect_top_value", "indirect top-value"),
     ("use_indirect_seed_value", "indirect seed-value"),
+    ("use_merge_weight_value", "merge-weight value"),
 )
 
 
@@ -252,6 +254,19 @@ def _route_direct_outputs(
             key,
             source_key,
             source_value,
+            bias,
+            routing_backend,
+            scale,
+            output=output,
+            assume_contiguous=True,
+        )
+
+    if direct_config.use_merge_weight_value:
+        return direct_weight_value_attention(
+            q,
+            key,
+            source_value,
+            key_scale,
             bias,
             routing_backend,
             scale,

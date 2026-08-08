@@ -11,6 +11,7 @@ from .hard_route_triton import (
     triton_direct_route_recompute_value_attention,
     triton_direct_route_seed_key_attention,
     triton_direct_route_top_key_attention,
+    triton_direct_route_weight_value_attention,
     triton_hard_route_merge_c4_direct_route,
 )
 
@@ -61,6 +62,7 @@ _DIRECT_ROUTE_FLAG_SUFFIXES = (
     ("_stripe", "use_stripe_assign"),
     ("_recomputevalue", "use_recompute_value"),
     ("_recompute", "use_recompute_merge"),
+    ("_mergeweights", "use_merge_weight_value"),
     ("_maxbias", "use_max_bias"),
     ("_bestlogit", "use_assigned_logit"),
     ("_maskassign", "use_mask_assign"),
@@ -113,6 +115,7 @@ class DirectRouteMergeConfig:
     use_mask_assign: bool = False
     use_recompute_merge: bool = False
     use_recompute_value: bool = False
+    use_merge_weight_value: bool = False
     use_stripe_assign: bool = False
     use_max_bias: bool = False
     use_seed_key: bool = False
@@ -300,6 +303,7 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         use_mask_assign=config.use_mask_assign,
         use_recompute_merge=config.use_recompute_merge,
         use_recompute_value=config.use_recompute_value,
+        use_merge_weight_value=config.use_merge_weight_value,
         use_stripe_assign=config.use_stripe_assign,
         use_max_bias=config.use_max_bias,
         use_seed_key=config.use_seed_key,
@@ -486,6 +490,41 @@ def direct_recompute_value_attention(
     )
 
 
+def direct_weight_value_attention(
+    q,
+    key,
+    source_value,
+    value_weight,
+    bias,
+    backend,
+    scale,
+    output=None,
+    assume_contiguous=False,
+):
+    config = _parse_tokenmajor_attention_backend(backend)
+    if config is None:
+        return None
+
+    block_m, block_n, num_warps, num_stages, group_block = config
+    if group_block != 1:
+        return None
+    return triton_direct_route_weight_value_attention(
+        q,
+        key,
+        source_value,
+        value_weight,
+        bias,
+        block_m=block_m,
+        block_n=block_n,
+        scale=scale,
+        num_warps=num_warps,
+        num_stages=num_stages,
+        use_exp2=True,
+        out=output,
+        assume_contiguous=assume_contiguous,
+    )
+
+
 def direct_compressed_attention(
     q,
     key,
@@ -539,6 +578,7 @@ __all__ = [
     "direct_recompute_value_attention",
     "direct_seed_key_attention",
     "direct_top_key_attention",
+    "direct_weight_value_attention",
     "merge_kv_direct_c4",
     "parse_direct_route_attention_backend",
     "parse_direct_route_backend",
