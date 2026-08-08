@@ -21,6 +21,10 @@ from .hard_route_triton import (
 _SEED_ROWS_CACHE = {}
 _DIRECT_ROUTE_C4_BASE = "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
 _DIRECT_ROUTE_ATTENTION_CONFIGS = {
+    "triton_direct_m16_n16_w1_s1_exp2": (16, 16, 1),
+    "triton_direct_m16_n32_w1_s1_exp2": (16, 32, 1),
+    "triton_direct_m16_n64_w1_s1_exp2": (16, 64, 1),
+    "triton_direct_m16_n64_w2_s1_exp2": (16, 64, 2),
     "triton_direct_m32_n16_w1_s1_exp2": (32, 16, 1),
     "triton_direct_m32_n32_w1_s1_exp2": (32, 32, 1),
     "triton_direct_m32_n64_w1_s1_exp2": (32, 64, 1),
