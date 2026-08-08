@@ -169,9 +169,10 @@ def parse_direct_route_backend(backend):
     match = _DIRECT_ROUTE_C4_RE.fullmatch(backend)
     supported = token_major_output and match is not None
     block_j_target = int(match.group("j")) if match is not None else 32
-    if block_j_target not in {16, 26, 32, 52, 64}:
+    # Triton tl.arange requires power-of-two block sizes in this kernel.
+    if block_j_target not in {16, 32, 64}:
         supported = False
-    if options["block_l_target"] not in {0, 52, 64, 128}:
+    if options["block_l_target"] not in {0, 64, 128}:
         supported = False
 
     return DirectRouteMergeConfig(

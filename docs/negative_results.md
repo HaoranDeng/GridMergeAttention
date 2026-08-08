@@ -281,6 +281,22 @@ check before launching another speed/quality sweep.
 - Rule: benchmark the current fastdot hard C4 path on `mi3001x` for final
   decisions. Use MI210 only with a separate `ieee`/non-fastdot backend.
 
+### Non-Power-of-Two Triton Merge Tiles
+
+- Result: compile-time failure.
+- Change tested: exact key/query tile sizes such as `j26`, `j52`, and `l52`
+  for the current hard C4 direct-route merge kernel.
+- Evidence: Slurm job `366687` wrote
+  `analysis/hard_c4_kernel_variant_smoke_20260808/smoke.json`; every `j26`,
+  `j52`, or `l52` variant failed with Triton reporting that `tl.arange` ranges
+  must be powers of two.
+- Why not repeat directly: the current kernel uses `tl.arange(0, BLOCK_J)` and
+  `tl.arange(0, BLOCK_L)`, so non-power-of-two block sizes are not legal for
+  this implementation.
+- Rule: do not submit `j26`, `j52`, or `l52` direct-route backend strings.
+  Exact-52 tiling would require a different kernel design that uses
+  power-of-two blocks plus masks.
+
 ## Current Best Direction
 
 The best accepted direction so far is still:

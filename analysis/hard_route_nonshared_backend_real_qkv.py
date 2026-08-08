@@ -273,20 +273,6 @@ def exact_variants():
         "hard_c4_bestlogit_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit"), seed_mode="local_with_ith"
         ),
-        "hard_c4_bestlogit_j52_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", block_j=52), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_l52_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", block_l=52), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_j26_l52_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", block_j=26, block_l=52),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_j52_l52_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", block_j=52, block_l=52),
-            seed_mode="local_with_ith",
-        ),
         "hard_c4_bestlogit_recompute_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "recompute"), seed_mode="local_with_ith"
         ),
@@ -326,38 +312,6 @@ def exact_variants():
         ),
         "hard_c4_bestlogit_packkbias_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "packkbias"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_packkbiascompact_l52_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "packkbiascompact", block_l=52),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_packkbias_j26_l52_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "packkbias", block_j=26, block_l=52),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_packkbiascompact_j26_l52_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "packkbiascompact", block_j=26, block_l=52),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_packkbiascompact_j52_l52_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "packkbiascompact", block_j=52, block_l=52),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_packkvbiascompact_l52_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "packkvbiascompact", block_l=52),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_packkvbiascompact_j26_l52_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "packkvbiascompact", block_j=26, block_l=52),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_packkvbiascompact_j52_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "packkvbiascompact", block_j=52),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_packkvbiascompact_j52_l52_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "packkvbiascompact", block_j=52, block_l=52),
-            seed_mode="local_with_ith",
         ),
         "hard_c4_bestlogit_recompute_packkvbias_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "recompute", "packkvbias"),

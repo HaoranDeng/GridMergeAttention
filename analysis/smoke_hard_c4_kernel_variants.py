@@ -98,18 +98,11 @@ def main():
     variants = exact_variants()
     names = [
         "hard_c4_bestlogit_tokenmajor",
-        # Highest-value same-math memory-layout/tile candidates first. If the
+        # Highest-value same-math memory-layout candidates first. If the
         # smoke job times out, partial JSON will still cover these.
-        "hard_c4_bestlogit_l52_tokenmajor",
-        "hard_c4_bestlogit_j26_l52_tokenmajor",
         "hard_c4_bestlogit_packkbias_tokenmajor",
-        "hard_c4_bestlogit_packkbias_j26_l52_tokenmajor",
         "hard_c4_bestlogit_packkbiascompact_tokenmajor",
-        "hard_c4_bestlogit_packkbiascompact_l52_tokenmajor",
-        "hard_c4_bestlogit_packkbiascompact_j26_l52_tokenmajor",
         "hard_c4_bestlogit_packkvbiascompact_tokenmajor",
-        "hard_c4_bestlogit_packkvbiascompact_l52_tokenmajor",
-        "hard_c4_bestlogit_packkvbiascompact_j26_l52_tokenmajor",
         # Older packing/recompute experiments are lower priority but still
         # useful to keep as regression checks.
         "hard_c4_bestlogit_packkv_tokenmajor",
@@ -118,13 +111,6 @@ def main():
         "hard_c4_bestlogit_recompute_packkv_tokenmajor",
         "hard_c4_bestlogit_recompute_packkvbias_tokenmajor",
         "hard_c4_bestlogit_recompute_packkvbiascompact_tokenmajor",
-        # Keep non-power-of-two tile experiments last: an illegal memory access
-        # here should not prevent safer variant results from being saved.
-        "hard_c4_bestlogit_j52_tokenmajor",
-        "hard_c4_bestlogit_packkvbiascompact_j52_tokenmajor",
-        "hard_c4_bestlogit_j52_l52_tokenmajor",
-        "hard_c4_bestlogit_packkvbiascompact_j52_l52_tokenmajor",
-        "hard_c4_bestlogit_packkbiascompact_j52_l52_tokenmajor",
     ]
     selected_names = parse_variant_names(args.variants)
     if selected_names:
