@@ -147,6 +147,9 @@ model still runs full compressed attention over every compressed token.
   is approximated by the two largest value contributors in the seed cluster.
   This keeps a closer V approximation than `topvalue` while avoiding the full
   merged-V tensor.
+- `top2seedvalue`: like `top2value`, but keeps the original softmax mass for
+  the top two values and assigns the remaining value mass to the representative
+  seed value. This is a more conservative V approximation candidate.
 - `topkv`: compressed K and V are both the top-logit original token in the seed
   cluster.
 - `seedvalue`: compressed V is the forced representative seed value.
@@ -159,6 +162,9 @@ model still runs full compressed attention over every compressed token.
 - `indirecttop2value`: for `top2value`, store two original value-column
   indices and one mixture weight instead of materializing compressed V. The
   second stage is still full compressed attention over every compressed token.
+- `indirecttop2seedvalue`: for `top2seedvalue`, store two original value-column
+  indices and two original softmax weights; the routing kernel gathers those
+  two values plus the seed value and still runs full compressed attention.
 - `indirectseedvalue`: for seed-value variants, avoid materializing compressed
   V; full compressed attention gathers original V by seed id. This can be used
   with materialized K or indirect top-key K.

@@ -28,6 +28,7 @@ _DIRECT_ROUTE_ONLY_FLAGS = (
     ("use_seed_key", "seed-key"),
     ("use_indirect_top_key", "indirect top-key"),
     ("use_indirect_top_kv", "indirect top-KV"),
+    ("use_indirect_top2_seed_value", "indirect top-2 plus seed value"),
     ("use_indirect_top2_value", "indirect top-2 value"),
     ("use_indirect_top_value", "indirect top-value"),
     ("use_indirect_seed_value", "indirect seed-value"),
@@ -199,6 +200,7 @@ def _route_direct_outputs(
     uses_indirect_key = direct_config.use_indirect_top_key or direct_config.use_indirect_top_kv
     uses_original_value = (
         direct_config.use_indirect_top_kv
+        or direct_config.use_indirect_top2_seed_value
         or direct_config.use_indirect_top2_value
         or direct_config.use_indirect_top_value
         or direct_config.use_indirect_seed_value
@@ -232,7 +234,8 @@ def _route_direct_outputs(
         )
 
     if (
-        direct_config.use_indirect_top2_value
+        direct_config.use_indirect_top2_seed_value
+        or direct_config.use_indirect_top2_value
         or direct_config.use_indirect_top_value
         or direct_config.use_indirect_seed_value
     ):
@@ -241,12 +244,15 @@ def _route_direct_outputs(
             key,
             source_value,
             value,
-            key_scale if direct_config.use_indirect_top2_value else None,
+            key_scale
+            if (direct_config.use_indirect_top2_value or direct_config.use_indirect_top2_seed_value)
+            else None,
             bias,
             routing_backend,
             scale,
             indirect_seed_value=direct_config.use_indirect_seed_value,
             indirect_top2_value=direct_config.use_indirect_top2_value,
+            indirect_top2_seed_value=direct_config.use_indirect_top2_seed_value,
             output=output,
             assume_contiguous=True,
         )
