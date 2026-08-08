@@ -220,6 +220,12 @@ def exact_variants():
         "hard_c4_bestlogit_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit"), seed_mode="local_with_ith"
         ),
+        "hard_c4_maskassign_tokenmajor": exact_backend(
+            direct_merge_backend("maskassign"), seed_mode="local_with_ith"
+        ),
+        "hard_c4_bestlogit_maskassign_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "maskassign"), seed_mode="local_with_ith"
+        ),
         "hard_c4_bf16kv_tokenmajor": exact_backend(
             direct_merge_backend("bf16kv"), seed_mode="local_with_ith"
         ),

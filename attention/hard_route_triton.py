@@ -356,6 +356,7 @@ if triton is not None:
         LOGIT_INPUT_PRECISION: tl.constexpr,
         INLINE_LOCAL_SEED: tl.constexpr,
         USE_ASSIGNED_LOGIT: tl.constexpr,
+        USE_MASK_ASSIGN: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -448,24 +449,36 @@ if triton is not None:
         logits2 = tl.where(valid_logits, logits2, -float("inf"))
         logits3 = tl.where(valid_logits, logits3, -float("inf"))
 
-        best_logits = logits0
-        assignments = tl.zeros((BLOCK_J, BLOCK_L), tl.int32)
-        update = logits1 > best_logits
-        best_logits = tl.where(update, logits1, best_logits)
-        assignments = tl.where(update, 1, assignments)
-        update = logits2 > best_logits
-        best_logits = tl.where(update, logits2, best_logits)
-        assignments = tl.where(update, 2, assignments)
-        update = logits3 > best_logits
-        assignments = tl.where(update, 3, assignments)
-        if FORCE_SEED_KEYS:
-            assignments = tl.where(
-                valid_logits & (key_offsets[None, :] < 4),
-                key_offsets[None, :],
-                assignments,
-            )
+        if USE_MASK_ASSIGN:
+            max01 = tl.maximum(logits0, logits1)
+            max012 = tl.maximum(max01, logits2)
+            best_logits = tl.maximum(max012, logits3)
+            assigned0 = (logits1 <= logits0) & (logits2 <= logits0) & (logits3 <= logits0)
+            assigned1 = (logits1 > logits0) & (logits2 <= logits1) & (logits3 <= logits1)
+            assigned2 = (logits2 > max01) & (logits3 <= logits2)
+            assigned3 = logits3 > max012
+        else:
+            best_logits = logits0
+            assignments = tl.zeros((BLOCK_J, BLOCK_L), tl.int32)
+            update = logits1 > best_logits
+            best_logits = tl.where(update, logits1, best_logits)
+            assignments = tl.where(update, 1, assignments)
+            update = logits2 > best_logits
+            best_logits = tl.where(update, logits2, best_logits)
+            assignments = tl.where(update, 2, assignments)
+            update = logits3 > best_logits
+            assignments = tl.where(update, 3, assignments)
+            if FORCE_SEED_KEYS:
+                assignments = tl.where(
+                    valid_logits & (key_offsets[None, :] < 4),
+                    key_offsets[None, :],
+                    assignments,
+                )
         if USE_ASSIGNED_LOGIT:
-            assigned_logits = tl.where(update, logits3, best_logits)
+            if USE_MASK_ASSIGN:
+                assigned_logits = best_logits
+            else:
+                assigned_logits = tl.where(update, logits3, best_logits)
             if FORCE_SEED_KEYS:
                 assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 0), logits0, assigned_logits)
                 assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 1), logits1, assigned_logits)
@@ -492,9 +505,23 @@ if triton is not None:
                 if seed_idx == 3:
                     logits = logits3
 
-            assigned_to_seed = assignments == seed_idx
+            if USE_MASK_ASSIGN:
+                assigned_to_seed = assigned0
+                if seed_idx == 1:
+                    assigned_to_seed = assigned1
+                if seed_idx == 2:
+                    assigned_to_seed = assigned2
+                if seed_idx == 3:
+                    assigned_to_seed = assigned3
+            else:
+                assigned_to_seed = assignments == seed_idx
             if FORCE_SEED_KEYS:
-                active = valid_logits & assigned_to_seed
+                if USE_MASK_ASSIGN:
+                    forced_key = key_offsets[None, :] == seed_idx
+                    not_forced_key = key_offsets[None, :] >= 4
+                    active = valid_logits & (forced_key | (not_forced_key & assigned_to_seed))
+                else:
+                    active = valid_logits & assigned_to_seed
             else:
                 has_seed = tl.sum(tl.where(assigned_to_seed & valid_logits, 1, 0), axis=1) > 0
                 forced_first_key = (~has_seed[:, None]) & (key_offsets[None, :] == 0)
@@ -1246,6 +1273,7 @@ def triton_hard_route_merge_c4_direct_route(
     key_outer_block=1,
     use_key_outer_kernel=False,
     use_assigned_logit=False,
+    use_mask_assign=False,
     assume_contiguous=False,
 ):
     """Exact non-shared C=4 merge that writes routing-ready K/V/bias.
@@ -1335,6 +1363,10 @@ def triton_hard_route_merge_c4_direct_route(
     use_key_outer_kernel = bool(use_key_outer_kernel or key_outer_block != 1)
     if use_assigned_logit and not force_seed_keys:
         raise ValueError("use_assigned_logit currently requires force_seed_keys=True.")
+    if use_mask_assign and not force_seed_keys:
+        raise ValueError("use_mask_assign currently requires force_seed_keys=True.")
+    if use_mask_assign and use_key_outer_kernel:
+        raise ValueError("use_mask_assign is only implemented for the non-keyouter direct C4 kernel.")
     if use_key_outer_kernel and (
         (not inline_local_seed)
         or block_j != 32
@@ -1419,6 +1451,7 @@ def triton_hard_route_merge_c4_direct_route(
         LOGIT_INPUT_PRECISION=logit_input_precision,
         INLINE_LOCAL_SEED=bool(inline_local_seed),
         USE_ASSIGNED_LOGIT=bool(use_assigned_logit),
+        USE_MASK_ASSIGN=bool(use_mask_assign),
         **launch_kwargs,
     )
     return merged_key, merged_value, routing_bias, None
