@@ -6,6 +6,12 @@ This repository keeps only the inference path needed to run Wan2.1 with the
 token-merging attention module. Large model weights and checkpoints are not
 stored here.
 
+Negative results and guardrails for future attention experiments are tracked in
+`docs/negative_results.md`. In particular, the main quality-preserving path
+should keep grid-local compression and full compressed attention after token
+merging; no-bias routing, global/share-all compression, and sparse/window
+second-stage routing are rejected for that path.
+
 ## Layout
 
 - `attention/`: dense SDPA attention plus token-merging attention.
