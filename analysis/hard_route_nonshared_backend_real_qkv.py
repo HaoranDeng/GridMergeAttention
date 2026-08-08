@@ -129,10 +129,8 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         # Three fp16 top-value weights; the remaining mass goes to the seed V.
         key_scale_bytes = 6
     elif merge_config.use_merge_weight_value:
-        # One fp16 merge weight per original key column.
-        key_scale_bytes = int(width) * _dtype_bytes(
-            torch.float32 if merge_config.use_fp32_key_scale else torch.float16
-        )
+        # One source-dtype merge weight per original key column.
+        key_scale_bytes = int(width) * _dtype_bytes(torch.float32 if merge_config.use_fp32_key_scale else q.dtype)
     elif merge_config.use_indirect_top3_value or merge_config.use_indirect_top2_seed_value:
         # Two fp16 weights. Top-3 uses the remaining mass for the third value;
         # top2+seed uses the remaining mass for the seed value.
@@ -141,6 +139,11 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         key_scale_bytes = _dtype_bytes(torch.float32 if merge_config.use_fp32_key_scale else torch.float16)
     else:
         key_scale_bytes = 0
+    merge_weight_dtype_name = (
+        "fp32"
+        if merge_config.use_fp32_key_scale
+        else ("bf16" if q.dtype == torch.bfloat16 else "fp16")
+    )
 
     chunk_count = 0
     total_bytes = 0
@@ -178,18 +181,18 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
             "original_value_by_merge_weights"
             if merge_config.use_merge_weight_value
             else (
-            "original_value_by_int16_index"
-            if (
-                merge_config.use_indirect_top_kv
-                or merge_config.use_indirect_top3_seed_value
-                or merge_config.use_indirect_top3_value
-                or merge_config.use_indirect_top2_seed_value
-                or merge_config.use_indirect_top2_value
-                or merge_config.use_indirect_top_value
-                or merge_config.use_indirect_seed_value
-                or merge_config.use_recompute_value
-            )
-            else ("bf16" if merge_config.use_bf16_merged_value else "fp16")
+                "original_value_by_int16_index"
+                if (
+                    merge_config.use_indirect_top_kv
+                    or merge_config.use_indirect_top3_seed_value
+                    or merge_config.use_indirect_top3_value
+                    or merge_config.use_indirect_top2_seed_value
+                    or merge_config.use_indirect_top2_value
+                    or merge_config.use_indirect_top_value
+                    or merge_config.use_indirect_seed_value
+                    or merge_config.use_recompute_value
+                )
+                else ("bf16" if merge_config.use_bf16_merged_value else "fp16")
             )
         ),
         "writes_separate_value_index": writes_separate_value_index,
@@ -211,7 +214,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
                 if merge_config.use_indirect_top2_seed_value
                 else "fp16_top2_value_mix"
                 if merge_config.use_indirect_top2_value
-                else "fp16_merge_weights"
+                else f"{merge_weight_dtype_name}_merge_weights"
                 if merge_config.use_merge_weight_value
                 else ("fp16" if writes_key_scale else None)
             )

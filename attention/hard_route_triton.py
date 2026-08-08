@@ -4267,7 +4267,7 @@ def triton_hard_route_merge_c4_direct_route(
         or use_merge_weight_value
     ):
         if key_scale_dtype is None:
-            key_scale_dtype = bias_dtype
+            key_scale_dtype = value.dtype if use_merge_weight_value else bias_dtype
         scale_name = "hard_route_c4_direct_route_key_scale_token_major"
         scale_shape = (route_tokens, route_groups)
         if writes_top2_value_mix:
