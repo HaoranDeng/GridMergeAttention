@@ -339,6 +339,22 @@ check before launching another speed/quality sweep.
 - Rule: do not set `query_outer_chunk=21` for the current hard C4 fast path
   unless the routing/merge kernel indexing is changed and revalidated.
 
+### Simplemerge Query-Outer Chunk Variants
+
+- Result: no improvement over the default `query_outer_chunk=10`.
+- Change tested: rerun the chunk sweep after switching the default merge kernel
+  to corrected `bestlogit_simplemerge`.
+- Evidence: Slurm job `366962` failed during warmup for
+  `hard_c4_bestlogit_simplemerge_tokenmajor_chunk11` with a HIP illegal memory
+  access, so larger two-chunk settings such as chunk11/chunk14 are unsafe in
+  the current routing path. Slurm job `366963` measured chunk10 at about
+  23.14 ms/call and chunk7 at about 23.58 ms/call on real Wan QKV, both with
+  rel-L2 about 0.09417 versus dense.
+- Why not repeat directly: larger chunks hit the same stability problem as the
+  old whole-outer run, while smaller safe chunks increase scheduling overhead
+  without reducing total K/V/bias traffic.
+- Rule: keep `query_outer_chunk=10` for the simplemerge hard C4 default.
+
 ### Quantized Intermediate K/V
 
 - Result: rejected for the current optimization direction.
