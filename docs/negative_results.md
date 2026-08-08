@@ -87,6 +87,22 @@ check before launching another speed/quality sweep.
 - Rule: keep `m32_n16` as the token-major routing tile unless a different
   routing kernel structure is introduced.
 
+### Token-Major Routing Larger-M Tiles
+
+- Result: slower than the current token-major `m32_n16` routing tile.
+- Change tested: keep the same C4 merge output and full compressed attention,
+  but use token-major direct routing tiles `m64_n16`, `m64_n32`, `m128_n16`,
+  `m128_n32`, and `m128_n32_w4`.
+- Evidence: Slurm job `366571` measured about 22.90 ms/call for the current
+  `m32_n16` full hard C4 path, versus about 24.01 ms/call for `m64_n32`,
+  25.22 ms/call for `m64_n16`, 25.51 ms/call for `m128_n32_w4`, 48.62
+  ms/call for `m128_n16`, and 50.95 ms/call for `m128_n32`; output error was
+  unchanged.
+- Why not repeat directly: Q_ROWS is only 30, so larger `BLOCK_M` shapes waste
+  lanes/registers in this direct-route layout.
+- Rule: keep token-major direct routing at `m32_n16_w1_s1_exp2` unless the
+  routing layout changes substantially.
+
 ### Current Fast Path with `j64` Merge Tile
 
 - Result: slower than the current `j32` merge tile.
