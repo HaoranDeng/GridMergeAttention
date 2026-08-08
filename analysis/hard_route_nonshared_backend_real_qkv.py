@@ -341,7 +341,7 @@ def install_probe(stats, args):
         variants = {name: all_variants[name] for name in selected}
     else:
         variants = all_variants
-    if "hard_c4_baseline" not in variants:
+    if not args.skip_baseline and "hard_c4_baseline" not in variants:
         variants = {"hard_c4_baseline": all_variants["hard_c4_baseline"], **variants}
 
     state = {"calls_total": 0, "calls_current_prompt": 0, "warmed": False}
@@ -396,11 +396,13 @@ def install_probe(stats, args):
             dense, seconds = timed(lambda: run_dense(q, k, v, self))
             stats["dense"].add_time(seconds)
 
-            baseline, seconds = timed(
-                lambda: run_variant(q, k, v, grid_size, variants["hard_c4_baseline"])
-            )
-            stats["hard_c4_baseline"].add_time(seconds)
-            stats["hard_c4_baseline"].add_error(baseline, dense)
+            baseline = None
+            if not args.skip_baseline:
+                baseline, seconds = timed(
+                    lambda: run_variant(q, k, v, grid_size, variants["hard_c4_baseline"])
+                )
+                stats["hard_c4_baseline"].add_time(seconds)
+                stats["hard_c4_baseline"].add_error(baseline, dense)
 
             for name, kwargs in variants.items():
                 if name == "hard_c4_baseline":
@@ -458,6 +460,11 @@ def parse_args():
     parser.add_argument("--use_ema", action="store_true")
     parser.add_argument("--max_calls", type=int, default=30)
     parser.add_argument("--query_outer_chunk", type=int, default=7)
+    parser.add_argument(
+        "--skip_baseline",
+        action="store_true",
+        help="Skip the slow legacy hard C4 baseline when only direct-route variants are needed.",
+    )
     parser.add_argument(
         "--variants",
         default="",
