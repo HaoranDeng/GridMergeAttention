@@ -778,11 +778,6 @@ if triton is not None:
                 mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
                 other=0.0,
             )
-            v = tl.load(
-                value_base + keys[:, None] * D_HEAD + dim_offsets[None, :],
-                mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
-                other=0.0,
-            )
             bias = tl.load(bias_base + keys, mask=keys < K_LEN, other=float("inf"))
 
             logits = tl.dot(q, tl.trans(k)) * SCORE_SCALE - bias[None, :]
@@ -801,6 +796,11 @@ if triton is not None:
                 p = tl.exp(logits - next_max[:, None])
                 alpha = tl.exp(max_score - next_max)
 
+            v = tl.load(
+                value_base + keys[:, None] * D_HEAD + dim_offsets[None, :],
+                mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
+                other=0.0,
+            )
             acc = acc * alpha[:, None] + tl.dot(p.to(v.dtype), v)
             normalizer = normalizer * alpha + tl.sum(p, axis=1)
             max_score = next_max
@@ -873,11 +873,6 @@ if triton is not None:
                 mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
                 other=0.0,
             )
-            v = tl.load(
-                value_ptr + (keys[:, None] * GROUPS + group_id) * D_HEAD + dim_offsets[None, :],
-                mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
-                other=0.0,
-            )
             bias = tl.load(bias_ptr + keys * GROUPS + group_id, mask=keys < K_LEN, other=float("inf"))
 
             logits = tl.dot(q_dot, tl.trans(k)) * SCORE_SCALE - bias[None, :]
@@ -896,6 +891,11 @@ if triton is not None:
                 p = tl.exp(logits - next_max[:, None])
                 alpha = tl.exp(max_score - next_max)
 
+            v = tl.load(
+                value_ptr + (keys[:, None] * GROUPS + group_id) * D_HEAD + dim_offsets[None, :],
+                mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
+                other=0.0,
+            )
             acc = acc * alpha[:, None] + tl.dot(p.to(v.dtype), v)
             normalizer = normalizer * alpha + tl.sum(p, axis=1)
             max_score = next_max
