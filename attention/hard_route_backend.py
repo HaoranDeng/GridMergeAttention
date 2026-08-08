@@ -8,6 +8,7 @@ from .hard_route_triton import (
     triton_direct_route_biased_attention,
     triton_direct_route_biased_attention_g2,
     triton_direct_route_seed_key_attention,
+    triton_direct_route_top_key_attention,
     triton_hard_route_merge_c4_direct_route,
 )
 
@@ -37,6 +38,7 @@ _DIRECT_ROUTE_FLAG_SUFFIXES = (
     ("_seedkeyproj", ("use_seed_key", "use_seed_key_scale")),
     ("_seedkeymatch", ("use_seed_key", "use_seed_key_bias_match")),
     ("_seedkey", "use_seed_key"),
+    ("_indirectkey", "use_indirect_top_key"),
     ("_topkv", "use_top_kv"),
     ("_topkeyaffine", ("use_top_key", "use_top_key_affine_scale")),
     ("_topkeyscale", ("use_top_key", "use_top_key_scale")),
@@ -78,6 +80,7 @@ class DirectRouteMergeConfig:
     use_fp32_key_scale: bool = False
     use_seed_key_lsq_scale: bool = False
     use_seed_key_affine_scale: bool = False
+    use_indirect_top_key: bool = False
     use_top_kv: bool = False
     use_top_key: bool = False
     use_top_key_scale: bool = False
@@ -152,6 +155,7 @@ def parse_direct_route_backend(backend):
         "use_fp32_key_scale": False,
         "use_seed_key_lsq_scale": False,
         "use_seed_key_affine_scale": False,
+        "use_indirect_top_key": False,
         "use_top_kv": False,
         "use_top_key": False,
         "use_top_key_scale": False,
@@ -247,6 +251,7 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         use_seed_key_scale=config.use_seed_key_scale,
         use_seed_key_lsq_scale=config.use_seed_key_lsq_scale,
         use_seed_key_affine_scale=config.use_seed_key_affine_scale,
+        use_indirect_top_key=config.use_indirect_top_key,
         use_top_kv=config.use_top_kv,
         use_top_key=config.use_top_key,
         use_top_key_scale=config.use_top_key_scale,
@@ -277,6 +282,43 @@ def direct_seed_key_attention(
         return None
     return triton_direct_route_seed_key_attention(
         q,
+        value,
+        bias,
+        key_scale=key_scale,
+        block_m=block_m,
+        block_n=block_n,
+        scale=scale,
+        num_warps=num_warps,
+        num_stages=num_stages,
+        use_exp2=True,
+        out=output,
+        assume_contiguous=assume_contiguous,
+    )
+
+
+def direct_top_key_attention(
+    q,
+    source_key,
+    key_index,
+    value,
+    bias,
+    key_scale,
+    backend,
+    scale,
+    output=None,
+    assume_contiguous=False,
+):
+    config = _parse_tokenmajor_attention_backend(backend)
+    if config is None:
+        return None
+
+    block_m, block_n, num_warps, num_stages, group_block = config
+    if group_block != 1:
+        return None
+    return triton_direct_route_top_key_attention(
+        q,
+        source_key,
+        key_index,
         value,
         bias,
         key_scale=key_scale,
@@ -341,6 +383,7 @@ __all__ = [
     "DirectRouteMergeConfig",
     "direct_compressed_attention",
     "direct_seed_key_attention",
+    "direct_top_key_attention",
     "merge_kv_direct_c4",
     "parse_direct_route_attention_backend",
     "parse_direct_route_backend",

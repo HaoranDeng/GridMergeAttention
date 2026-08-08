@@ -71,7 +71,12 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
     materialized_key_bytes = _dtype_bytes(
         torch.bfloat16 if merge_config.use_bf16_merged_key else torch.float16
     )
-    key_bytes = 0 if merge_config.use_seed_key else materialized_key_bytes
+    if merge_config.use_seed_key:
+        key_bytes = 0
+    elif merge_config.use_indirect_top_key:
+        key_bytes = 2
+    else:
+        key_bytes = materialized_key_bytes
     value_bytes = _dtype_bytes(torch.bfloat16 if merge_config.use_bf16_merged_value else torch.float16)
     bias_dtype = (
         torch.float32
@@ -79,9 +84,16 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         else (torch.bfloat16 if merge_config.use_bf16_routing_bias else torch.float16)
     )
     bias_bytes = _dtype_bytes(bias_dtype)
+    writes_key_scale = bool(
+        merge_config.use_seed_key_scale
+        or (
+            merge_config.use_indirect_top_key
+            and (merge_config.use_top_key_scale or merge_config.use_top_key_affine_scale)
+        )
+    )
     key_scale_bytes = (
         _dtype_bytes(torch.float32 if merge_config.use_fp32_key_scale else torch.float16)
-        if merge_config.use_seed_key_scale
+        if writes_key_scale
         else 0
     )
 
@@ -115,15 +127,16 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
             if merge_config.use_fp32_routing_bias
             else ("bf16" if merge_config.use_bf16_routing_bias else "fp16")
         ),
-        "writes_key_scale": bool(merge_config.use_seed_key_scale),
+        "writes_key_scale": writes_key_scale,
         "key_scale_dtype": (
             "fp32"
-            if merge_config.use_seed_key_scale and merge_config.use_fp32_key_scale
-            else ("fp16" if merge_config.use_seed_key_scale else None)
+            if writes_key_scale and merge_config.use_fp32_key_scale
+            else ("fp16" if writes_key_scale else None)
         ),
         "block_j_target": merge_config.block_j_target,
         "block_l_target": merge_config.block_l_target or None,
-        "writes_merged_key": not merge_config.use_seed_key,
+        "writes_merged_key": not (merge_config.use_seed_key or merge_config.use_indirect_top_key),
+        "uses_indirect_top_key": bool(merge_config.use_indirect_top_key),
         "uses_top_kv": bool(merge_config.use_top_kv),
         "uses_top_key": bool(merge_config.use_top_key),
         "uses_top_key_scale": bool(merge_config.use_top_key_scale),
@@ -348,6 +361,18 @@ def exact_variants():
         ),
         "hard_c4_bestlogit_topkeyaffine_seedvalue_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "topkeyaffine", "seedvalue"),
+            seed_mode="local_with_ith",
+        ),
+        "hard_c4_bestlogit_topkeyaffine_indirectkey_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "topkeyaffine", "indirectkey"),
+            seed_mode="local_with_ith",
+        ),
+        "hard_c4_bestlogit_topkeyaffine_topvalue_indirectkey_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "topkeyaffine", "topvalue", "indirectkey"),
+            seed_mode="local_with_ith",
+        ),
+        "hard_c4_bestlogit_topkeyaffine_seedvalue_indirectkey_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "topkeyaffine", "seedvalue", "indirectkey"),
             seed_mode="local_with_ith",
         ),
         "hard_c4_seedkey_tokenmajor": exact_backend(

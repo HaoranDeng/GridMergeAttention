@@ -129,6 +129,9 @@ model still runs full compressed attention over every compressed token.
 - `topkeyaffine_seedvalue`: combines the affine top-key approximation with the
   forced representative V, also skipping both softmax K merge and softmax V
   merge.
+- `indirectkey`: for top-key variants, store only the top-key column index and
+  optional scale instead of materializing compressed K; full compressed
+  attention then gathers K from the original K tensor.
 - `topvalue`: compressed K still uses the normal softmax merge; compressed V is
   the top-logit original value in the seed cluster.
 - `topkv`: compressed K and V are both the top-logit original token in the seed

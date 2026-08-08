@@ -10,6 +10,7 @@ from .common import (
 from .hard_route_backend import (
     direct_compressed_attention,
     direct_seed_key_attention,
+    direct_top_key_attention,
     merge_kv_direct_c4,
     parse_direct_route_backend,
     uses_inline_local_seed_backend,
@@ -177,10 +178,23 @@ def _run_reference_path(q, k, v, scale, seed_rows, hard_route_backend, hard_rout
     return _restore_attention_blocks(out, q)
 
 
-def _route_direct_outputs(q, key, value, bias, key_scale, direct_config, routing_backend, scale, output):
+def _route_direct_outputs(q, source_key, key, value, bias, key_scale, direct_config, routing_backend, scale, output):
     if direct_config.use_seed_key:
         return direct_seed_key_attention(
             q,
+            value,
+            bias,
+            key_scale,
+            routing_backend,
+            scale,
+            output=output,
+            assume_contiguous=True,
+        )
+    if direct_config.use_indirect_top_key:
+        return direct_top_key_attention(
+            q,
+            source_key,
+            key,
             value,
             bias,
             key_scale,
@@ -230,6 +244,7 @@ def _run_direct_path(q, k, v, scale, seed_rows, direct_config, hard_route_routin
     output = output if output is not None and output.is_contiguous() else None
     direct_out = _route_direct_outputs(
         q,
+        k,
         key,
         value,
         bias,
@@ -244,6 +259,8 @@ def _run_direct_path(q, k, v, scale, seed_rows, direct_config, hard_route_routin
 
     if direct_config.use_seed_key:
         raise ValueError("seed-key hard-route backend requires a triton_direct_*_tokenmajor routing backend.")
+    if direct_config.use_indirect_top_key:
+        raise ValueError("indirect top-key hard-route backend requires a triton_direct_*_tokenmajor routing backend.")
 
     return _run_direct_fallback_attention(q, key, value, bias, hard_route_routing_backend, scale)
 

@@ -61,6 +61,35 @@ def main():
                 "use_seed_value": True,
             },
         ),
+        "topkeyaffine_indirectkey": (
+            backend("bestlogit", "topkeyaffine", "indirectkey"),
+            {
+                "use_assigned_logit": True,
+                "use_top_key": True,
+                "use_top_key_affine_scale": True,
+                "use_indirect_top_key": True,
+            },
+        ),
+        "topkeyaffine_topvalue_indirectkey": (
+            backend("bestlogit", "topkeyaffine", "topvalue", "indirectkey"),
+            {
+                "use_assigned_logit": True,
+                "use_top_key": True,
+                "use_top_key_affine_scale": True,
+                "use_top_value": True,
+                "use_indirect_top_key": True,
+            },
+        ),
+        "topkeyaffine_seedvalue_indirectkey": (
+            backend("bestlogit", "topkeyaffine", "seedvalue", "indirectkey"),
+            {
+                "use_assigned_logit": True,
+                "use_top_key": True,
+                "use_top_key_affine_scale": True,
+                "use_seed_value": True,
+                "use_indirect_top_key": True,
+            },
+        ),
         "topkv": (
             backend("bestlogit", "topkv"),
             {"use_assigned_logit": True, "use_top_kv": True},
