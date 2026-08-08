@@ -179,6 +179,10 @@ def _direct_route_merge(q, seed_rows, k, v, backend, scale):
     token_major_output = backend.endswith("_tokenmajor")
     if token_major_output:
         backend = backend[: -len("_tokenmajor")]
+    query_outer_block = 1
+    if backend.endswith("_a2"):
+        backend = backend[: -len("_a2")]
+        query_outer_block = 2
 
     if backend != "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot":
         return None
@@ -200,6 +204,7 @@ def _direct_route_merge(q, seed_rows, k, v, backend, scale):
         key_head_major=key_head_major,
         inline_local_seed=inline_local_seed,
         token_major_output=token_major_output,
+        query_outer_block=query_outer_block,
     )
 
 def hard_route_compressed_attention(query, key, value, bias, backend, scale):
