@@ -50,7 +50,7 @@ NAMES=(
   "hard_route_c2_triton"
   "hard_route_c4_triton"
   "hard_route_c6_triton"
-  "hard_route_c4_best"
+  "hard_route_c4_full_core"
 )
 
 CONFIGS=(
@@ -61,7 +61,7 @@ CONFIGS=(
   "configs/token_merging_wan_hard_route_c2_triton_fewstep.yaml"
   "configs/token_merging_wan_hard_route_c4_triton_fewstep.yaml"
   "configs/token_merging_wan_hard_route_c6_triton_fewstep.yaml"
-  "configs/token_merging_wan_hard_route_c4_shared_triton_c4_direct_route_j32_w2_routing_triton_grid_m128_s1_fewstep.yaml"
+  "configs/token_merging_wan_hard_route_c4_fastseed_full_core_fewstep.yaml"
 )
 
 cd "${REPO_DIR}"
@@ -173,7 +173,7 @@ order = [
     "hard_route_c2_triton",
     "hard_route_c4_triton",
     "hard_route_c6_triton",
-    "hard_route_c4_best",
+    "hard_route_c4_full_core",
 ]
 rows = {json.loads(path.read_text())["name"]: json.loads(path.read_text()) for path in result_dir.glob("*.json")}
 dense_seconds = rows.get("dense", {}).get("seconds_per_mp4")

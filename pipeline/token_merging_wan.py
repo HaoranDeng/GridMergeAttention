@@ -44,12 +44,10 @@ class TokenMergingWanPipeline(torch.nn.Module):
         conditional_dict = self.text_encoder(text_prompts=text_prompts)
         noisy_image_or_video = noise
         pred_image_or_video = None
-        num_denoise_steps = len(self.denoising_step_list) - 1
 
         timesteps = self.denoising_step_list.to(device=noise.device)
         timestep_shape = noise.shape[:2]
         for index, current_timestep in enumerate(timesteps[:-1]):
-            self.generator.model.set_token_merging_denoise_step(index, num_denoise_steps)
             _, pred_image_or_video = self.generator(
                 noisy_image_or_video=noisy_image_or_video,
                 conditional_dict=conditional_dict,

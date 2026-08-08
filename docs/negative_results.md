@@ -103,6 +103,21 @@ check before launching another speed/quality sweep.
   reduced tiling overhead.
 - Rule: keep `j32_w2` for the current token-major hard C4 merge path.
 
+### Same-Precision Merge Tile/Warp Sweep
+
+- Result: slower than the current `j32_w2` merge tile.
+- Change tested: same-precision hard C4 merge variants `j16_w2`, `j32_w1`,
+  and `j32_w4` while keeping local-with-ith seeds, token-major output, full
+  compressed attention, and the same output error.
+- Evidence: Slurm job `366543` measured about 24.59 ms/call for the current
+  `j32_w2` path, versus about 26.58 ms/call for `j16_w2`, 26.60 ms/call for
+  `j32_w1`, and 33.27 ms/call for `j32_w4`.
+- Why not repeat directly: these variants change launch geometry but do not
+  reduce the dominant memory traffic enough to offset poorer occupancy or extra
+  scheduling overhead.
+- Rule: do not keep or rerun these same tile/warp variants unless the merge
+  kernel structure changes substantially.
+
 ### Whole-Outer `query_outer_chunk=21`
 
 - Result: unsafe for the current no-headmajor token-major hard C4 path.
