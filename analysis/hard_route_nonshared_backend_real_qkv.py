@@ -541,7 +541,8 @@ def main():
     wall_seconds = time.perf_counter() - start
 
     dense_seconds = stats["dense"].seconds
-    baseline_seconds = stats["hard_c4_baseline"].seconds
+    baseline_stat = stats.get("hard_c4_baseline")
+    baseline_seconds = baseline_stat.seconds if baseline_stat is not None and baseline_stat.calls else None
     payload = {
         "device": torch.cuda.get_device_name(0),
         "config": args.config,
@@ -556,7 +557,7 @@ def main():
         "variants": {
             name: value.summary(
                 dense_seconds=dense_seconds if name != "dense" else None,
-                baseline_seconds=baseline_seconds if name not in {"dense", "hard_c4_baseline"} else None,
+                baseline_seconds=baseline_seconds if baseline_seconds and name != "dense" else None,
             )
             for name, value in sorted(stats.items())
         },
