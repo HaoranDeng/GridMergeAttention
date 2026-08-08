@@ -6,6 +6,7 @@ from .hard_route_transpose import hard_route_attention_transpose
 from .hard_route_triton import (
     triton_biased_attention,
     triton_direct_route_biased_attention,
+    triton_direct_route_biased_attention_packed_kv,
     triton_hard_route_merge,
     triton_hard_route_merge_c4_direct_route,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "hard_route_attention_transpose",
     "triton_biased_attention",
     "triton_direct_route_biased_attention",
+    "triton_direct_route_biased_attention_packed_kv",
     "triton_hard_route_merge",
     "triton_hard_route_merge_c4_direct_route",
     "select_route_attention",

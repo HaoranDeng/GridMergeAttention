@@ -14,6 +14,7 @@ from .common import (
 from .hard_route_triton import (
     triton_biased_attention,
     triton_direct_route_biased_attention,
+    triton_direct_route_biased_attention_packed_kv,
     triton_hard_route_merge,
     triton_hard_route_merge_c4,
     triton_hard_route_merge_c4_direct_route,
@@ -47,6 +48,7 @@ _DIRECT_ROUTE_KEY_OUTER_BLOCKS = {
 _DIRECT_ROUTE_FLAG_SUFFIXES = (
     ("_bestlogit", "use_assigned_logit"),
     ("_maskassign", "use_mask_assign"),
+    ("_packkv", "use_packed_kv"),
     ("_bf16kv", ("use_bf16_merged_key", "use_bf16_merged_value")),
     ("_bf16k", "use_bf16_merged_key"),
     ("_bf16v", "use_bf16_merged_value"),
@@ -67,6 +69,7 @@ class DirectRouteMergeConfig:
     use_bf16_merged_value: bool = False
     use_bf16_routing_bias: bool = False
     use_mask_assign: bool = False
+    use_packed_kv: bool = False
 
 
 def _remove_suffix(text, suffix):
@@ -122,6 +125,7 @@ def _parse_direct_route_backend(backend):
         "use_bf16_merged_value": False,
         "use_bf16_routing_bias": False,
         "use_mask_assign": False,
+        "use_packed_kv": False,
     }
     while True:
         for suffix, block in _DIRECT_ROUTE_KEY_OUTER_BLOCKS.items():
@@ -327,6 +331,7 @@ def _merge_kv_direct_c4(q, seed_rows, k, v, config, scale, assume_contiguous=Fal
         use_key_outer_kernel=config.use_key_outer_kernel,
         use_assigned_logit=config.use_assigned_logit,
         use_mask_assign=config.use_mask_assign,
+        pack_kv=config.use_packed_kv,
         assume_contiguous=assume_contiguous and config.inline_local_seed,
     )
 
@@ -368,6 +373,40 @@ def hard_route_direct_compressed_attention(
         q,
         key,
         value,
+        bias,
+        block_m=block_m,
+        block_n=block_n,
+        scale=scale,
+        num_warps=num_warps,
+        num_stages=num_stages,
+        use_exp2=True,
+        out=output,
+        assume_contiguous=assume_contiguous,
+    )
+
+
+def hard_route_direct_compressed_attention_packed_kv(
+    q,
+    packed_kv,
+    bias,
+    backend,
+    scale,
+    output=None,
+    assume_contiguous=False,
+):
+    backend = (backend or "").lower()
+    key_token_major = backend.endswith("_tokenmajor")
+    if not key_token_major:
+        return None
+    backend = backend[: -len("_tokenmajor")]
+    direct_config = _parse_direct_route_attention_backend(backend)
+    if direct_config is None:
+        return None
+
+    block_m, block_n, num_warps, num_stages = direct_config
+    return triton_direct_route_biased_attention_packed_kv(
+        q,
+        packed_kv,
         bias,
         block_m=block_m,
         block_n=block_n,
@@ -428,18 +467,32 @@ def _run_direct_path(q, k, v, scale, seed_rows, direct_config, hard_route_routin
         scale,
         assume_contiguous=True,
     )
-    direct_out = hard_route_direct_compressed_attention(
-        q,
-        key,
-        value,
-        bias,
-        hard_route_routing_backend,
-        scale,
-        output=output if output is not None and output.is_contiguous() else None,
-        assume_contiguous=True,
-    )
+    output = output if output is not None and output.is_contiguous() else None
+    if direct_config.use_packed_kv:
+        direct_out = hard_route_direct_compressed_attention_packed_kv(
+            q,
+            key,
+            bias,
+            hard_route_routing_backend,
+            scale,
+            output=output,
+            assume_contiguous=True,
+        )
+    else:
+        direct_out = hard_route_direct_compressed_attention(
+            q,
+            key,
+            value,
+            bias,
+            hard_route_routing_backend,
+            scale,
+            output=output,
+            assume_contiguous=True,
+        )
     if direct_out is not None:
         return direct_out
+    if direct_config.use_packed_kv:
+        raise ValueError("packed-KV hard-route backend requires a triton_direct_*_tokenmajor routing backend.")
 
     query = rearrange(q, "b a i j h d -> (b h a j) i d")
     out = hard_route_compressed_attention(
