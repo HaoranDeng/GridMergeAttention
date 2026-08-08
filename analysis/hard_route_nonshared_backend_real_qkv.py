@@ -81,6 +81,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
     key_bytes = 0 if merge_config.use_seed_key else materialized_key_bytes
     value_bytes = _dtype_bytes(torch.bfloat16 if merge_config.use_bf16_merged_value else torch.float16)
     bias_bytes = _dtype_bytes(torch.bfloat16 if merge_config.use_bf16_routing_bias else torch.float16)
+    prelogit_bytes = 4 if merge_config.use_fp32_precomputed_logits else 2
 
     chunk_count = 0
     total_bytes = 0
@@ -89,7 +90,11 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
     for start in range(0, int(frames), int(query_outer_chunk)):
         chunk_outer = min(int(query_outer_chunk), int(frames) - start)
         route_groups = int(batch) * int(heads) * chunk_outer * int(width)
-        if merge_config.use_packed_key_bias:
+        if merge_config.use_precomputed_logits:
+            chunk_bytes = route_tokens * route_groups * (
+                int(height) * prelogit_bytes + dim * value_bytes
+            )
+        elif merge_config.use_packed_key_bias:
             packed_width = _packed_keybias_width(
                 dim,
                 compact=merge_config.use_compact_packed_key_bias,
@@ -122,6 +127,12 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         "compact_packed_bias": merge_config.use_compact_packed_bias,
         "packs_key_bias": merge_config.use_packed_key_bias,
         "compact_packed_key_bias": merge_config.use_compact_packed_key_bias,
+        "uses_precomputed_logits": merge_config.use_precomputed_logits,
+        "precomputed_logits_dtype": (
+            "fp32"
+            if merge_config.use_fp32_precomputed_logits
+            else ("fp16" if merge_config.use_precomputed_logits else None)
+        ),
         "block_j_target": merge_config.block_j_target,
         "block_l_target": merge_config.block_l_target or None,
         "packed_width": (
@@ -134,7 +145,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
             if merge_config.use_packed_key_bias
             else None
         ),
-        "writes_merged_key": not merge_config.use_seed_key,
+        "writes_merged_key": (not merge_config.use_seed_key) and (not merge_config.use_precomputed_logits),
     }
 
 
@@ -275,6 +286,12 @@ def exact_variants():
         ),
         "hard_c4_bestlogit_recompute_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "recompute"), seed_mode="local_with_ith"
+        ),
+        "hard_c4_bestlogit_prelogit_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "prelogit"), seed_mode="local_with_ith"
+        ),
+        "hard_c4_bestlogit_prelogitfp32_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "prelogitfp32"), seed_mode="local_with_ith"
         ),
         "hard_c4_bestlogit_tokenmajor_sdpa": exact_backend(
             direct_merge_backend("bestlogit"),

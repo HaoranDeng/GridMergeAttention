@@ -8,6 +8,7 @@ from .hard_route_triton import (
     triton_direct_route_biased_attention,
     triton_direct_route_biased_attention_packed_kv,
     triton_direct_route_biased_attention_packed_key_bias,
+    triton_direct_route_precomputed_logits_attention,
     triton_direct_route_seed_key_attention,
     triton_hard_route_merge_c4_direct_route,
 )
@@ -34,6 +35,8 @@ _DIRECT_ROUTE_FLAG_SUFFIXES = (
     ("_seedkey", "use_seed_key"),
     ("_stripe", "use_stripe_assign"),
     ("_recompute", "use_recompute_merge"),
+    ("_prelogitfp32", ("use_precomputed_logits", "use_fp32_precomputed_logits")),
+    ("_prelogit", "use_precomputed_logits"),
     ("_bestlogit", "use_assigned_logit"),
     ("_maskassign", "use_mask_assign"),
     ("_packkvbiascompact", ("use_packed_kv", "use_packed_bias", "use_compact_packed_bias")),
@@ -68,6 +71,8 @@ class DirectRouteMergeConfig:
     use_packed_bias: bool = False
     use_packed_key_bias: bool = False
     use_packed_kv: bool = False
+    use_precomputed_logits: bool = False
+    use_fp32_precomputed_logits: bool = False
     use_recompute_merge: bool = False
     use_stripe_assign: bool = False
     use_seed_key: bool = False
@@ -132,6 +137,8 @@ def parse_direct_route_backend(backend):
         "use_packed_bias": False,
         "use_packed_key_bias": False,
         "use_packed_kv": False,
+        "use_precomputed_logits": False,
+        "use_fp32_precomputed_logits": False,
         "use_recompute_merge": False,
         "use_stripe_assign": False,
         "use_seed_key": False,
@@ -218,6 +225,8 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         compact_packed_bias=config.use_compact_packed_bias,
         pack_key_bias=config.use_packed_key_bias,
         compact_packed_key_bias=config.use_compact_packed_key_bias,
+        precompute_logits=config.use_precomputed_logits,
+        precompute_logits_dtype=torch.float32 if config.use_fp32_precomputed_logits else torch.float16,
         use_recompute_merge=config.use_recompute_merge,
         use_stripe_assign=config.use_stripe_assign,
         use_seed_key=config.use_seed_key,
@@ -274,6 +283,35 @@ def direct_compressed_attention(
         key,
         value,
         bias,
+        block_m=block_m,
+        block_n=block_n,
+        scale=scale,
+        num_warps=num_warps,
+        num_stages=num_stages,
+        use_exp2=True,
+        out=output,
+        assume_contiguous=assume_contiguous,
+    )
+
+
+def direct_precomputed_logits_attention(
+    q,
+    logits,
+    value,
+    backend,
+    scale,
+    output=None,
+    assume_contiguous=False,
+):
+    config = _parse_tokenmajor_attention_backend(backend)
+    if config is None:
+        return None
+
+    block_m, block_n, num_warps, num_stages = config
+    return triton_direct_route_precomputed_logits_attention(
+        q,
+        logits,
+        value,
         block_m=block_m,
         block_n=block_n,
         scale=scale,
@@ -383,6 +421,7 @@ __all__ = [
     "direct_compressed_attention_packed_key_bias",
     "direct_compressed_attention_packed_kv",
     "direct_compressed_attention_packed_kvbias",
+    "direct_precomputed_logits_attention",
     "direct_seed_key_attention",
     "merge_kv_direct_c4",
     "parse_direct_route_attention_backend",

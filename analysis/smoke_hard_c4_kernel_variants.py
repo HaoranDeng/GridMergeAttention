@@ -100,6 +100,8 @@ def main():
         "hard_c4_bestlogit_tokenmajor",
         # Highest-value same-math memory-layout candidates first. If the
         # smoke job times out, partial JSON will still cover these.
+        "hard_c4_bestlogit_prelogit_tokenmajor",
+        "hard_c4_bestlogit_prelogitfp32_tokenmajor",
         "hard_c4_bestlogit_packkbias_tokenmajor",
         "hard_c4_bestlogit_packkbiascompact_tokenmajor",
         "hard_c4_bestlogit_packkvbiascompact_tokenmajor",

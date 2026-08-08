@@ -12,6 +12,7 @@ from .hard_route_backend import (
     direct_compressed_attention_packed_key_bias,
     direct_compressed_attention_packed_kv,
     direct_compressed_attention_packed_kvbias,
+    direct_precomputed_logits_attention,
     direct_seed_key_attention,
     merge_kv_direct_c4,
     parse_direct_route_backend,
@@ -183,6 +184,16 @@ def _route_direct_outputs(q, key, value, bias, direct_config, routing_backend, s
             q,
             value,
             bias,
+            routing_backend,
+            scale,
+            output=output,
+            assume_contiguous=True,
+        )
+    if direct_config.use_precomputed_logits:
+        return direct_precomputed_logits_attention(
+            q,
+            key,
+            value,
             routing_backend,
             scale,
             output=output,
