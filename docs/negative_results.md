@@ -103,6 +103,23 @@ check before launching another speed/quality sweep.
 - Rule: keep token-major direct routing at `m32_n16_w1_s1_exp2` unless the
   routing layout changes substantially.
 
+### Token-Major Routing `m16`, `n64`, and Stage Sweeps
+
+- Result: no useful speedup with unchanged error.
+- Change tested: keep the same C4 token-major merge output and full compressed
+  attention, but use routing variants `m16_n16`, `m16_n32`, `m16_n64`,
+  `n64_w1`, `n64_w2`, and extra routing stages `s2`/`s3`.
+- Evidence: AMDHPC sweeps
+  `hard_c4_n64_routing_sweep_20260808`,
+  `hard_c4_m16_routing_sweep_20260808`, and
+  `hard_c4_stage_sweep_20260808` measured the best variants around
+  22.98-23.42 ms/call, roughly tied with or slower than dense and not better
+  than the current `m32_n16_w1_s1` path.
+- Why not repeat directly: these settings only retile the second-stage full
+  compressed attention and do not reduce the dominant intermediate K/V traffic.
+- Rule: do not retry these routing tile/stage settings unless the compressed
+  K/V layout or attention kernel structure changes.
+
 ### Current Fast Path with `j64` Merge Tile
 
 - Result: slower than the current `j32` merge tile.
@@ -133,6 +150,24 @@ check before launching another speed/quality sweep.
   scheduling overhead.
 - Rule: do not keep or rerun these same tile/warp variants unless the merge
   kernel structure changes substantially.
+
+### Key-Outer Merge Blocking F1-F7
+
+- Result: slower than the non-keyouter token-major merge path with unchanged
+  dense-vs-hard error.
+- Change tested: process multiple key-outer groups per Triton merge program
+  (`f1` through `f7`) while keeping grid-local C4 compression, local-with-ith
+  seeds, routing bias, token-major output, and full compressed attention.
+- Evidence: AMDHPC sweep
+  `hard_c4_f2to7_bf16kv_noplaceholder_smoke_20260808` measured about
+  22.79 ms/call for `hard_c4_bestlogit_tokenmajor`, 23.22 ms/call for
+  `hard_c4_full_core_tokenmajor`, and 31-34 ms/call for tested keyouter
+  variants. `hard_c4_f1_keyouter_smoke_20260808` measured about 22.96 ms/call
+  for `f1`, still not a clear improvement over the current path.
+- Why not repeat directly: batching key outers increases register pressure and
+  store complexity more than it reduces launch or key/value load overhead.
+- Rule: do not use `_f1`...`_f7` key-outer blocking for the main hard C4 path
+  unless the merge kernel is redesigned.
 
 ### Group-Major Inline-Seed Layout
 
@@ -236,6 +271,9 @@ The best accepted direction so far is still:
 - local-with-ith seed selection for lower error than random-with-ith,
 - inline local seed-row computation to avoid reading the seed table in the C4
   merge kernel,
+- assigned-logit reuse (`bestlogit`) inside the C4 merge kernel, which keeps
+  the same assignment and full compressed-attention semantics while shaving a
+  small amount of merge overhead,
 - token-major intermediate compressed-KV layout, which preserves the same
   full-attention math but makes merge stores more contiguous,
 - standard K/V block layout for the current token-major `m32_n16` path, avoiding
