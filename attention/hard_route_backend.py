@@ -30,6 +30,7 @@ _DIRECT_ROUTE_KEY_OUTER_BLOCKS = {
     "f7": 7,
 }
 _DIRECT_ROUTE_FLAG_SUFFIXES = (
+    ("_seedkeyproj", ("use_seed_key", "use_seed_key_scale")),
     ("_seedkeymatch", ("use_seed_key", "use_seed_key_bias_match")),
     ("_seedkey", "use_seed_key"),
     ("_stripe", "use_stripe_assign"),
@@ -62,6 +63,7 @@ class DirectRouteMergeConfig:
     use_stripe_assign: bool = False
     use_seed_key: bool = False
     use_seed_key_bias_match: bool = False
+    use_seed_key_scale: bool = False
 
 
 def _remove_suffix(text, suffix):
@@ -125,6 +127,7 @@ def parse_direct_route_backend(backend):
         "use_stripe_assign": False,
         "use_seed_key": False,
         "use_seed_key_bias_match": False,
+        "use_seed_key_scale": False,
     }
 
     while True:
@@ -207,6 +210,7 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         use_stripe_assign=config.use_stripe_assign,
         use_seed_key=config.use_seed_key,
         use_seed_key_bias_match=config.use_seed_key_bias_match,
+        use_seed_key_scale=config.use_seed_key_scale,
         assume_contiguous=assume_contiguous and config.inline_local_seed,
     )
 
@@ -215,6 +219,7 @@ def direct_seed_key_attention(
     q,
     value,
     bias,
+    key_scale,
     backend,
     scale,
     output=None,
@@ -231,6 +236,7 @@ def direct_seed_key_attention(
         q,
         value,
         bias,
+        key_scale=key_scale,
         block_m=block_m,
         block_n=block_n,
         scale=scale,

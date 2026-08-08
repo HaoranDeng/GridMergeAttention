@@ -177,12 +177,13 @@ def _can_skip_seed_rows(direct_config):
     return direct_config.supported and direct_config.inline_local_seed
 
 
-def _route_direct_outputs(q, key, value, bias, direct_config, routing_backend, scale, output):
+def _route_direct_outputs(q, key, value, bias, key_scale, direct_config, routing_backend, scale, output):
     if direct_config.use_seed_key:
         return direct_seed_key_attention(
             q,
             value,
             bias,
+            key_scale,
             routing_backend,
             scale,
             output=output,
@@ -217,7 +218,7 @@ def _run_direct_fallback_attention(q, key, value, bias, routing_backend, scale):
 def _run_direct_path(q, k, v, scale, seed_rows, direct_config, hard_route_routing_backend, output):
     """Optimized C4 path: Triton merge writes routing-ready token-major KV."""
     q = q.contiguous()
-    key, value, bias, _ = merge_kv_direct_c4(
+    key, value, bias, key_scale = merge_kv_direct_c4(
         q,
         seed_rows,
         k,
@@ -232,6 +233,7 @@ def _run_direct_path(q, k, v, scale, seed_rows, direct_config, hard_route_routin
         key,
         value,
         bias,
+        key_scale,
         direct_config,
         hard_route_routing_backend,
         scale,

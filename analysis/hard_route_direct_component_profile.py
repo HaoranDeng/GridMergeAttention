@@ -134,7 +134,17 @@ def make_seed_rows(q_chunk, k_blocks, query_outer_offset, args, variant):
     )
 
 
-def route_compressed_tokens(q_chunk, merged_key, merged_value, routing_bias, variant, config, scale, output):
+def route_compressed_tokens(
+    q_chunk,
+    merged_key,
+    merged_value,
+    routing_bias,
+    key_scale,
+    variant,
+    config,
+    scale,
+    output,
+):
     """Run full compressed attention after direct C4 merge.
 
     Direct Triton routing consumes token-major [K, group, D] intermediates.
@@ -147,6 +157,7 @@ def route_compressed_tokens(q_chunk, merged_key, merged_value, routing_bias, var
             q_chunk,
             merged_value,
             routing_bias,
+            key_scale,
             routing_backend,
             scale,
             output=output,
@@ -266,7 +277,7 @@ def install_probe(stats, args):
 
             if merge_out is None:
                 raise RuntimeError("hard_route_backend must be a direct-route backend.")
-            merged_key, merged_value, routing_bias, _ = merge_out
+            merged_key, merged_value, routing_bias, key_scale = merge_out
             output = out_slice if out_slice.is_contiguous() else None
 
             if record:
@@ -276,6 +287,7 @@ def install_probe(stats, args):
                         merged_key,
                         merged_value,
                         routing_bias,
+                        key_scale,
                         variant,
                         direct_merge_config,
                         scale,
@@ -292,6 +304,7 @@ def install_probe(stats, args):
                     merged_key,
                     merged_value,
                     routing_bias,
+                    key_scale,
                     variant,
                     direct_merge_config,
                     scale,

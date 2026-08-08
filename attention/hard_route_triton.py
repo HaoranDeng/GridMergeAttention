@@ -338,6 +338,7 @@ if triton is not None:
         merged_key_ptr,
         merged_value_ptr,
         routing_bias_ptr,
+        key_scale_ptr,
         A: tl.constexpr,
         F: tl.constexpr,
         Q_ROWS: tl.constexpr,
@@ -359,6 +360,7 @@ if triton is not None:
         USE_MASK_ASSIGN: tl.constexpr,
         SEED_KEY: tl.constexpr,
         SEED_KEY_BIAS_MATCH: tl.constexpr,
+        SEED_KEY_SCALE: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -587,6 +589,20 @@ if triton is not None:
                 mask=valid_query[:, None] & valid_dim[None, :],
             )
             bias_offset = route_token * ROUTE_GROUPS + route_group
+            if SEED_KEY_SCALE:
+                seed_for_scale = seed0
+                if seed_idx == 1:
+                    seed_for_scale = seed1
+                if seed_idx == 2:
+                    seed_for_scale = seed2
+                if seed_idx == 3:
+                    seed_for_scale = seed3
+                seed_self_logit = (
+                    tl.sum(seed_for_scale.to(tl.float32) * seed_for_scale.to(tl.float32), axis=1)
+                    * SCORE_SCALE
+                )
+                safe_self_logit = tl.where(tl.abs(seed_self_logit) > 1.0e-20, seed_self_logit, 1.0)
+                tl.store(key_scale_ptr + bias_offset, expected_logit / safe_self_logit, mask=valid_query)
             tl.store(routing_bias_ptr + bias_offset, routing_bias, mask=valid_query)
 
     @triton.jit
@@ -598,6 +614,7 @@ if triton is not None:
         merged_key_ptr,
         merged_value_ptr,
         routing_bias_ptr,
+        key_scale_ptr,
         A: tl.constexpr,
         F: tl.constexpr,
         Q_ROWS: tl.constexpr,
@@ -619,6 +636,7 @@ if triton is not None:
         USE_MASK_ASSIGN: tl.constexpr,
         SEED_KEY: tl.constexpr,
         SEED_KEY_BIAS_MATCH: tl.constexpr,
+        SEED_KEY_SCALE: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -812,6 +830,13 @@ if triton is not None:
                 mask=valid_query[:, None] & valid_dim[None, :],
             )
             bias_offset = route_token * ROUTE_GROUPS + route_group
+            if SEED_KEY_SCALE:
+                seed_self_logit = (
+                    tl.sum(seed.to(tl.float32) * seed.to(tl.float32), axis=1)
+                    * SCORE_SCALE
+                )
+                safe_self_logit = tl.where(tl.abs(seed_self_logit) > 1.0e-20, seed_self_logit, 1.0)
+                tl.store(key_scale_ptr + bias_offset, expected_logit / safe_self_logit, mask=valid_query)
             tl.store(routing_bias_ptr + bias_offset, routing_bias, mask=valid_query)
 
     @triton.jit
@@ -1614,6 +1639,7 @@ if triton is not None:
         query_ptr,
         value_ptr,
         bias_ptr,
+        key_scale_ptr,
         out_ptr,
         A_OUTER: tl.constexpr,
         Q_ROWS: tl.constexpr,
@@ -1627,6 +1653,7 @@ if triton is not None:
         BLOCK_D: tl.constexpr,
         SCORE_SCALE: tl.constexpr,
         USE_EXP2: tl.constexpr,
+        USE_KEY_SCALE: tl.constexpr,
         GROUPS: tl.constexpr,
     ):
         group_id = tl.program_id(0)
@@ -1697,7 +1724,15 @@ if triton is not None:
                     mask=base_tokens < BASE_K_LEN,
                     other=float("inf"),
                 )
-                logits = seed_logits - bias[None, :]
+                if USE_KEY_SCALE:
+                    key_scale = tl.load(
+                        key_scale_ptr + route_keys * GROUPS + group_id,
+                        mask=base_tokens < BASE_K_LEN,
+                        other=1.0,
+                    )
+                    logits = seed_logits * key_scale[None, :] - bias[None, :]
+                else:
+                    logits = seed_logits - bias[None, :]
                 logits = tl.where(valid_logits, logits, -float("inf"))
 
                 block_max = tl.max(logits, axis=1)
@@ -1965,6 +2000,7 @@ def triton_direct_route_seed_key_attention(
     query,
     value,
     bias,
+    key_scale=None,
     block_m=32,
     block_n=64,
     scale=1.0,
@@ -1979,6 +2015,7 @@ def triton_direct_route_seed_key_attention(
     query/out: [B, A, query_rows, query_columns, heads, dim]
     value:     [compressed_tokens, B*heads*A*query_columns, dim]
     bias:      [compressed_tokens, B*heads*A*query_columns]
+    key_scale: optional [compressed_tokens, B*heads*A*query_columns]
 
     This keeps the full second-stage attention over every compressed token, but
     avoids materializing merged K from the first stage. It is an approximation
@@ -1995,6 +2032,8 @@ def triton_direct_route_seed_key_attention(
         query = query.contiguous()
         value = value.contiguous()
         bias = bias.contiguous()
+        if key_scale is not None:
+            key_scale = key_scale.contiguous()
 
     batch, query_outer, query_rows, query_columns, heads, dim = query.shape
     key_len, groups, value_dim = value.shape
@@ -2006,6 +2045,8 @@ def triton_direct_route_seed_key_attention(
         )
     if value_dim != dim or bias.shape != (key_len, groups):
         raise ValueError("query/value/bias shapes are inconsistent for seed-key direct-route attention.")
+    if key_scale is not None and key_scale.shape != (key_len, groups):
+        raise ValueError("key_scale shape is inconsistent for seed-key direct-route attention.")
     if key_len % (query_rows * 4) != 0:
         raise ValueError("seed-key direct-route attention expects K_LEN = key_outer * query_rows * 4.")
     key_outers = key_len // (query_rows * 4)
@@ -2031,6 +2072,7 @@ def triton_direct_route_seed_key_attention(
         query,
         value,
         bias,
+        key_scale if key_scale is not None else bias,
         out,
         A_OUTER=query_outer,
         Q_ROWS=query_rows,
@@ -2044,6 +2086,7 @@ def triton_direct_route_seed_key_attention(
         BLOCK_D=block_d,
         SCORE_SCALE=float(scale),
         USE_EXP2=bool(use_exp2),
+        USE_KEY_SCALE=bool(key_scale is not None),
         GROUPS=groups,
         **meta,
     )
@@ -2243,6 +2286,7 @@ def triton_hard_route_merge_c4_direct_route(
     use_stripe_assign=False,
     use_seed_key=False,
     use_seed_key_bias_match=False,
+    use_seed_key_scale=False,
     assume_contiguous=False,
 ):
     """Exact non-shared C=4 merge that writes routing-ready K/V/bias.
@@ -2341,6 +2385,14 @@ def triton_hard_route_merge_c4_direct_route(
         key.device,
         bias_dtype,
     )
+    key_scale = None
+    if use_seed_key_scale:
+        key_scale = _cached_empty(
+            "hard_route_c4_direct_route_key_scale_token_major",
+            (route_tokens, route_groups),
+            key.device,
+            bias_dtype,
+        )
 
     key_outer_block = int(key_outer_block)
     if key_outer_block not in (1, 2, 3, 4, 5, 6, 7):
@@ -2372,6 +2424,10 @@ def triton_hard_route_merge_c4_direct_route(
         raise ValueError("seed-key routing currently requires inline_local_seed=True.")
     if use_seed_key_bias_match and not use_seed_key:
         raise ValueError("seed-key bias matching requires use_seed_key=True.")
+    if use_seed_key_scale and not use_seed_key:
+        raise ValueError("seed-key scaling requires use_seed_key=True.")
+    if use_seed_key_scale and use_seed_key_bias_match:
+        raise ValueError("seed-key scaling and seed-key bias matching are alternative approximations.")
     if use_key_outer_kernel and (
         (not inline_local_seed)
         or block_j != 32
@@ -2477,6 +2533,7 @@ def triton_hard_route_merge_c4_direct_route(
         merged_key,
         merged_value,
         routing_bias,
+        key_scale if key_scale is not None else routing_bias,
         A=query_outer,
         F=key_outer,
         Q_ROWS=query_rows,
@@ -2498,9 +2555,10 @@ def triton_hard_route_merge_c4_direct_route(
         USE_MASK_ASSIGN=bool(use_mask_assign),
         SEED_KEY=bool(use_seed_key),
         SEED_KEY_BIAS_MATCH=bool(use_seed_key_bias_match),
+        SEED_KEY_SCALE=bool(use_seed_key_scale),
         **launch_kwargs,
     )
-    return merged_key, merged_value, routing_bias, None
+    return merged_key, merged_value, routing_bias, key_scale
 
 
 

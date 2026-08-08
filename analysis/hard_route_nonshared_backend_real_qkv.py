@@ -74,6 +74,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
     key_bytes = 0 if merge_config.use_seed_key else materialized_key_bytes
     value_bytes = _dtype_bytes(torch.bfloat16 if merge_config.use_bf16_merged_value else torch.float16)
     bias_bytes = _dtype_bytes(torch.bfloat16 if merge_config.use_bf16_routing_bias else torch.float16)
+    key_scale_bytes = bias_bytes if merge_config.use_seed_key_scale else 0
 
     chunk_count = 0
     total_bytes = 0
@@ -82,7 +83,9 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
     for start in range(0, int(frames), int(query_outer_chunk)):
         chunk_outer = min(int(query_outer_chunk), int(frames) - start)
         route_groups = int(batch) * int(heads) * chunk_outer * int(width)
-        chunk_bytes = route_tokens * route_groups * (dim * key_bytes + dim * value_bytes + bias_bytes)
+        chunk_bytes = route_tokens * route_groups * (
+            dim * key_bytes + dim * value_bytes + bias_bytes + key_scale_bytes
+        )
         total_bytes += chunk_bytes
         max_chunk_bytes = max(max_chunk_bytes, chunk_bytes)
         if merge_config.use_seed_key:
@@ -99,6 +102,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         "key_dtype": "bf16" if merge_config.use_bf16_merged_key else "fp16",
         "value_dtype": "bf16" if merge_config.use_bf16_merged_value else "fp16",
         "bias_dtype": "bf16" if merge_config.use_bf16_routing_bias else "fp16",
+        "writes_key_scale": bool(merge_config.use_seed_key_scale),
         "block_j_target": merge_config.block_j_target,
         "block_l_target": merge_config.block_l_target or None,
         "writes_merged_key": not merge_config.use_seed_key,
@@ -299,6 +303,9 @@ def exact_variants():
         "hard_c4_seedkeymatch_tokenmajor": exact_backend(
             direct_merge_backend("seedkeymatch", "bestlogit"), seed_mode="local_with_ith"
         ),
+        "hard_c4_seedkeyproj_tokenmajor": exact_backend(
+            direct_merge_backend("seedkeyproj", "bestlogit"), seed_mode="local_with_ith"
+        ),
         "hard_c4_seedkey_tokenmajor_n32_s1": exact_backend(
             direct_merge_backend("seedkey", "bestlogit"),
             seed_mode="local_with_ith",
@@ -309,6 +316,11 @@ def exact_variants():
             seed_mode="local_with_ith",
             routing_backend=direct_routing_backend(block_n=32),
         ),
+        "hard_c4_seedkeyproj_tokenmajor_n32_s1": exact_backend(
+            direct_merge_backend("seedkeyproj", "bestlogit"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=32),
+        ),
         "hard_c4_seedkey_tokenmajor_n64_w1": exact_backend(
             direct_merge_backend("seedkey", "bestlogit"),
             seed_mode="local_with_ith",
@@ -316,6 +328,11 @@ def exact_variants():
         ),
         "hard_c4_seedkeymatch_tokenmajor_n64_w1": exact_backend(
             direct_merge_backend("seedkeymatch", "bestlogit"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=64, num_warps=1),
+        ),
+        "hard_c4_seedkeyproj_tokenmajor_n64_w1": exact_backend(
+            direct_merge_backend("seedkeyproj", "bestlogit"),
             seed_mode="local_with_ith",
             routing_backend=direct_routing_backend(block_n=64, num_warps=1),
         ),
