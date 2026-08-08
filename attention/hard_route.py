@@ -40,6 +40,7 @@ class DirectRouteMergeConfig:
     inline_local_seed: bool = False
     key_outer_block: int = 1
     use_assigned_logit: bool = False
+    use_bf16_merged_kv: bool = False
 
 
 def uses_inline_local_seed_backend(backend):
@@ -60,6 +61,7 @@ def _parse_direct_route_backend(backend):
 
     key_outer_block = 1
     use_assigned_logit = False
+    use_bf16_merged_kv = False
     changed = True
     while changed:
         changed = False
@@ -73,12 +75,17 @@ def _parse_direct_route_backend(backend):
             backend = backend[: -len("_bestlogit")]
             use_assigned_logit = True
             changed = True
+        if backend.endswith("_bf16kv"):
+            backend = backend[: -len("_bf16kv")]
+            use_bf16_merged_kv = True
+            changed = True
 
     return DirectRouteMergeConfig(
         supported=token_major_output and backend == _DIRECT_ROUTE_C4_BASE,
         inline_local_seed=inline_local_seed,
         key_outer_block=key_outer_block,
         use_assigned_logit=use_assigned_logit,
+        use_bf16_merged_kv=use_bf16_merged_kv,
     )
 
 
@@ -236,7 +243,7 @@ def _direct_route_merge(q, seed_rows, k, v, config, scale):
         block_j_target=32,
         num_warps=2,
         bias_dtype=torch.float16,
-        merged_dtype=torch.float16,
+        merged_dtype=torch.bfloat16 if config.use_bf16_merged_kv else torch.float16,
         use_exp2=True,
         force_seed_keys=True,
         num_stages=1,

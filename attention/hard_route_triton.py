@@ -1324,7 +1324,7 @@ def triton_hard_route_merge_c4_direct_route(
         or block_j != 32
         or int(num_warps) != 2
         or bias_dtype != torch.float16
-        or merged_dtype != torch.float16
+        or merged_dtype not in (torch.float16, torch.bfloat16)
         or (not use_exp2)
         or (not force_seed_keys)
         or num_stages != 1
