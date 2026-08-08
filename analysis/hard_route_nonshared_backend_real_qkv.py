@@ -255,6 +255,12 @@ def exact_variants():
             seed_mode="local_with_ith",
             routing_backend=direct_routing_backend(block_n=32),
         ),
+        "hard_c4_stripe_tokenmajor": exact_backend(
+            direct_merge_backend("stripe"), seed_mode="local_with_ith"
+        ),
+        "hard_c4_stripe_packkv_tokenmajor": exact_backend(
+            direct_merge_backend("stripe", "packkv"), seed_mode="local_with_ith"
+        ),
         "hard_c4_bf16kv_tokenmajor": exact_backend(
             direct_merge_backend("bf16kv"), seed_mode="local_with_ith"
         ),

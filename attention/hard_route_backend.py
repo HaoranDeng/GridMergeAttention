@@ -26,6 +26,7 @@ _DIRECT_ROUTE_KEY_OUTER_BLOCKS = {
     "f7": 7,
 }
 _DIRECT_ROUTE_FLAG_SUFFIXES = (
+    ("_stripe", "use_stripe_assign"),
     ("_bestlogit", "use_assigned_logit"),
     ("_maskassign", "use_mask_assign"),
     ("_packkv", "use_packed_kv"),
@@ -50,6 +51,7 @@ class DirectRouteMergeConfig:
     use_bf16_routing_bias: bool = False
     use_mask_assign: bool = False
     use_packed_kv: bool = False
+    use_stripe_assign: bool = False
 
 
 def _remove_suffix(text, suffix):
@@ -106,6 +108,7 @@ def parse_direct_route_backend(backend):
         "use_bf16_routing_bias": False,
         "use_mask_assign": False,
         "use_packed_kv": False,
+        "use_stripe_assign": False,
     }
 
     while True:
@@ -160,6 +163,7 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         use_assigned_logit=config.use_assigned_logit,
         use_mask_assign=config.use_mask_assign,
         pack_kv=config.use_packed_kv,
+        use_stripe_assign=config.use_stripe_assign,
         assume_contiguous=assume_contiguous and config.inline_local_seed,
     )
 

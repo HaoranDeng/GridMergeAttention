@@ -591,6 +591,173 @@ if triton is not None:
             tl.store(routing_bias_ptr + bias_offset, routing_bias, mask=valid_query)
 
     @triton.jit
+    def _hard_route_merge_c4_stripe_direct_route_kernel(
+        query_ptr,
+        seed_rows_ptr,
+        key_ptr,
+        value_ptr,
+        merged_key_ptr,
+        merged_value_ptr,
+        routing_bias_ptr,
+        A: tl.constexpr,
+        F: tl.constexpr,
+        Q_ROWS: tl.constexpr,
+        K_ROWS: tl.constexpr,
+        J: tl.constexpr,
+        H: tl.constexpr,
+        L: tl.constexpr,
+        D_HEAD: tl.constexpr,
+        ROUTE_GROUPS: tl.constexpr,
+        BLOCK_J: tl.constexpr,
+        BLOCK_L: tl.constexpr,
+        BLOCK_D: tl.constexpr,
+        SCORE_SCALE: tl.constexpr,
+        USE_EXP2: tl.constexpr,
+        INLINE_LOCAL_SEED: tl.constexpr,
+        PACK_KV: tl.constexpr,
+    ):
+        group_id = tl.program_id(0)
+        query_col_block = tl.program_id(1)
+
+        head = group_id % H
+        tmp = group_id // H
+        key_row = tmp % K_ROWS
+        tmp = tmp // K_ROWS
+        key_outer = tmp % F
+        tmp = tmp // F
+        query_outer = tmp % A
+        batch = tmp // A
+
+        query_offsets = query_col_block * BLOCK_J + tl.arange(0, BLOCK_J)
+        stripe_offsets = tl.arange(0, BLOCK_L)
+        dim_offsets = tl.arange(0, BLOCK_D)
+        valid_query = query_offsets < J
+        valid_dim = dim_offsets < D_HEAD
+
+        if INLINE_LOCAL_SEED:
+            seed1 = tl.where(key_row > 0, key_row - 1, 1)
+            seed2 = tl.where(
+                key_row == 0,
+                2,
+                tl.where(key_row == Q_ROWS - 1, Q_ROWS - 3, key_row + 1),
+            )
+            seed3 = tl.where(
+                key_row <= 1,
+                3,
+                tl.where(key_row >= Q_ROWS - 2, Q_ROWS - 4, key_row - 2),
+            )
+            seed_row0 = tl.full((BLOCK_J,), key_row, tl.int64)
+            seed_row1 = tl.full((BLOCK_J,), seed1, tl.int64)
+            seed_row2 = tl.full((BLOCK_J,), seed2, tl.int64)
+            seed_row3 = tl.full((BLOCK_J,), seed3, tl.int64)
+        else:
+            seed_rows_base = (
+                seed_rows_ptr
+                + ((((query_outer * F + key_outer) * K_ROWS + key_row) * J + query_offsets) * 4)
+            )
+            seed_row0 = tl.load(seed_rows_base, mask=valid_query, other=0)
+            seed_row1 = tl.load(seed_rows_base + 1, mask=valid_query, other=0)
+            seed_row2 = tl.load(seed_rows_base + 2, mask=valid_query, other=0)
+            seed_row3 = tl.load(seed_rows_base + 3, mask=valid_query, other=0)
+
+        query_base = (batch * A + query_outer) * Q_ROWS * J * H * D_HEAD
+        route_group = (((batch * H + head) * A + query_outer) * J + query_offsets)
+        route_token_base = (key_outer * K_ROWS + key_row) * 4
+        key_base = key_ptr + (((batch * F + key_outer) * K_ROWS + key_row) * L * H + head) * D_HEAD
+        value_base = value_ptr + (((batch * F + key_outer) * K_ROWS + key_row) * L * H + head) * D_HEAD
+
+        for seed_idx in tl.static_range(0, 4):
+            seed_row = seed_row0
+            if seed_idx == 1:
+                seed_row = seed_row1
+            if seed_idx == 2:
+                seed_row = seed_row2
+            if seed_idx == 3:
+                seed_row = seed_row3
+
+            stripe_start = (seed_idx * L) // 4
+            stripe_end = ((seed_idx + 1) * L) // 4
+            stripe_len = stripe_end - stripe_start
+            key_offsets = stripe_start + stripe_offsets
+            valid_key = stripe_offsets < stripe_len
+
+            seed = tl.load(
+                query_ptr
+                + query_base
+                + (((seed_row[:, None] * J + query_offsets[:, None]) * H + head) * D_HEAD + dim_offsets[None, :]),
+                mask=valid_query[:, None] & valid_dim[None, :],
+                other=0.0,
+            )
+            key_block = tl.load(
+                key_base + key_offsets[:, None] * H * D_HEAD + dim_offsets[None, :],
+                mask=valid_key[:, None] & valid_dim[None, :],
+                other=0.0,
+            )
+            value_block = tl.load(
+                value_base + key_offsets[:, None] * H * D_HEAD + dim_offsets[None, :],
+                mask=valid_key[:, None] & valid_dim[None, :],
+                other=0.0,
+            )
+            logits = tl.dot(seed, tl.trans(key_block), input_precision="tf32") * SCORE_SCALE
+            active = valid_query[:, None] & valid_key[None, :]
+
+            row_max = tl.max(tl.where(active, logits, -float("inf")), axis=1)
+            if USE_EXP2:
+                probs = tl.where(
+                    active,
+                    tl.exp2((logits - row_max[:, None]) * 1.4426950408889634),
+                    0.0,
+                )
+            else:
+                probs = tl.where(active, tl.exp(logits - row_max[:, None]), 0.0)
+            denom = tl.sum(probs, axis=1)
+            safe_denom = tl.where(valid_query, denom, 1.0)
+            weights = probs / safe_denom[:, None]
+            if USE_EXP2:
+                log_denom = row_max + tl.log2(safe_denom) * 0.6931471805599453
+            else:
+                log_denom = row_max + tl.log(safe_denom)
+
+            merged_key = tl.dot(weights.to(key_block.dtype), key_block)
+            merged_value = tl.dot(weights.to(value_block.dtype), value_block)
+            expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
+            routing_bias = expected_logit - log_denom
+
+            route_token = route_token_base + seed_idx
+            if PACK_KV:
+                route_offset = (
+                    (route_token * ROUTE_GROUPS + route_group[:, None]) * (2 * D_HEAD)
+                    + dim_offsets[None, :]
+                )
+                tl.store(
+                    merged_key_ptr + route_offset,
+                    merged_key,
+                    mask=valid_query[:, None] & valid_dim[None, :],
+                )
+                tl.store(
+                    merged_key_ptr + route_offset + D_HEAD,
+                    merged_value,
+                    mask=valid_query[:, None] & valid_dim[None, :],
+                )
+            else:
+                route_offset = (
+                    (route_token * ROUTE_GROUPS + route_group[:, None]) * D_HEAD
+                    + dim_offsets[None, :]
+                )
+                tl.store(
+                    merged_key_ptr + route_offset,
+                    merged_key,
+                    mask=valid_query[:, None] & valid_dim[None, :],
+                )
+                tl.store(
+                    merged_value_ptr + route_offset,
+                    merged_value,
+                    mask=valid_query[:, None] & valid_dim[None, :],
+                )
+            bias_offset = route_token * ROUTE_GROUPS + route_group
+            tl.store(routing_bias_ptr + bias_offset, routing_bias, mask=valid_query)
+
+    @triton.jit
     def _hard_route_merge_c4_direct_route_keyouter_kernel(
         query_ptr,
         key_ptr,
@@ -1392,6 +1559,7 @@ def triton_hard_route_merge_c4_direct_route(
     use_assigned_logit=False,
     use_mask_assign=False,
     pack_kv=False,
+    use_stripe_assign=False,
     assume_contiguous=False,
 ):
     """Exact non-shared C=4 merge that writes routing-ready K/V/bias.
@@ -1498,6 +1666,12 @@ def triton_hard_route_merge_c4_direct_route(
         raise ValueError("use_mask_assign is only implemented for the non-keyouter direct C4 kernel.")
     if pack_kv and use_key_outer_kernel:
         raise ValueError("pack_kv is only implemented for the non-keyouter direct C4 kernel.")
+    if use_stripe_assign and use_key_outer_kernel:
+        raise ValueError("stripe C4 merge is only implemented for the non-keyouter direct C4 kernel.")
+    if use_stripe_assign and (use_assigned_logit or use_mask_assign):
+        raise ValueError("stripe C4 merge replaces hard assignment; do not combine it with bestlogit or maskassign.")
+    if use_stripe_assign and key_columns < 4:
+        raise ValueError("stripe C4 merge requires at least four key columns.")
     if use_key_outer_kernel and (
         (not inline_local_seed)
         or block_j != 32
@@ -1514,6 +1688,41 @@ def triton_hard_route_merge_c4_direct_route(
             "key-outer direct-route merge is specialized for the current token-major "
             "inline-local-seed hard C4 fast path."
         )
+
+    if use_stripe_assign:
+        stripe_block_l = triton.next_power_of_2((key_columns + 3) // 4)
+        grid = (
+            batch * query_outer * key_outer * key_rows * heads,
+            triton.cdiv(query_columns, block_j),
+        )
+        _hard_route_merge_c4_stripe_direct_route_kernel[grid](
+            query,
+            seed_rows,
+            key,
+            value,
+            merged_key,
+            merged_value,
+            routing_bias,
+            A=query_outer,
+            F=key_outer,
+            Q_ROWS=query_rows,
+            K_ROWS=key_rows,
+            J=query_columns,
+            H=heads,
+            L=key_columns,
+            D_HEAD=dim,
+            ROUTE_GROUPS=route_groups,
+            BLOCK_J=block_j,
+            BLOCK_L=stripe_block_l,
+            BLOCK_D=block_d,
+            SCORE_SCALE=float(scale),
+            USE_EXP2=bool(use_exp2),
+            INLINE_LOCAL_SEED=bool(inline_local_seed),
+            PACK_KV=bool(pack_kv),
+            num_warps=int(num_warps),
+            num_stages=int(num_stages) if num_stages is not None else 3,
+        )
+        return merged_key, merged_value, routing_bias, None
 
     if use_key_outer_kernel:
         key_outer_groups = triton.cdiv(key_outer, key_outer_block)
