@@ -225,6 +225,37 @@ def exact_variants():
             "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_headmajor",
             "hard_route_routing_backend": "triton_direct_m32_n32_w1_s1_exp2",
         },
+        "hard_c4_headmajor_direct_m16_n64": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_headmajor",
+            "hard_route_routing_backend": "triton_direct_m16_n64_w1_s1_exp2",
+        },
+        "hard_c4_headmajor_direct_m32_n64": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_headmajor",
+            "hard_route_routing_backend": "triton_direct_m32_n64_w1_s1_exp2",
+        },
+        "hard_c4_headmajor_direct_m32_n128": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_headmajor",
+            "hard_route_routing_backend": "triton_direct_m32_n128_w1_s1_exp2",
+        },
+        "hard_c4_headmajor_direct_m64_n64": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_headmajor",
+            "hard_route_routing_backend": "triton_direct_m64_n64_w1_s1_exp2",
+        },
+        "hard_c4_headmajor_local_seed": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_headmajor",
+            "hard_route_routing_backend": "triton_direct_m32_n32_w1_s1_exp2",
+            "seed_mode": "local_with_ith",
+        },
+        "hard_c4_headmajor_strided_seed": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_headmajor",
+            "hard_route_routing_backend": "triton_direct_m32_n32_w1_s1_exp2",
+            "seed_mode": "strided_with_ith",
+        },
+        "hard_c4_headmajor_fast_seed": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_headmajor",
+            "hard_route_routing_backend": "triton_direct_m32_n32_w1_s1_exp2",
+            "seed_mode": "fast_random_with_ith",
+        },
         "hard_c4_direct_route_j16_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_direct_m32_n32_w1_s1_exp2": {
             "hard_route_backend": "triton_c4_direct_route_j16_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot",
             "hard_route_routing_backend": "triton_direct_m32_n32_w1_s1_exp2",
@@ -368,7 +399,7 @@ def install_probe(stats, args):
             query_outer_chunk=args.query_outer_chunk,
             layout="hard_route",
             num_merge_tokens=4,
-            seed_mode="random_with_ith",
+            seed_mode=kwargs.get("seed_mode", "random_with_ith"),
             seed=args.seed,
             hard_route_backend=kwargs["hard_route_backend"],
             hard_route_routing_backend=kwargs["hard_route_routing_backend"],
