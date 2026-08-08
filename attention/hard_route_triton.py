@@ -346,6 +346,7 @@ if triton is not None:
         H: tl.constexpr,
         L: tl.constexpr,
         D_HEAD: tl.constexpr,
+        ROUTE_GROUPS: tl.constexpr,
         BLOCK_J: tl.constexpr,
         BLOCK_L: tl.constexpr,
         BLOCK_D: tl.constexpr,
@@ -355,6 +356,7 @@ if triton is not None:
         LOGIT_INPUT_PRECISION: tl.constexpr,
         KEY_HEAD_MAJOR: tl.constexpr,
         INLINE_LOCAL_SEED: tl.constexpr,
+        TOKEN_MAJOR_OUTPUT: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -529,10 +531,16 @@ if triton is not None:
                 routing_bias = tl.where(has_keys, routing_bias, 0.0)
 
             route_token = route_token_base + seed_idx
-            route_offset = (
-                (route_group[:, None] * route_tokens + route_token) * D_HEAD
-                + dim_offsets[None, :]
-            )
+            if TOKEN_MAJOR_OUTPUT:
+                route_offset = (
+                    (route_token * ROUTE_GROUPS + route_group[:, None]) * D_HEAD
+                    + dim_offsets[None, :]
+                )
+            else:
+                route_offset = (
+                    (route_group[:, None] * route_tokens + route_token) * D_HEAD
+                    + dim_offsets[None, :]
+                )
             tl.store(
                 merged_key_ptr + route_offset,
                 merged_key,
@@ -543,7 +551,10 @@ if triton is not None:
                 merged_value,
                 mask=valid_query[:, None] & valid_dim[None, :],
             )
-            bias_offset = route_group * route_tokens + route_token
+            if TOKEN_MAJOR_OUTPUT:
+                bias_offset = route_token * ROUTE_GROUPS + route_group
+            else:
+                bias_offset = route_group * route_tokens + route_token
             tl.store(routing_bias_ptr + bias_offset, routing_bias, mask=valid_query)
 
     @triton.jit
@@ -934,6 +945,8 @@ if triton is not None:
         SCORE_SCALE: tl.constexpr,
         USE_EXP2: tl.constexpr,
         CAST_Q_TO_FP16: tl.constexpr,
+        KEY_TOKEN_MAJOR: tl.constexpr,
+        GROUPS: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_block_id = tl.program_id(1)
@@ -973,17 +986,30 @@ if triton is not None:
 
         for key_start in range(0, K_LEN, BLOCK_N):
             keys = key_start + key_offsets
-            k = tl.load(
-                key_base + keys[:, None] * D_HEAD + dim_offsets[None, :],
-                mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
-                other=0.0,
-            )
-            v = tl.load(
-                value_base + keys[:, None] * D_HEAD + dim_offsets[None, :],
-                mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
-                other=0.0,
-            )
-            bias = tl.load(bias_base + keys, mask=keys < K_LEN, other=float("inf"))
+            if KEY_TOKEN_MAJOR:
+                k = tl.load(
+                    key_ptr + (keys[:, None] * GROUPS + group_id) * D_HEAD + dim_offsets[None, :],
+                    mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
+                    other=0.0,
+                )
+                v = tl.load(
+                    value_ptr + (keys[:, None] * GROUPS + group_id) * D_HEAD + dim_offsets[None, :],
+                    mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
+                    other=0.0,
+                )
+                bias = tl.load(bias_ptr + keys * GROUPS + group_id, mask=keys < K_LEN, other=float("inf"))
+            else:
+                k = tl.load(
+                    key_base + keys[:, None] * D_HEAD + dim_offsets[None, :],
+                    mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
+                    other=0.0,
+                )
+                v = tl.load(
+                    value_base + keys[:, None] * D_HEAD + dim_offsets[None, :],
+                    mask=(keys[:, None] < K_LEN) & (dim_offsets[None, :] < D_HEAD),
+                    other=0.0,
+                )
+                bias = tl.load(bias_base + keys, mask=keys < K_LEN, other=float("inf"))
 
             logits = tl.dot(q_dot, tl.trans(k)) * SCORE_SCALE - bias[None, :]
             logits = tl.where(
@@ -1308,6 +1334,7 @@ def triton_direct_route_biased_attention(
     num_stages=1,
     use_exp2=True,
     out=None,
+    key_token_major=False,
 ):
     """Fused routing attention that reads/writes hard-route block layout.
 
@@ -1328,14 +1355,18 @@ def triton_direct_route_biased_attention(
     bias = bias.contiguous()
 
     batch, query_outer, query_rows, query_columns, heads, dim = query.shape
-    groups, key_len, key_dim = key.shape
+    if key_token_major:
+        key_len, groups, key_dim = key.shape
+    else:
+        groups, key_len, key_dim = key.shape
     expected_groups = batch * heads * query_outer * query_columns
     if groups != expected_groups:
         raise ValueError(
             "direct-route attention expects route-layout KV with "
             f"{expected_groups} groups, got {groups}."
         )
-    if key_dim != dim or value.shape != key.shape or bias.shape != (groups, key_len):
+    expected_bias_shape = (key_len, groups) if key_token_major else (groups, key_len)
+    if key_dim != dim or value.shape != key.shape or bias.shape != expected_bias_shape:
         raise ValueError("query/key/value/bias shapes are inconsistent for direct-route attention.")
 
     block_d = triton.next_power_of_2(dim)
@@ -1371,6 +1402,8 @@ def triton_direct_route_biased_attention(
         SCORE_SCALE=float(scale),
         USE_EXP2=bool(use_exp2),
         CAST_Q_TO_FP16=bool(key.dtype == torch.float16 and query.dtype != torch.float16),
+        KEY_TOKEN_MAJOR=bool(key_token_major),
+        GROUPS=groups,
         **meta,
     )
     return out
@@ -1809,6 +1842,7 @@ def triton_hard_route_merge_c4_direct_route(
     logit_input_precision="ieee",
     key_head_major=False,
     inline_local_seed=False,
+    token_major_output=False,
 ):
     """Exact non-shared C=4 merge that writes routing-ready K/V/bias.
 
@@ -1864,21 +1898,29 @@ def triton_hard_route_merge_c4_direct_route(
     route_tokens = key_outer * key_rows * 4
     if merged_dtype is None:
         merged_dtype = key.dtype
+    if token_major_output:
+        merged_shape = (route_tokens, route_groups, dim)
+        bias_shape = (route_tokens, route_groups)
+        cache_suffix = "token_major"
+    else:
+        merged_shape = (route_groups, route_tokens, dim)
+        bias_shape = (route_groups, route_tokens)
+        cache_suffix = "group_major"
     merged_key = _cached_empty(
-        "hard_route_c4_direct_route_key",
-        (route_groups, route_tokens, dim),
+        f"hard_route_c4_direct_route_key_{cache_suffix}",
+        merged_shape,
         key.device,
         merged_dtype,
     )
     merged_value = _cached_empty(
-        "hard_route_c4_direct_route_value",
-        (route_groups, route_tokens, dim),
+        f"hard_route_c4_direct_route_value_{cache_suffix}",
+        merged_shape,
         key.device,
         merged_dtype,
     )
     routing_bias = _cached_empty(
-        "hard_route_c4_direct_route_bias",
-        (route_groups, route_tokens),
+        f"hard_route_c4_direct_route_bias_{cache_suffix}",
+        bias_shape,
         key.device,
         bias_dtype,
     )
@@ -1906,6 +1948,7 @@ def triton_hard_route_merge_c4_direct_route(
         H=heads,
         L=key_columns,
         D_HEAD=dim,
+        ROUTE_GROUPS=route_groups,
         BLOCK_J=block_j,
         BLOCK_L=block_l,
         BLOCK_D=block_d,
@@ -1915,6 +1958,7 @@ def triton_hard_route_merge_c4_direct_route(
         LOGIT_INPUT_PRECISION=logit_input_precision,
         KEY_HEAD_MAJOR=bool(key_head_major),
         INLINE_LOCAL_SEED=bool(inline_local_seed),
+        TOKEN_MAJOR_OUTPUT=bool(token_major_output),
         **launch_kwargs,
     )
     return merged_key, merged_value, routing_bias, None
