@@ -23,7 +23,7 @@ _SEED_ROWS_CACHE = {}
 
 
 def uses_head_major_kv_backend(backend):
-    return "_headmajor" in str(backend or "").lower()
+    return str(backend or "").lower().endswith("_headmajor")
 
 
 def _cached_seed_rows(
@@ -140,15 +140,9 @@ def _merge(seed_queries, k, v, backend, scale):
 
 def _direct_route_merge(q, seed_rows, k, v, backend, scale):
     backend = (backend or "").lower()
-    key_head_major = "_headmajor" in backend
+    key_head_major = backend.endswith("_headmajor")
     if key_head_major:
-        backend = backend.replace("_headmajor", "")
-    key_row_block = 1
-    for suffix, value in (("_kr2", 2), ("_kr3", 3), ("_kr5", 5)):
-        if backend.endswith(suffix):
-            backend = backend[: -len(suffix)]
-            key_row_block = value
-            break
+        backend = backend[: -len("_headmajor")]
     if backend == "triton_c4_direct_route_j16_w2":
         return triton_hard_route_merge_c4_direct_route(
             q,
@@ -291,7 +285,6 @@ def _direct_route_merge(q, seed_rows, k, v, backend, scale):
             num_stages=1,
             logit_input_precision="tf32",
             key_head_major=key_head_major,
-            key_row_block=key_row_block,
         )
     if backend == "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_bf16bias_s2":
         return triton_hard_route_merge_c4_direct_route(
