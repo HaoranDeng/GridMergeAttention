@@ -49,8 +49,11 @@ def _dtype_bytes(dtype):
     raise ValueError(f"unsupported dtype for estimate: {dtype}")
 
 
-def _packed_kvbias_width(dim):
-    return ((2 * int(dim) + 1 + 15) // 16) * 16
+def _packed_kvbias_width(dim, compact=False):
+    width = 2 * int(dim) + 1
+    if compact:
+        return width
+    return ((width + 15) // 16) * 16
 
 
 def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant):
@@ -77,7 +80,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         chunk_outer = min(int(query_outer_chunk), int(frames) - start)
         route_groups = int(batch) * int(heads) * chunk_outer * int(width)
         if merge_config.use_packed_bias:
-            packed_width = _packed_kvbias_width(dim)
+            packed_width = _packed_kvbias_width(dim, compact=merge_config.use_compact_packed_bias)
             chunk_bytes = route_tokens * route_groups * packed_width * materialized_key_bytes
         else:
             chunk_bytes = route_tokens * route_groups * (dim * key_bytes + dim * value_bytes + bias_bytes)
@@ -98,7 +101,12 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         "value_dtype": "bf16" if merge_config.use_bf16_merged_value else "fp16",
         "bias_dtype": "bf16" if merge_config.use_bf16_routing_bias else "fp16",
         "packs_routing_bias": merge_config.use_packed_bias,
-        "packed_width": _packed_kvbias_width(dim) if merge_config.use_packed_bias else None,
+        "compact_packed_bias": merge_config.use_compact_packed_bias,
+        "packed_width": (
+            _packed_kvbias_width(dim, compact=merge_config.use_compact_packed_bias)
+            if merge_config.use_packed_bias
+            else None
+        ),
         "writes_merged_key": not merge_config.use_seed_key,
     }
 
@@ -269,8 +277,15 @@ def exact_variants():
         "hard_c4_bestlogit_packkvbias_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "packkvbias"), seed_mode="local_with_ith"
         ),
+        "hard_c4_bestlogit_packkvbiascompact_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "packkvbiascompact"), seed_mode="local_with_ith"
+        ),
         "hard_c4_bestlogit_recompute_packkvbias_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "recompute", "packkvbias"),
+            seed_mode="local_with_ith",
+        ),
+        "hard_c4_bestlogit_recompute_packkvbiascompact_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "recompute", "packkvbiascompact"),
             seed_mode="local_with_ith",
         ),
         "hard_c4_bestlogit_packkv_tokenmajor_n32_s1": exact_backend(
@@ -283,11 +298,20 @@ def exact_variants():
             seed_mode="local_with_ith",
             routing_backend=direct_routing_backend(block_n=32),
         ),
+        "hard_c4_bestlogit_packkvbiascompact_tokenmajor_n32_s1": exact_backend(
+            direct_merge_backend("bestlogit", "packkvbiascompact"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=32),
+        ),
         "hard_c4_bestlogit_maskassign_packkv_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "maskassign", "packkv"), seed_mode="local_with_ith"
         ),
         "hard_c4_bestlogit_maskassign_packkvbias_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "maskassign", "packkvbias"),
+            seed_mode="local_with_ith",
+        ),
+        "hard_c4_bestlogit_maskassign_packkvbiascompact_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "maskassign", "packkvbiascompact"),
             seed_mode="local_with_ith",
         ),
         "hard_c4_bestlogit_maskassign_packkv_tokenmajor_n32_s1": exact_backend(
@@ -297,6 +321,11 @@ def exact_variants():
         ),
         "hard_c4_bestlogit_maskassign_packkvbias_tokenmajor_n32_s1": exact_backend(
             direct_merge_backend("bestlogit", "maskassign", "packkvbias"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=32),
+        ),
+        "hard_c4_bestlogit_maskassign_packkvbiascompact_tokenmajor_n32_s1": exact_backend(
+            direct_merge_backend("bestlogit", "maskassign", "packkvbiascompact"),
             seed_mode="local_with_ith",
             routing_backend=direct_routing_backend(block_n=32),
         ),

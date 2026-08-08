@@ -32,6 +32,7 @@ _DIRECT_ROUTE_FLAG_SUFFIXES = (
     ("_recompute", "use_recompute_merge"),
     ("_bestlogit", "use_assigned_logit"),
     ("_maskassign", "use_mask_assign"),
+    ("_packkvbiascompact", ("use_packed_kv", "use_packed_bias", "use_compact_packed_bias")),
     ("_packkvbias", ("use_packed_kv", "use_packed_bias")),
     ("_packkv", "use_packed_kv"),
     ("_bf16kv", ("use_bf16_merged_key", "use_bf16_merged_value")),
@@ -54,6 +55,7 @@ class DirectRouteMergeConfig:
     use_bf16_merged_value: bool = False
     use_bf16_routing_bias: bool = False
     use_mask_assign: bool = False
+    use_compact_packed_bias: bool = False
     use_packed_bias: bool = False
     use_packed_kv: bool = False
     use_recompute_merge: bool = False
@@ -114,6 +116,7 @@ def parse_direct_route_backend(backend):
         "use_bf16_merged_value": False,
         "use_bf16_routing_bias": False,
         "use_mask_assign": False,
+        "use_compact_packed_bias": False,
         "use_packed_bias": False,
         "use_packed_kv": False,
         "use_recompute_merge": False,
@@ -182,6 +185,7 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         use_mask_assign=config.use_mask_assign,
         pack_kv=config.use_packed_kv,
         pack_bias=config.use_packed_bias,
+        compact_packed_bias=config.use_compact_packed_bias,
         use_recompute_merge=config.use_recompute_merge,
         use_stripe_assign=config.use_stripe_assign,
         use_seed_key=config.use_seed_key,
@@ -286,6 +290,7 @@ def direct_compressed_attention_packed_kvbias(
     scale,
     output=None,
     assume_contiguous=False,
+    compact_packed_bias=False,
 ):
     config = _parse_tokenmajor_attention_backend(backend)
     if config is None:
@@ -305,6 +310,7 @@ def direct_compressed_attention_packed_kvbias(
         out=output,
         assume_contiguous=assume_contiguous,
         bias_in_packed_kv=True,
+        compact_packed_bias=compact_packed_bias,
     )
 
 

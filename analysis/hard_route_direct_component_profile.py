@@ -167,6 +167,7 @@ def route_compressed_tokens(q_chunk, merged_key, merged_value, routing_bias, var
                 scale,
                 output=output,
                 assume_contiguous=True,
+                compact_packed_bias=config.use_compact_packed_bias,
             )
         else:
             routed = direct_compressed_attention_packed_kv(

@@ -196,6 +196,7 @@ def _route_direct_outputs(q, key, value, bias, direct_config, routing_backend, s
                 scale,
                 output=output,
                 assume_contiguous=True,
+                compact_packed_bias=direct_config.use_compact_packed_bias,
             )
         return direct_compressed_attention_packed_kv(
             q,
