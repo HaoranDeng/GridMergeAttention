@@ -557,6 +557,8 @@ def install_probe(stats, args):
         "calls_current_prompt": 0,
         "warmed": False,
         "intermediate_estimates": {},
+        "disabled_variants": set(),
+        "variant_errors": {},
     }
 
     def run_dense(q, k, v, self):
@@ -608,8 +610,12 @@ def install_probe(stats, args):
 
         if should_record and not state["warmed"]:
             _ = run_dense(q, k, v, self)
-            for kwargs in variants.values():
-                _ = run_variant(q, k, v, grid_size, kwargs)
+            for name, kwargs in variants.items():
+                try:
+                    _ = run_variant(q, k, v, grid_size, kwargs)
+                except Exception as exc:
+                    state["disabled_variants"].add(name)
+                    state["variant_errors"][name] = repr(exc)
             sync()
             state["warmed"] = True
 
@@ -628,9 +634,15 @@ def install_probe(stats, args):
             for name, kwargs in variants.items():
                 if name == "hard_c4_baseline":
                     continue
-                out, seconds = timed(lambda kwargs=kwargs: run_variant(q, k, v, grid_size, kwargs))
-                stats[name].add_time(seconds)
-                stats[name].add_error(out, dense, baseline=baseline)
+                if name in state["disabled_variants"]:
+                    continue
+                try:
+                    out, seconds = timed(lambda kwargs=kwargs: run_variant(q, k, v, grid_size, kwargs))
+                    stats[name].add_time(seconds)
+                    stats[name].add_error(out, dense, baseline=baseline)
+                except Exception as exc:
+                    state["disabled_variants"].add(name)
+                    state["variant_errors"][name] = repr(exc)
             x = dense
         else:
             x = run_dense(q, k, v, self)
@@ -752,6 +764,7 @@ def main():
         "query_outer_chunk": args.query_outer_chunk,
         "wall_seconds": wall_seconds,
         "variants": variant_summaries,
+        "variant_errors": probe_state["variant_errors"],
     }
     output_path = Path(args.output_json)
     output_path.parent.mkdir(parents=True, exist_ok=True)

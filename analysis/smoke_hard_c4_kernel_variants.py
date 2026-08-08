@@ -90,30 +90,44 @@ def main():
         "hard_c4_bestlogit_recompute_packkvbiascompact_tokenmajor",
     ]
 
-    outputs = {}
     results = {}
-    for name in names:
-        torch.cuda.synchronize()
-        out = run_variant(q, k, v, variants[name])
-        torch.cuda.synchronize()
-        outputs[name] = out
 
-    ref = outputs["hard_c4_bestlogit_tokenmajor"]
-    for name, out in outputs.items():
-        diff = (out.float() - ref.float()).abs()
-        results[name] = {
-            "shape": list(out.shape),
-            "max_abs_vs_bestlogit": float(diff.max().item()),
-            "rel_l2_vs_bestlogit": rel_l2(out, ref),
-            "mean_ms": time_variant(
+    ref_name = "hard_c4_bestlogit_tokenmajor"
+    torch.cuda.synchronize()
+    ref = run_variant(q, k, v, variants[ref_name])
+    torch.cuda.synchronize()
+    ref_time = time_variant(q, k, v, variants[ref_name], warmup=args.warmup, repeats=args.repeats)
+    results[ref_name] = {
+        "shape": list(ref.shape),
+        "max_abs_vs_bestlogit": 0.0,
+        "rel_l2_vs_bestlogit": 0.0,
+        "mean_ms": ref_time,
+    }
+
+    for name in names:
+        if name == ref_name:
+            continue
+        torch.cuda.synchronize()
+        try:
+            out = run_variant(q, k, v, variants[name])
+            torch.cuda.synchronize()
+            diff = (out.float() - ref.float()).abs()
+            mean_ms = time_variant(
                 q,
                 k,
                 v,
                 variants[name],
                 warmup=args.warmup,
                 repeats=args.repeats,
-            ),
-        }
+            )
+            results[name] = {
+                "shape": list(out.shape),
+                "max_abs_vs_bestlogit": float(diff.max().item()),
+                "rel_l2_vs_bestlogit": rel_l2(out, ref),
+                "mean_ms": mean_ms,
+            }
+        except Exception as exc:
+            results[name] = {"error": repr(exc)}
 
     payload = {
         "device": torch.cuda.get_device_name(0),
