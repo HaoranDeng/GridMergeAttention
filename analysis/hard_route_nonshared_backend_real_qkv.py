@@ -92,7 +92,13 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         and not merge_config.use_indirect_top_key
         and not merge_config.use_indirect_top_kv
     )
-    value_index_bytes = 4 if merge_config.use_indirect_top2_value else (2 if writes_separate_value_index else 0)
+    if merge_config.use_indirect_top2_value:
+        # Two int16 source-value columns are stored for each compressed token.
+        value_index_bytes = 4
+    elif writes_separate_value_index:
+        value_index_bytes = 2
+    else:
+        value_index_bytes = 0
     bias_dtype = (
         torch.float32
         if merge_config.use_fp32_routing_bias
@@ -165,7 +171,11 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         "key_scale_dtype": (
             "fp32"
             if writes_key_scale and merge_config.use_fp32_key_scale
-            else ("fp16_top2_value_mix" if merge_config.use_indirect_top2_value else ("fp16" if writes_key_scale else None))
+            else (
+                "fp16_top2_value_mix"
+                if merge_config.use_indirect_top2_value
+                else ("fp16" if writes_key_scale else None)
+            )
         ),
         "block_j_target": merge_config.block_j_target,
         "block_l_target": merge_config.block_l_target or None,
