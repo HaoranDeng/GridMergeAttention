@@ -2854,6 +2854,7 @@ if triton is not None:
                 active = valid_block & valid_source_key[None, :] & (assignments[None, :] == seed_offsets[:, None])
                 merge_logits = forced_logits[None, :] + tl.zeros((4, BLOCK_L), tl.float32)
                 row_max = tl.max(tl.where(active, merge_logits, -float("inf")), axis=1)
+                row_max = tl.where(valid_block, row_max, 0.0)
                 if USE_EXP2:
                     merge_probs = tl.where(
                         active,

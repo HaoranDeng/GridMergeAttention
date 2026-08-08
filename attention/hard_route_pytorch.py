@@ -1,3 +1,12 @@
+"""Readable PyTorch reference for hard-route token merging.
+
+This file is intentionally simple rather than fast. The Triton kernels should
+match the tensor math here:
+  1. seed queries score every key inside one grid block;
+  2. every key is assigned to the seed with the largest score;
+  3. each seed runs a softmax over only its assigned keys and merges K/V.
+"""
+
 import torch
 
 
@@ -17,7 +26,9 @@ def assign_keys_to_seeds(seed_key_logits):
     best_seed = seed_key_logits.argmax(dim=-2, keepdim=True)
     assigned = torch.zeros_like(seed_key_logits, dtype=torch.bool)
     assigned.scatter_(dim=-2, index=best_seed, value=True)
-    assigned[..., 0:1] |= ~assigned.any(dim=-1, keepdim=True)
+
+    empty_seed = ~assigned.any(dim=-1, keepdim=True)
+    assigned[..., :1] |= empty_seed
     return assigned
 
 
@@ -34,8 +45,8 @@ def hard_cluster_weights(seed_key_logits, dtype):
     routing_bias:    [..., C]
     """
     assigned = assign_keys_to_seeds(seed_key_logits)
-    masked_logits = seed_key_logits.float().masked_fill(~assigned, FLOAT32_NEG_INF)
-    log_weights = masked_logits - torch.logsumexp(masked_logits, dim=-1, keepdim=True)
+    logits = seed_key_logits.float().masked_fill(~assigned, FLOAT32_NEG_INF)
+    log_weights = logits - torch.logsumexp(logits, dim=-1, keepdim=True)
 
     weights = log_weights.exp().masked_fill(~assigned, 0.0)
     log_weights = log_weights.masked_fill(~assigned, 0.0)
@@ -43,18 +54,15 @@ def hard_cluster_weights(seed_key_logits, dtype):
     return weights.to(dtype), routing_bias
 
 
-def _row_layout_logits(seed_queries, key, scale):
-    # seed_queries: [B, A, F, K, J, C, H, D]
-    # key:          [B,    F, K, L,    H, D]
-    # logits:       [B, H, A, F, K, J, C, L]
-    return torch.einsum("bafkjchd,bfklhd->bhafkjcl", seed_queries, key).float() * float(scale)
+def _scaled_seed_key_logits(equation, seed_queries, key, scale):
+    return torch.einsum(equation, seed_queries, key).float() * float(scale)
 
 
-def _transpose_layout_logits(seed_queries, key, scale):
-    # seed_queries: [B, A, F, I, L, C, H, D]
-    # key:          [B,    F, K, L,    H, D]
-    # logits:       [B, H, A, F, I, L, C, K]
-    return torch.einsum("bafilchd,bfklhd->bhafilck", seed_queries, key).float() * float(scale)
+def _merge_kv(weights, key, value, key_equation, value_equation):
+    return (
+        torch.einsum(key_equation, weights, key),
+        torch.einsum(value_equation, weights, value),
+    )
 
 
 def hard_route_merge_kv_pytorch(seed_queries, key, value, scale):
@@ -69,12 +77,21 @@ def hard_route_merge_kv_pytorch(seed_queries, key, value, scale):
     merged K/V:   [B, A, F, J, K, C, H, D]
     bias:         [B, H, A, F, K, J, C]
     """
-    weights, routing_bias = hard_cluster_weights(
-        _row_layout_logits(seed_queries, key, scale),
-        key.dtype,
+    # logits: [B, H, A, F, K, J, C, L]
+    seed_key_logits = _scaled_seed_key_logits(
+        "bafkjchd,bfklhd->bhafkjcl",
+        seed_queries,
+        key,
+        scale,
     )
-    merged_key = torch.einsum("bhafkjcl,bfklhd->bafjkchd", weights, key)
-    merged_value = torch.einsum("bhafkjcl,bfklhe->bafjkche", weights, value)
+    weights, routing_bias = hard_cluster_weights(seed_key_logits, key.dtype)
+    merged_key, merged_value = _merge_kv(
+        weights,
+        key,
+        value,
+        "bhafkjcl,bfklhd->bafjkchd",
+        "bhafkjcl,bfklhe->bafjkche",
+    )
     return merged_key, merged_value, routing_bias
 
 
@@ -84,12 +101,21 @@ def hard_route_merge_kv_transpose_pytorch(seed_queries, key, value, scale):
     The regular block is I queries x L keys. The transposed block is
     J queries x K keys, so seed query columns compress key rows.
     """
-    weights, routing_bias = hard_cluster_weights(
-        _transpose_layout_logits(seed_queries, key, scale),
-        key.dtype,
+    # logits: [B, H, A, F, I, L, C, K]
+    seed_key_logits = _scaled_seed_key_logits(
+        "bafilchd,bfklhd->bhafilck",
+        seed_queries,
+        key,
+        scale,
     )
-    merged_key = torch.einsum("bhafilck,bfklhd->bafilchd", weights, key)
-    merged_value = torch.einsum("bhafilck,bfklhe->bafilche", weights, value)
+    weights, routing_bias = hard_cluster_weights(seed_key_logits, key.dtype)
+    merged_key, merged_value = _merge_kv(
+        weights,
+        key,
+        value,
+        "bhafilck,bfklhd->bafilchd",
+        "bhafilck,bfklhe->bafilche",
+    )
     return merged_key, merged_value, routing_bias
 
 
