@@ -114,6 +114,9 @@ def exact_variants():
         "hard_c4_full_core_tokenmajor": exact_backend(
             direct_merge_backend(), seed_mode="local_with_ith"
         ),
+        "hard_c4_keyouter_f1_tokenmajor": exact_backend(
+            direct_merge_backend("f1"), seed_mode="local_with_ith"
+        ),
         "hard_c4_full_core_tokenmajor_n16_s2": exact_backend(
             direct_merge_backend(),
             seed_mode="local_with_ith",

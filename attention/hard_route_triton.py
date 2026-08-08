@@ -1242,6 +1242,7 @@ def triton_hard_route_merge_c4_direct_route(
     logit_input_precision="ieee",
     inline_local_seed=False,
     key_outer_block=1,
+    use_key_outer_kernel=False,
     use_assigned_logit=False,
     assume_contiguous=False,
 ):
@@ -1325,9 +1326,10 @@ def triton_hard_route_merge_c4_direct_route(
     key_outer_block = int(key_outer_block)
     if key_outer_block not in (1, 2, 3, 4, 5, 6, 7):
         raise ValueError(f"key_outer_block must be between 1 and 7, got {key_outer_block}.")
+    use_key_outer_kernel = bool(use_key_outer_kernel or key_outer_block != 1)
     if use_assigned_logit and not force_seed_keys:
         raise ValueError("use_assigned_logit currently requires force_seed_keys=True.")
-    if key_outer_block in (2, 3, 4, 5, 6, 7) and (
+    if use_key_outer_kernel and (
         (not inline_local_seed)
         or block_j != 32
         or int(num_warps) != 2
@@ -1339,11 +1341,11 @@ def triton_hard_route_merge_c4_direct_route(
         or logit_input_precision != "tf32"
     ):
         raise ValueError(
-            "key_outer_block > 1 is specialized for the current token-major "
+            "key-outer direct-route merge is specialized for the current token-major "
             "inline-local-seed hard C4 fast path."
         )
 
-    if key_outer_block in (2, 3, 4, 5, 6, 7):
+    if use_key_outer_kernel:
         key_outer_groups = triton.cdiv(key_outer, key_outer_block)
         grid = (
             batch * query_outer * key_outer_groups * key_rows * heads,

@@ -36,6 +36,7 @@ _DIRECT_ROUTE_ATTENTION_CONFIGS = {
     "triton_direct_m32_n64_w2_s1_exp2": (32, 64, 2, 1),
 }
 _DIRECT_ROUTE_KEY_OUTER_BLOCKS = {
+    "f1": 1,
     "f2": 2,
     "f3": 3,
     "f4": 4,
@@ -50,6 +51,7 @@ class DirectRouteMergeConfig:
     supported: bool
     inline_local_seed: bool = False
     key_outer_block: int = 1
+    use_key_outer_kernel: bool = False
     use_assigned_logit: bool = False
     use_bf16_merged_kv: bool = False
 
@@ -72,6 +74,7 @@ def _parse_direct_route_backend(backend):
     backend, token_major_output = _remove_suffix(backend, "_tokenmajor")
 
     key_outer_block = 1
+    use_key_outer_kernel = False
     use_assigned_logit = False
     use_bf16_merged_kv = False
     changed = True
@@ -82,6 +85,7 @@ def _parse_direct_route_backend(backend):
             backend, matched = _remove_suffix(backend, token)
             if matched:
                 key_outer_block = block
+                use_key_outer_kernel = True
                 changed = True
         backend, matched = _remove_suffix(backend, "_bestlogit")
         if matched:
@@ -96,6 +100,7 @@ def _parse_direct_route_backend(backend):
         supported=token_major_output and backend == _DIRECT_ROUTE_C4_BASE,
         inline_local_seed=inline_local_seed,
         key_outer_block=key_outer_block,
+        use_key_outer_kernel=use_key_outer_kernel,
         use_assigned_logit=use_assigned_logit,
         use_bf16_merged_kv=use_bf16_merged_kv,
     )
@@ -256,6 +261,7 @@ def _direct_route_merge(q, seed_rows, k, v, config, scale, assume_contiguous=Fal
         logit_input_precision="tf32",
         inline_local_seed=config.inline_local_seed,
         key_outer_block=config.key_outer_block,
+        use_key_outer_kernel=config.use_key_outer_kernel,
         use_assigned_logit=config.use_assigned_logit,
         assume_contiguous=assume_contiguous and config.inline_local_seed,
     )
