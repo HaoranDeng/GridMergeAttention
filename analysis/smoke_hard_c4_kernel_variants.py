@@ -45,6 +45,12 @@ def time_variant(q, k, v, variant, warmup, repeats):
     return float(start.elapsed_time(end) / max(repeats, 1))
 
 
+def write_payload(output_json, payload):
+    output_path = Path(output_json)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(payload, indent=2) + "\n")
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Smoke-test hard C4 Triton variants on random tensors.")
     parser.add_argument("--output_json", required=True)
@@ -79,18 +85,30 @@ def main():
     variants = exact_variants()
     names = [
         "hard_c4_bestlogit_tokenmajor",
-        "hard_c4_bestlogit_j52_tokenmajor",
         "hard_c4_bestlogit_packkv_tokenmajor",
         "hard_c4_bestlogit_packkvbias_tokenmajor",
         "hard_c4_bestlogit_packkvbiascompact_tokenmajor",
-        "hard_c4_bestlogit_packkvbiascompact_j52_tokenmajor",
         "hard_c4_bestlogit_recompute_tokenmajor",
         "hard_c4_bestlogit_recompute_packkv_tokenmajor",
         "hard_c4_bestlogit_recompute_packkvbias_tokenmajor",
         "hard_c4_bestlogit_recompute_packkvbiascompact_tokenmajor",
+        # Keep wider-tile experiments last: an illegal memory access here should
+        # not prevent earlier, safer variant results from being saved.
+        "hard_c4_bestlogit_j52_tokenmajor",
+        "hard_c4_bestlogit_packkvbiascompact_j52_tokenmajor",
     ]
 
     results = {}
+    payload = {
+        "device": torch.cuda.get_device_name(0),
+        "dtype": args.dtype,
+        "shape_q": list(shape_q),
+        "shape_kv": list(shape_kv),
+        "warmup": args.warmup,
+        "repeats": args.repeats,
+        "results": results,
+        "complete": False,
+    }
 
     ref_name = "hard_c4_bestlogit_tokenmajor"
     torch.cuda.synchronize()
@@ -103,6 +121,7 @@ def main():
         "rel_l2_vs_bestlogit": 0.0,
         "mean_ms": ref_time,
     }
+    write_payload(args.output_json, payload)
 
     for name in names:
         if name == ref_name:
@@ -128,19 +147,10 @@ def main():
             }
         except Exception as exc:
             results[name] = {"error": repr(exc)}
+        write_payload(args.output_json, payload)
 
-    payload = {
-        "device": torch.cuda.get_device_name(0),
-        "dtype": args.dtype,
-        "shape_q": list(shape_q),
-        "shape_kv": list(shape_kv),
-        "warmup": args.warmup,
-        "repeats": args.repeats,
-        "results": results,
-    }
-    output_path = Path(args.output_json)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(payload, indent=2) + "\n")
+    payload["complete"] = True
+    write_payload(args.output_json, payload)
     print(json.dumps(payload, indent=2))
 
 
