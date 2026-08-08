@@ -24,6 +24,14 @@ _DIRECT_ROUTE_ATTENTION_CONFIGS = {
     "triton_direct_m32_n16_w1_s1_exp2": (32, 16, 1),
     "triton_direct_m32_n32_w1_s1_exp2": (32, 32, 1),
 }
+_DIRECT_ROUTE_KEY_OUTER_BLOCKS = {
+    "f2": 2,
+    "f3": 3,
+    "f4": 4,
+    "f5": 5,
+    "f6": 6,
+    "f7": 7,
+}
 
 
 @dataclass(frozen=True)
@@ -55,22 +63,12 @@ def _parse_direct_route_backend(backend):
     changed = True
     while changed:
         changed = False
-        if backend.endswith("_f2"):
-            backend = backend[: -len("_f2")]
-            key_outer_block = 2
-            changed = True
-        if backend.endswith("_f3"):
-            backend = backend[: -len("_f3")]
-            key_outer_block = 3
-            changed = True
-        if backend.endswith("_f4"):
-            backend = backend[: -len("_f4")]
-            key_outer_block = 4
-            changed = True
-        if backend.endswith("_f7"):
-            backend = backend[: -len("_f7")]
-            key_outer_block = 7
-            changed = True
+        for suffix, block in _DIRECT_ROUTE_KEY_OUTER_BLOCKS.items():
+            token = f"_{suffix}"
+            if backend.endswith(token):
+                backend = backend[: -len(token)]
+                key_outer_block = block
+                changed = True
         if backend.endswith("_bestlogit"):
             backend = backend[: -len("_bestlogit")]
             use_assigned_logit = True
