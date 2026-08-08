@@ -2170,6 +2170,7 @@ def triton_hard_route_merge_c4_direct_route(
     value,
     scale=1.0,
     block_j_target=16,
+    block_l_target=0,
     num_warps=2,
     bias_dtype=torch.float32,
     merged_dtype=None,
@@ -2241,8 +2242,13 @@ def triton_hard_route_merge_c4_direct_route(
         raise ValueError("seed-key routing requires key_rows == query_rows.")
 
     block_j = min(int(block_j_target), triton.next_power_of_2(query_columns))
-    block_l = triton.next_power_of_2(key_columns)
+    default_block_l = triton.next_power_of_2(key_columns)
+    block_l = int(block_l_target) if int(block_l_target or 0) else default_block_l
     block_d = triton.next_power_of_2(dim)
+    if block_l < key_columns:
+        raise ValueError(
+            f"block_l_target={block_l} is smaller than key columns {key_columns}."
+        )
     if block_l > 128:
         raise ValueError(f"Triton hard-route merge supports at most 128 key tokens per block, got {key_columns}.")
     if block_d > 128:

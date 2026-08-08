@@ -18,6 +18,7 @@ _DIRECT_ROUTE_C4_RE = re.compile(
 _DIRECT_ROUTE_ATTENTION_RE = re.compile(
     r"^triton_direct_m(?P<m>\d+)_n(?P<n>\d+)_w(?P<w>\d+)_s(?P<s>\d+)_exp2$"
 )
+_DIRECT_ROUTE_KEY_TILE_RE = re.compile(r"^(?P<base>.+)_l(?P<l>\d+)$")
 
 _DIRECT_ROUTE_KEY_OUTER_BLOCKS = {
     "f1": 1,
@@ -51,6 +52,7 @@ class DirectRouteMergeConfig:
     supported: bool
     inline_local_seed: bool = False
     block_j_target: int = 32
+    block_l_target: int = 0
     key_outer_block: int = 1
     use_key_outer_kernel: bool = False
     use_assigned_logit: bool = False
@@ -112,6 +114,7 @@ def parse_direct_route_backend(backend):
     backend, token_major_output = _remove_suffix(backend, "_tokenmajor")
 
     options = {
+        "block_l_target": 0,
         "key_outer_block": 1,
         "use_key_outer_kernel": False,
         "use_assigned_logit": False,
@@ -140,6 +143,12 @@ def parse_direct_route_backend(backend):
         if matched_any_suffix:
             continue
 
+        match = _DIRECT_ROUTE_KEY_TILE_RE.fullmatch(backend)
+        if match is not None:
+            options["block_l_target"] = int(match.group("l"))
+            backend = match.group("base")
+            continue
+
         for suffix, field in _DIRECT_ROUTE_FLAG_SUFFIXES:
             backend, matched = _remove_suffix(backend, suffix)
             if matched:
@@ -154,6 +163,8 @@ def parse_direct_route_backend(backend):
     supported = token_major_output and match is not None
     block_j_target = int(match.group("j")) if match is not None else 32
     if block_j_target not in {16, 32, 52, 64}:
+        supported = False
+    if options["block_l_target"] not in {0, 52, 64, 128}:
         supported = False
 
     return DirectRouteMergeConfig(
@@ -180,6 +191,7 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         value,
         scale=scale,
         block_j_target=config.block_j_target,
+        block_l_target=config.block_l_target,
         num_warps=2,
         bias_dtype=torch.bfloat16 if config.use_bf16_routing_bias else torch.float16,
         merged_key_dtype=torch.bfloat16 if config.use_bf16_merged_key else torch.float16,

@@ -92,10 +92,12 @@ def main():
         "hard_c4_bestlogit_recompute_packkv_tokenmajor",
         "hard_c4_bestlogit_recompute_packkvbias_tokenmajor",
         "hard_c4_bestlogit_recompute_packkvbiascompact_tokenmajor",
-        # Keep wider-tile experiments last: an illegal memory access here should
-        # not prevent earlier, safer variant results from being saved.
+        # Keep non-power-of-two tile experiments last: an illegal memory access
+        # here should not prevent safer variant results from being saved.
         "hard_c4_bestlogit_j52_tokenmajor",
         "hard_c4_bestlogit_packkvbiascompact_j52_tokenmajor",
+        "hard_c4_bestlogit_l52_tokenmajor",
+        "hard_c4_bestlogit_packkvbiascompact_l52_tokenmajor",
     ]
 
     results = {}
