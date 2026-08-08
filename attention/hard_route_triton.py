@@ -3459,6 +3459,7 @@ __all__ = [
     "triton_biased_attention",
     "triton_direct_route_biased_attention",
     "triton_direct_route_biased_attention_g2",
+    "triton_direct_route_indirect_value_attention",
     "triton_direct_route_seed_key_attention",
     "triton_direct_route_top_key_attention",
     "triton_hard_route_merge",
