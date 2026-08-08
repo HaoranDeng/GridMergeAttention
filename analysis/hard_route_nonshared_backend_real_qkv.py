@@ -58,7 +58,9 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
     batch, _, heads, dim = q.shape
     frames, height, width = grid_size
     route_tokens = int(frames) * int(height) * 4
-    key_bytes = _dtype_bytes(torch.bfloat16 if merge_config.use_bf16_merged_key else torch.float16)
+    key_bytes = 0 if merge_config.use_seed_key else _dtype_bytes(
+        torch.bfloat16 if merge_config.use_bf16_merged_key else torch.float16
+    )
     value_bytes = _dtype_bytes(torch.bfloat16 if merge_config.use_bf16_merged_value else torch.float16)
     bias_bytes = _dtype_bytes(torch.bfloat16 if merge_config.use_bf16_routing_bias else torch.float16)
 
@@ -82,6 +84,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         "key_dtype": "bf16" if merge_config.use_bf16_merged_key else "fp16",
         "value_dtype": "bf16" if merge_config.use_bf16_merged_value else "fp16",
         "bias_dtype": "bf16" if merge_config.use_bf16_routing_bias else "fp16",
+        "writes_merged_key": not merge_config.use_seed_key,
     }
 
 
