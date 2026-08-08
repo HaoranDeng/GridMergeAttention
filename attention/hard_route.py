@@ -281,6 +281,28 @@ def _direct_route_merge(q, seed_rows, k, v, backend, scale):
             force_seed_keys=True,
             num_stages=1,
             logit_input_precision="tf32",
+            key_head_major=key_head_major,
+            inline_local_seed=inline_local_seed,
+            token_major_output=token_major_output,
+        )
+    if backend == "triton_c4_direct_route_j32_w1_exp2merge_forcekeys_fp16kvbias_s1_fastdot":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=1,
+            bias_dtype=torch.float16,
+            merged_dtype=torch.float16,
+            use_exp2=True,
+            force_seed_keys=True,
+            num_stages=1,
+            logit_input_precision="tf32",
+            key_head_major=key_head_major,
+            inline_local_seed=inline_local_seed,
+            token_major_output=token_major_output,
         )
     if backend == "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot":
         return triton_hard_route_merge_c4_direct_route(
@@ -291,6 +313,25 @@ def _direct_route_merge(q, seed_rows, k, v, backend, scale):
             scale=scale,
             block_j_target=32,
             num_warps=2,
+            bias_dtype=torch.float16,
+            merged_dtype=torch.float16,
+            use_exp2=True,
+            force_seed_keys=True,
+            num_stages=1,
+            logit_input_precision="tf32",
+            key_head_major=key_head_major,
+            inline_local_seed=inline_local_seed,
+            token_major_output=token_major_output,
+        )
+    if backend == "triton_c4_direct_route_j32_w4_exp2merge_forcekeys_fp16kvbias_s1_fastdot":
+        return triton_hard_route_merge_c4_direct_route(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+            block_j_target=32,
+            num_warps=4,
             bias_dtype=torch.float16,
             merged_dtype=torch.float16,
             use_exp2=True,
