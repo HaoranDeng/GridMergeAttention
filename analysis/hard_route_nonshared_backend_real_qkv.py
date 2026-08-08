@@ -362,6 +362,11 @@ def exact_variants():
             seed_mode="local_with_ith",
             routing_backend=direct_routing_backend(block_n=16),
         ),
+        "hard_c4_bestlogit_recomputevalue_n32_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "recomputevalue"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=32),
+        ),
         "hard_c4_bestlogit_maxbias_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "maxbias"), seed_mode="local_with_ith"
         ),

@@ -2777,7 +2777,7 @@ if triton is not None:
                 alpha = tl.exp(max_score - next_max)
 
             merged_value = tl.zeros((BLOCK_N, BLOCK_D), tl.float32)
-            for block_idx in tl.static_range(0, 4):
+            for block_idx in tl.static_range(0, BLOCK_N // 4):
                 block_start = key_start + block_idx * 4
                 valid_block = block_start < K_LEN
                 key_outer = block_start // base_key_len
@@ -3517,8 +3517,8 @@ def triton_direct_route_recompute_value_attention(
     if query.dtype not in (torch.float16, torch.bfloat16):
         raise RuntimeError("hard_route_routing_backend='triton_direct_*' requires fp16 or bf16 tensors.")
     block_n = int(block_n)
-    if block_n != 16:
-        raise ValueError("recompute-value routing currently requires block_n=16.")
+    if block_n not in {16, 32}:
+        raise ValueError("recompute-value routing currently supports block_n=16 or 32.")
 
     if not assume_contiguous:
         query = query.contiguous()
