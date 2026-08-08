@@ -945,6 +945,7 @@ if triton is not None:
         SCORE_SCALE: tl.constexpr,
         USE_EXP2: tl.constexpr,
         CAST_Q_TO_FP16: tl.constexpr,
+        CAST_KV_TO_FP16: tl.constexpr,
         KEY_TOKEN_MAJOR: tl.constexpr,
         GROUPS: tl.constexpr,
     ):
@@ -1011,7 +1012,13 @@ if triton is not None:
                 )
                 bias = tl.load(bias_base + keys, mask=keys < K_LEN, other=float("inf"))
 
-            logits = tl.dot(q_dot, tl.trans(k)) * SCORE_SCALE - bias[None, :]
+            k_dot = k
+            v_dot = v
+            if CAST_KV_TO_FP16:
+                k_dot = k.to(tl.float16)
+                v_dot = v.to(tl.float16)
+
+            logits = tl.dot(q_dot, tl.trans(k_dot)) * SCORE_SCALE - bias[None, :]
             logits = tl.where(
                 (query_offsets[:, None] < Q_ROWS) & (keys[None, :] < K_LEN),
                 logits,
@@ -1027,7 +1034,7 @@ if triton is not None:
                 p = tl.exp(logits - next_max[:, None])
                 alpha = tl.exp(max_score - next_max)
 
-            acc = acc * alpha[:, None] + tl.dot(p.to(v.dtype), v)
+            acc = acc * alpha[:, None] + tl.dot(p.to(v_dot.dtype), v_dot)
             normalizer = normalizer * alpha + tl.sum(p, axis=1)
             max_score = next_max
 
@@ -1384,6 +1391,7 @@ def triton_direct_route_biased_attention(
     meta = {"num_warps": int(num_warps)}
     if num_stages is not None:
         meta["num_stages"] = int(num_stages)
+    key_is_fp8 = str(key.dtype).startswith("torch.float8")
     _direct_route_biased_attention_kernel[grid](
         query,
         key,
@@ -1401,7 +1409,8 @@ def triton_direct_route_biased_attention(
         BLOCK_D=block_d,
         SCORE_SCALE=float(scale),
         USE_EXP2=bool(use_exp2),
-        CAST_Q_TO_FP16=bool(key.dtype == torch.float16 and query.dtype != torch.float16),
+        CAST_Q_TO_FP16=bool((key.dtype == torch.float16 or key_is_fp8) and query.dtype != torch.float16),
+        CAST_KV_TO_FP16=bool(key_is_fp8),
         KEY_TOKEN_MAJOR=bool(key_token_major),
         GROUPS=groups,
         **meta,
