@@ -43,6 +43,15 @@ def main():
             backend("bestlogit", "topkeyaffine"),
             {"use_assigned_logit": True, "use_top_key": True, "use_top_key_affine_scale": True},
         ),
+        "topkeyaffine_topvalue": (
+            backend("bestlogit", "topkeyaffine", "topvalue"),
+            {
+                "use_assigned_logit": True,
+                "use_top_key": True,
+                "use_top_key_affine_scale": True,
+                "use_top_value": True,
+            },
+        ),
         "topkv": (
             backend("bestlogit", "topkv"),
             {"use_assigned_logit": True, "use_top_kv": True},
