@@ -212,6 +212,21 @@ check before launching another speed/quality sweep.
 - Rule: do not use fp8/quantized intermediate K/V for the main hard C4 path
   unless quantization is explicitly reopened as a separate experiment.
 
+### MI210 Smoke for MI300 Fastdot Backend
+
+- Result: invalid hardware check for the current fast path.
+- Change tested: run the MI300-oriented hard C4 direct-route backend
+  `triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot`
+  on `mi2101x` as a provisional smoke test.
+- Evidence: Slurm job `366607` failed during Triton compilation because MI210
+  allowed dot input precisions were `ieee`, `bf16x3`, and `bf16x6`, while the
+  current fastdot path requests `input_precision="tf32"`.
+- Why not repeat directly: this is a hardware/compiler capability mismatch, not
+  an attention-quality result. It cannot validate speed or correctness for the
+  MI300 fastdot backend.
+- Rule: benchmark the current fastdot hard C4 path on `mi3001x` for final
+  decisions. Use MI210 only with a separate `ieee`/non-fastdot backend.
+
 ## Current Best Direction
 
 The best accepted direction so far is still:
