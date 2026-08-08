@@ -1,5 +1,4 @@
 import torch
-import torch.nn.functional as F
 
 
 def seed_key_logits(seed_queries, key, scale):
@@ -42,7 +41,14 @@ def assign_keys_to_seeds(seed_logits):
     num_keys = seed_logits.size(-1)
 
     best_seed = seed_logits.argmax(dim=-2)
-    assigned = F.one_hot(best_seed, num_classes=num_seeds).movedim(-1, -2).bool()
+    assigned = torch.zeros(
+        *seed_logits.shape[:-2],
+        num_seeds,
+        num_keys,
+        dtype=torch.bool,
+        device=seed_logits.device,
+    )
+    assigned.scatter_(dim=-2, index=best_seed.unsqueeze(-2), value=True)
 
     cluster_has_key = assigned.any(dim=-1)
     key0 = torch.arange(num_keys, device=seed_logits.device) == 0
