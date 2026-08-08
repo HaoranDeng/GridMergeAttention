@@ -2285,7 +2285,7 @@ def triton_hard_route_merge_c4_direct_route(
         )
     routing_bias = _cached_empty(
         "hard_route_c4_direct_route_bias_token_major",
-        (0,) if pack_bias else (route_tokens, route_groups),
+        (1,) if pack_bias else (route_tokens, route_groups),
         key.device,
         bias_dtype,
     )
