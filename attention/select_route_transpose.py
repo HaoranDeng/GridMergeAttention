@@ -3,8 +3,8 @@ from einops import rearrange
 
 from .common import (
     gather_seed_queries_transpose,
-    random_seed_columns,
     scale_qk,
+    seed_columns_by_mode,
     soft_merge_weights,
     validate_block_seed_mode,
 )
@@ -23,7 +23,7 @@ def select_route_attention_transpose(
     # Transposed selective path. Each seed compresses all K key rows in a fixed
     # (a, f, i, l) block; each query column picks the best compressed KV via
     # q_j dot K_c + H(alpha_c).
-    include_ith = validate_block_seed_mode(seed_mode, "transposed selective token merging")
+    validate_block_seed_mode(seed_mode, "transposed selective token merging")
 
     q, k = scale_qk(q, k, scale)
 
@@ -33,7 +33,7 @@ def select_route_attention_transpose(
         device=q.device,
     )
     key_outer = torch.arange(k.size(1), device=q.device)
-    seed_cols = random_seed_columns(
+    seed_cols = seed_columns_by_mode(
         query_outer,
         key_outer,
         q.size(2),
@@ -41,7 +41,7 @@ def select_route_attention_transpose(
         q.size(3),
         num_merge_tokens,
         seed,
-        include_ith=include_ith,
+        seed_mode,
     )
     seed_queries = gather_seed_queries_transpose(q, seed_cols)
 

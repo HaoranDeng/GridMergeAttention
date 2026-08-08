@@ -2,8 +2,7 @@ import torch
 from einops import rearrange
 
 from .common import (
-    fast_seed_indices_with_include,
-    seed_indices_from_base,
+    seed_indices_for_mode,
     validate_block_seed_mode,
 )
 from .hard_route import (
@@ -36,6 +35,7 @@ def shared_seed_rows(
     seed,
     include_ith=False,
     fast_with_include=False,
+    seed_mode=None,
 ):
     """Choose seed query rows once per key outer, key row, and query column."""
     if num_seeds > query_rows:
@@ -51,12 +51,15 @@ def shared_seed_rows(
         + query_col * 2654435761
         + int(seed)
     )
-    ith_seed = None
-    if include_ith:
-        ith_seed = key_row.expand(key_outer.numel(), key_rows, query_columns)
-        if fast_with_include:
-            return fast_seed_indices_with_include(base, query_rows, num_seeds, ith_seed)
-    return seed_indices_from_base(base, query_rows, num_seeds, include_seed=ith_seed)
+    ith_seed = key_row.expand(key_outer.numel(), key_rows, query_columns)
+    if seed_mode is None:
+        if include_ith and fast_with_include:
+            seed_mode = "fast_random_with_ith"
+        elif include_ith:
+            seed_mode = "random_with_ith"
+        else:
+            seed_mode = "random"
+    return seed_indices_for_mode(base, query_rows, num_seeds, ith_seed, seed_mode)
 
 
 def cached_shared_seed_rows(
@@ -69,6 +72,7 @@ def cached_shared_seed_rows(
     seed,
     include_ith=False,
     fast_with_include=False,
+    seed_mode=None,
 ):
     """Reuse deterministic shared seed rows across layers and denoise steps."""
     cache_key = (
@@ -81,6 +85,7 @@ def cached_shared_seed_rows(
         int(seed),
         bool(include_ith),
         bool(fast_with_include),
+        str(seed_mode),
     )
     seed_rows = _SHARED_SEED_ROWS_CACHE.get(cache_key)
     if seed_rows is None:
@@ -94,6 +99,7 @@ def cached_shared_seed_rows(
             seed,
             include_ith=include_ith,
             fast_with_include=fast_with_include,
+            seed_mode=seed_mode,
         )
         _SHARED_SEED_ROWS_CACHE[cache_key] = seed_rows
     return seed_rows
@@ -655,6 +661,7 @@ def hard_route_shared_attention(
         seed,
         include_ith=include_ith,
         fast_with_include=fast_with_include,
+        seed_mode=seed_mode,
     )
     merged_keys, merged_values, routing_bias, cluster_has_keys = _merge_shared(
         q,

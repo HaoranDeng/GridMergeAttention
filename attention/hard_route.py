@@ -4,7 +4,7 @@ from einops import rearrange
 from .common import (
     biased_sdpa,
     gather_seed_queries,
-    random_seed_rows,
+    seed_rows_by_mode,
     validate_block_seed_mode,
 )
 from .hard_route_triton import (
@@ -34,6 +34,7 @@ def _cached_seed_rows(
     seed,
     include_ith,
     fast_with_include,
+    seed_mode,
 ):
     cache_key = (
         str(device),
@@ -47,6 +48,7 @@ def _cached_seed_rows(
         int(seed),
         bool(include_ith),
         bool(fast_with_include),
+        str(seed_mode),
     )
     seed_rows = _SEED_ROWS_CACHE.get(cache_key)
     if seed_rows is not None:
@@ -58,7 +60,7 @@ def _cached_seed_rows(
         device=device,
     )
     key_outer = torch.arange(key_outer_count, device=device)
-    seed_rows = random_seed_rows(
+    seed_rows = seed_rows_by_mode(
         query_outer,
         key_outer,
         key_rows,
@@ -66,8 +68,7 @@ def _cached_seed_rows(
         query_rows,
         num_seeds,
         seed,
-        include_ith=include_ith,
-        fast_with_include=fast_with_include,
+        seed_mode,
     )
     _SEED_ROWS_CACHE[cache_key] = seed_rows
     return seed_rows
@@ -1465,6 +1466,7 @@ def hard_route_attention(
         seed,
         include_ith,
         fast_with_include,
+        seed_mode,
     )
 
     direct_merge = _direct_route_merge(q, seed_rows, k, v, hard_route_backend, scale)

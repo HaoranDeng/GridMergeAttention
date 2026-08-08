@@ -3,8 +3,8 @@ from einops import rearrange
 
 from .common import (
     gather_seed_queries,
-    random_seed_rows,
     scale_qk,
+    seed_rows_by_mode,
     soft_merge_weights,
     validate_block_seed_mode,
 )
@@ -25,7 +25,7 @@ def select_route_attention(
     # Each seed compresses all L keys in a fixed (a, f, j, k) block. Each
     # query then selects the seed whose compressed distribution maximizes
     # q_i dot K_c + H(alpha_c), the softmax variational objective.
-    include_ith = validate_block_seed_mode(seed_mode, "selective token merging")
+    validate_block_seed_mode(seed_mode, "selective token merging")
 
     q, k = scale_qk(q, k, scale)
 
@@ -35,7 +35,7 @@ def select_route_attention(
         device=q.device,
     )
     key_outer = torch.arange(k.size(1), device=q.device)
-    seed_rows = random_seed_rows(
+    seed_rows = seed_rows_by_mode(
         query_outer,
         key_outer,
         k.size(2),
@@ -43,7 +43,7 @@ def select_route_attention(
         q.size(2),
         num_merge_tokens,
         seed,
-        include_ith=include_ith,
+        seed_mode,
     )
     seed_queries = gather_seed_queries(q, seed_rows)
 

@@ -4,7 +4,13 @@ from einops import rearrange
 
 
 HASH_MOD = 2147483647
-BLOCK_SEED_MODES = {"random", "random_with_ith", "fast_random_with_ith"}
+BLOCK_SEED_MODES = {
+    "random",
+    "random_with_ith",
+    "fast_random_with_ith",
+    "local_with_ith",
+    "strided_with_ith",
+}
 
 _Q_INIT_ALIASES = {
     "identity": "ith",
@@ -30,9 +36,10 @@ def validate_block_seed_mode(seed_mode, context):
     if seed_mode not in BLOCK_SEED_MODES:
         raise ValueError(
             f"{context} currently supports seed_mode='random', "
-            "'random_with_ith', or 'fast_random_with_ith'."
+            "'random_with_ith', 'fast_random_with_ith', "
+            "'local_with_ith', or 'strided_with_ith'."
         )
-    return seed_mode in {"random_with_ith", "fast_random_with_ith"}
+    return seed_mode != "random"
 
 
 def merge_query_row(q, key_rows, q_init):
@@ -169,6 +176,54 @@ def fast_seed_indices_with_include(base, num_choices, num_seeds, include_seed):
     return torch.cat((include_seed.unsqueeze(-1).long(), extra.long()), dim=-1)
 
 
+def local_seed_indices_with_include(num_choices, num_seeds, include_seed):
+    """Pick the nearest rows/columns around the matched ith seed."""
+    if num_seeds == 1:
+        return include_seed.unsqueeze(-1).long()
+    if num_seeds > num_choices:
+        raise ValueError("num_seeds cannot exceed num_choices.")
+
+    candidate = torch.arange(num_choices, device=include_seed.device).view(
+        *((1,) * include_seed.ndim),
+        num_choices,
+    )
+    distance = (candidate - include_seed.unsqueeze(-1)).abs()
+    score = -distance * (num_choices + 1) - candidate
+    score = score.masked_fill(candidate == include_seed.unsqueeze(-1), torch.iinfo(score.dtype).min)
+    extras = score.topk(num_seeds - 1, dim=-1).indices.long()
+    return torch.cat((include_seed.unsqueeze(-1).long(), extras), dim=-1)
+
+
+def strided_seed_indices_with_include(num_choices, num_seeds, include_seed):
+    """Pick ith plus evenly spaced rows/columns to cover the whole block."""
+    if num_seeds == 1:
+        return include_seed.unsqueeze(-1).long()
+    if num_seeds > num_choices:
+        raise ValueError("num_seeds cannot exceed num_choices.")
+
+    step = max(1, num_choices // num_seeds)
+    offsets = torch.arange(num_seeds, device=include_seed.device).view(
+        *((1,) * include_seed.ndim),
+        num_seeds,
+    )
+    return (include_seed.unsqueeze(-1).long() + offsets.long() * step).remainder(num_choices)
+
+
+def seed_indices_for_mode(base, num_choices, num_seeds, include_seed, seed_mode):
+    """Choose per-block seed indices for row or column hard-route merging."""
+    if seed_mode == "random":
+        return seed_indices_from_base(base, num_choices, num_seeds)
+    if seed_mode == "random_with_ith":
+        return seed_indices_from_base(base, num_choices, num_seeds, include_seed=include_seed)
+    if seed_mode == "fast_random_with_ith":
+        return fast_seed_indices_with_include(base, num_choices, num_seeds, include_seed)
+    if seed_mode == "local_with_ith":
+        return local_seed_indices_with_include(num_choices, num_seeds, include_seed)
+    if seed_mode == "strided_with_ith":
+        return strided_seed_indices_with_include(num_choices, num_seeds, include_seed)
+    raise ValueError(f"unsupported seed_mode={seed_mode!r}.")
+
+
 def random_seed_rows(
     query_outer,
     key_outer,
@@ -202,6 +257,34 @@ def random_seed_rows(
     return seed_indices_from_base(base, query_rows, num_seeds, include_seed=ith_seed)
 
 
+def seed_rows_by_mode(
+    query_outer,
+    key_outer,
+    key_rows,
+    query_columns,
+    query_rows,
+    num_seeds,
+    seed,
+    seed_mode,
+):
+    """Deterministic query-row seeds for each hard-route block."""
+    if num_seeds > query_rows:
+        raise ValueError("num_merge_tokens cannot exceed query rows per block.")
+
+    device = query_outer.device
+    key_row = torch.arange(key_rows, device=device).view(1, 1, key_rows, 1)
+    query_col = torch.arange(query_columns, device=device).view(1, 1, 1, query_columns)
+    base = (
+        query_outer.view(-1, 1, 1, 1) * 73856093
+        + key_outer.view(1, -1, 1, 1) * 19349663
+        + key_row * 83492791
+        + query_col * 2654435761
+        + int(seed)
+    )
+    ith_seed = key_row.expand(query_outer.numel(), key_outer.numel(), key_rows, query_columns)
+    return seed_indices_for_mode(base, query_rows, num_seeds, ith_seed, seed_mode)
+
+
 def random_seed_columns(
     query_outer,
     key_outer,
@@ -233,6 +316,34 @@ def random_seed_columns(
         if fast_with_include:
             return fast_seed_indices_with_include(base, query_columns, num_seeds, ith_seed)
     return seed_indices_from_base(base, query_columns, num_seeds, include_seed=ith_seed)
+
+
+def seed_columns_by_mode(
+    query_outer,
+    key_outer,
+    query_rows,
+    key_columns,
+    query_columns,
+    num_seeds,
+    seed,
+    seed_mode,
+):
+    """Deterministic query-column seeds for each transposed hard-route block."""
+    if num_seeds > query_columns:
+        raise ValueError("num_merge_tokens cannot exceed query columns per block.")
+
+    device = query_outer.device
+    query_row = torch.arange(query_rows, device=device).view(1, 1, query_rows, 1)
+    key_col = torch.arange(key_columns, device=device).view(1, 1, 1, key_columns)
+    base = (
+        query_outer.view(-1, 1, 1, 1) * 73856093
+        + key_outer.view(1, -1, 1, 1) * 19349663
+        + query_row * 83492791
+        + key_col * 2654435761
+        + int(seed)
+    )
+    ith_seed = key_col.expand(query_outer.numel(), key_outer.numel(), query_rows, key_columns)
+    return seed_indices_for_mode(base, query_columns, num_seeds, ith_seed, seed_mode)
 
 
 def gather_seed_queries(q, seed_rows):

@@ -134,6 +134,21 @@ def backend_variants(variant_set):
             "hard_route_routing_backend": "triton_grid_m128_n64_s1_exp2",
             "seed_mode": "fast_random_with_ith",
         },
+        "full_c4_n64_local": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached",
+            "hard_route_routing_backend": "triton_grid_m128_n64_s1_exp2",
+            "seed_mode": "local_with_ith",
+        },
+        "full_c4_n64_strided": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached",
+            "hard_route_routing_backend": "triton_grid_m128_n64_s1_exp2",
+            "seed_mode": "strided_with_ith",
+        },
+        "full_c4_n64_random": {
+            "hard_route_backend": "triton_c4_direct_route_j32_w2_forcekeys_exp2merge_cached",
+            "hard_route_routing_backend": "triton_grid_m128_n64_s1_exp2",
+            "seed_mode": "random_with_ith",
+        },
         "full_c4_j64_w2_cached": {
             "hard_route_backend": "triton_c4_direct_route_j64_w2_forcekeys_exp2merge_cached",
             "hard_route_routing_backend": "triton_grid_m128_n32_s1_exp2",
@@ -732,7 +747,7 @@ def install_backend_probe(stats, max_calls, variant_set, selected_variants=None)
             layout="hard_route_shared",
             num_merge_tokens=4,
             seed_mode=kwargs.get("seed_mode", "random_with_ith"),
-            seed=0,
+            seed=kwargs.get("seed", 0),
             hard_route_backend=kwargs["hard_route_backend"],
             hard_route_routing_backend=kwargs["hard_route_routing_backend"],
         )

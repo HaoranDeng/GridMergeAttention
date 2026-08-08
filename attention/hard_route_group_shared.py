@@ -1,7 +1,7 @@
 import torch
 from einops import rearrange
 
-from .common import random_seed_rows, validate_block_seed_mode
+from .common import seed_rows_by_mode, validate_block_seed_mode
 from .hard_route import hard_route_compressed_attention, _merge
 
 
@@ -34,8 +34,7 @@ def hard_route_group_shared_attention(
     if query_outer_offset:
         raise ValueError("hard_route_group_shared expects the full query outer dimension.")
 
-    include_ith = validate_block_seed_mode(seed_mode, "group-shared multi-token merging")
-    fast_with_include = seed_mode == "fast_random_with_ith"
+    validate_block_seed_mode(seed_mode, "group-shared multi-token merging")
     if num_merge_tokens > k.size(3):
         raise ValueError("num_merge_tokens cannot exceed key columns per block.")
 
@@ -48,7 +47,7 @@ def hard_route_group_shared_attention(
     groups = q.size(1) // group_size
     local_anchor = torch.arange(groups, device=q.device) * group_size + group_size // 2
     key_outer = torch.arange(k.size(1), device=q.device)
-    seed_rows = random_seed_rows(
+    seed_rows = seed_rows_by_mode(
         local_anchor,
         key_outer,
         k.size(2),
@@ -56,8 +55,7 @@ def hard_route_group_shared_attention(
         q.size(2),
         num_merge_tokens,
         seed,
-        include_ith=include_ith,
-        fast_with_include=fast_with_include,
+        seed_mode,
     )
     seed_queries = _group_seed_queries(q, seed_rows, local_anchor)
 
