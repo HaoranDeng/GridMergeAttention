@@ -464,6 +464,11 @@ def resolve_variant(name, available):
     return variant
 
 
+def parse_variant_names(text):
+    """Accept comma-separated or whitespace-separated variant lists."""
+    return [name for name in (text or "").replace(",", " ").split() if name]
+
+
 def sync():
     if torch.cuda.is_available():
         torch.cuda.synchronize()
@@ -493,7 +498,7 @@ def install_probe(stats, args):
     import wan.modules.model as wan_model
 
     all_variants = exact_variants()
-    selected = [name.strip() for name in args.variants.split(",") if name.strip()]
+    selected = parse_variant_names(args.variants)
     if selected:
         variants = {}
         missing = []

@@ -21,6 +21,7 @@ from attention.hard_route_backend import (
 from analysis.hard_route_nonshared_backend_real_qkv import (
     estimate_direct_intermediate_bytes,
     exact_variants,
+    parse_variant_names,
 )
 from generate import load_generator_checkpoint, load_prompts
 from pipeline import TokenMergingWanPipeline
@@ -115,7 +116,7 @@ def selected_variants(args):
         }
 
     available = exact_variants()
-    names = [name.strip() for name in args.variants.split(",") if name.strip()]
+    names = parse_variant_names(args.variants)
     missing = [name for name in names if name not in available]
     if missing:
         raise ValueError(f"unknown variants: {', '.join(missing)}")
@@ -420,7 +421,7 @@ def parse_args():
     parser.add_argument(
         "--variants",
         default="",
-        help="Comma-separated exact variant names from hard_route_nonshared_backend_real_qkv.py.",
+        help="Comma- or whitespace-separated exact variant names from hard_route_nonshared_backend_real_qkv.py.",
     )
     parser.add_argument(
         "--hard_route_backend",
