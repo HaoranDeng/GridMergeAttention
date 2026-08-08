@@ -713,6 +713,192 @@ if triton is not None:
             mask=(query_offsets[:, None] < Q_ROWS) & (dim_offsets[None, :] < D_HEAD),
         )
 
+    @triton.jit
+    def _hard_route_c4_fused_full_attention_kernel(
+        query_ptr,
+        key_ptr,
+        value_ptr,
+        out_ptr,
+        A_OUTER: tl.constexpr,
+        F_OUTER: tl.constexpr,
+        Q_ROWS: tl.constexpr,
+        K_ROWS: tl.constexpr,
+        J_COLS: tl.constexpr,
+        H_HEADS: tl.constexpr,
+        K_COLS: tl.constexpr,
+        D_HEAD: tl.constexpr,
+        BLOCK_M: tl.constexpr,
+        BLOCK_L: tl.constexpr,
+        BLOCK_D: tl.constexpr,
+        SCORE_SCALE: tl.constexpr,
+        USE_EXP2: tl.constexpr,
+    ):
+        outer_group = tl.program_id(0)
+        query_col = tl.program_id(1)
+        query_block_id = tl.program_id(2)
+
+        head = outer_group % H_HEADS
+        tmp = outer_group // H_HEADS
+        query_outer = tmp % A_OUTER
+        batch = tmp // A_OUTER
+
+        query_offsets = query_block_id * BLOCK_M + tl.arange(0, BLOCK_M)
+        key_offsets = tl.arange(0, BLOCK_L)
+        dim_offsets = tl.arange(0, BLOCK_D)
+        valid_query = query_offsets < Q_ROWS
+        valid_key = key_offsets < K_COLS
+        valid_dim = dim_offsets < D_HEAD
+
+        query_base = (batch * A_OUTER + query_outer) * Q_ROWS * J_COLS * H_HEADS * D_HEAD
+        q = tl.load(
+            query_ptr
+            + query_base
+            + (((query_offsets[:, None] * J_COLS + query_col) * H_HEADS + head) * D_HEAD
+               + dim_offsets[None, :]),
+            mask=valid_query[:, None] & valid_dim[None, :],
+            other=0.0,
+        )
+        q_dot = q.to(tl.float16)
+
+        max_score = tl.full((BLOCK_M,), -float("inf"), tl.float32)
+        normalizer = tl.zeros((BLOCK_M,), tl.float32)
+        acc = tl.zeros((BLOCK_M, BLOCK_D), tl.float32)
+
+        for key_group in range(0, F_OUTER * K_ROWS):
+            key_outer = key_group // K_ROWS
+            key_row = key_group - key_outer * K_ROWS
+
+            key_base = (((batch * F_OUTER + key_outer) * K_ROWS + key_row) * K_COLS * H_HEADS + head) * D_HEAD
+            key_block = tl.load(
+                key_ptr + key_base + key_offsets[:, None] * H_HEADS * D_HEAD + dim_offsets[None, :],
+                mask=valid_key[:, None] & valid_dim[None, :],
+                other=0.0,
+            )
+            value_block = tl.load(
+                value_ptr + key_base + key_offsets[:, None] * H_HEADS * D_HEAD + dim_offsets[None, :],
+                mask=valid_key[:, None] & valid_dim[None, :],
+                other=0.0,
+            )
+
+            seed1_row = tl.where(key_row > 0, key_row - 1, 1)
+            seed2_row = tl.where(
+                key_row == 0,
+                2,
+                tl.where(key_row == Q_ROWS - 1, Q_ROWS - 3, key_row + 1),
+            )
+            seed3_row = tl.where(
+                key_row <= 1,
+                3,
+                tl.where(key_row >= Q_ROWS - 2, Q_ROWS - 4, key_row - 2),
+            )
+
+            seed0 = tl.load(
+                query_ptr
+                + query_base
+                + (((key_row * J_COLS + query_col) * H_HEADS + head) * D_HEAD + dim_offsets),
+                mask=valid_dim,
+                other=0.0,
+            )
+            seed1 = tl.load(
+                query_ptr
+                + query_base
+                + (((seed1_row * J_COLS + query_col) * H_HEADS + head) * D_HEAD + dim_offsets),
+                mask=valid_dim,
+                other=0.0,
+            )
+            seed2 = tl.load(
+                query_ptr
+                + query_base
+                + (((seed2_row * J_COLS + query_col) * H_HEADS + head) * D_HEAD + dim_offsets),
+                mask=valid_dim,
+                other=0.0,
+            )
+            seed3 = tl.load(
+                query_ptr
+                + query_base
+                + (((seed3_row * J_COLS + query_col) * H_HEADS + head) * D_HEAD + dim_offsets),
+                mask=valid_dim,
+                other=0.0,
+            )
+
+            logits0 = tl.sum(seed0[None, :] * key_block, axis=1) * SCORE_SCALE
+            logits1 = tl.sum(seed1[None, :] * key_block, axis=1) * SCORE_SCALE
+            logits2 = tl.sum(seed2[None, :] * key_block, axis=1) * SCORE_SCALE
+            logits3 = tl.sum(seed3[None, :] * key_block, axis=1) * SCORE_SCALE
+            logits0 = tl.where(valid_key, logits0, -float("inf"))
+            logits1 = tl.where(valid_key, logits1, -float("inf"))
+            logits2 = tl.where(valid_key, logits2, -float("inf"))
+            logits3 = tl.where(valid_key, logits3, -float("inf"))
+
+            best_logits = logits0
+            assignments = tl.zeros((BLOCK_L,), tl.int32)
+            update = logits1 > best_logits
+            best_logits = tl.where(update, logits1, best_logits)
+            assignments = tl.where(update, 1, assignments)
+            update = logits2 > best_logits
+            best_logits = tl.where(update, logits2, best_logits)
+            assignments = tl.where(update, 2, assignments)
+            update = logits3 > best_logits
+            assignments = tl.where(update, 3, assignments)
+            assignments = tl.where(valid_key & (key_offsets < 4), key_offsets, assignments)
+
+            for seed_idx in tl.static_range(0, 4):
+                logits = logits0
+                if seed_idx == 1:
+                    logits = logits1
+                if seed_idx == 2:
+                    logits = logits2
+                if seed_idx == 3:
+                    logits = logits3
+
+                active = valid_key & (assignments == seed_idx)
+                row_max = tl.max(tl.where(active, logits, -float("inf")), axis=0)
+                if USE_EXP2:
+                    probs = tl.where(
+                        active,
+                        tl.exp2((logits - row_max) * 1.4426950408889634),
+                        0.0,
+                    )
+                else:
+                    probs = tl.where(active, tl.exp(logits - row_max), 0.0)
+                denom = tl.sum(probs, axis=0)
+                safe_denom = tl.where(denom > 0.0, denom, 1.0)
+                weights = probs / safe_denom
+                if USE_EXP2:
+                    log_denom = row_max + tl.log2(safe_denom) * 0.6931471805599453
+                else:
+                    log_denom = row_max + tl.log(safe_denom)
+
+                merge_weights = weights.to(key_block.dtype)
+                merged_key = tl.sum(merge_weights[:, None] * key_block, axis=0).to(tl.float16)
+                merged_value = tl.sum(merge_weights[:, None] * value_block, axis=0).to(tl.float16)
+                expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=0)
+                routing_bias = expected_logit - log_denom
+
+                token_score = tl.sum(q_dot * merged_key[None, :], axis=1) * SCORE_SCALE - routing_bias
+                token_score = tl.where(valid_query, token_score, -float("inf"))
+                next_max = tl.maximum(max_score, token_score)
+                if USE_EXP2:
+                    p = tl.exp2((token_score - next_max) * 1.4426950408889634)
+                    alpha = tl.exp2((max_score - next_max) * 1.4426950408889634)
+                else:
+                    p = tl.exp(token_score - next_max)
+                    alpha = tl.exp(max_score - next_max)
+                acc = acc * alpha[:, None] + p[:, None] * merged_value[None, :]
+                normalizer = normalizer * alpha + p
+                max_score = next_max
+
+        out = acc / normalizer[:, None]
+        out_base = query_base
+        tl.store(
+            out_ptr
+            + out_base
+            + (((query_offsets[:, None] * J_COLS + query_col) * H_HEADS + head) * D_HEAD
+               + dim_offsets[None, :]),
+            out,
+            mask=valid_query[:, None] & valid_dim[None, :],
+        )
+
 
 def triton_biased_attention(
     query,
@@ -856,6 +1042,85 @@ def triton_direct_route_biased_attention(
         CAST_Q_TO_FP16=bool(key.dtype == torch.float16 and query.dtype != torch.float16),
         GROUPS=groups,
         **meta,
+    )
+    return out
+
+
+def triton_hard_route_c4_fused_full_attention(
+    query,
+    key,
+    value,
+    scale=1.0,
+    block_m=16,
+    out=None,
+    use_exp2=True,
+    num_warps=4,
+    num_stages=1,
+):
+    """Stream hard C4 merge directly into full compressed attention.
+
+    This prototype preserves the accepted C4 math: grid-local compression,
+    local-with-ith seeds, force-seed-key assignment, routing bias, and full
+    attention over all compressed tokens. It avoids materializing compressed
+    K/V/bias in global memory.
+    """
+    if triton is None:
+        raise RuntimeError("hard_route_backend='triton_c4_fused_full_*' requires Triton.")
+    if not query.is_cuda:
+        raise RuntimeError("hard_route_backend='triton_c4_fused_full_*' requires CUDA/ROCm tensors.")
+    if query.dtype not in (torch.float16, torch.bfloat16):
+        raise RuntimeError("hard_route_backend='triton_c4_fused_full_*' requires fp16 or bf16 tensors.")
+
+    query = query.contiguous()
+    key = key.contiguous()
+    value = value.contiguous()
+
+    batch, query_outer, query_rows, query_columns, heads, dim = query.shape
+    key_outer = key.size(1)
+    key_rows = key.size(2)
+    key_columns = key.size(3)
+    if key.shape != value.shape or key.shape[:3] != (batch, key_outer, key_rows):
+        raise ValueError("query/key/value shapes are inconsistent for fused hard C4 attention.")
+    if key.size(4) != heads or key.size(5) != dim:
+        raise ValueError("query/key head dimensions are inconsistent for fused hard C4 attention.")
+
+    block_l = triton.next_power_of_2(key_columns)
+    block_d = triton.next_power_of_2(dim)
+    if block_l > 128:
+        raise ValueError(f"fused hard C4 attention supports key columns <= 128, got {key_columns}.")
+    if block_d > 128:
+        raise ValueError(f"fused hard C4 attention supports head dim <= 128, got {dim}.")
+
+    if out is None:
+        out = _cached_empty("hard_route_c4_fused_full_out", query.shape, query.device, query.dtype)
+    elif out.shape != query.shape or out.device != query.device or out.dtype != query.dtype:
+        raise ValueError("fused hard C4 output tensor has inconsistent shape/device/dtype.")
+
+    grid = (
+        batch * query_outer * heads,
+        query_columns,
+        triton.cdiv(query_rows, int(block_m)),
+    )
+    _hard_route_c4_fused_full_attention_kernel[grid](
+        query,
+        key,
+        value,
+        out,
+        A_OUTER=query_outer,
+        F_OUTER=key_outer,
+        Q_ROWS=query_rows,
+        K_ROWS=key_rows,
+        J_COLS=query_columns,
+        H_HEADS=heads,
+        K_COLS=key_columns,
+        D_HEAD=dim,
+        BLOCK_M=int(block_m),
+        BLOCK_L=block_l,
+        BLOCK_D=block_d,
+        SCORE_SCALE=float(scale),
+        USE_EXP2=bool(use_exp2),
+        num_warps=int(num_warps),
+        num_stages=int(num_stages),
     )
     return out
 
@@ -1156,6 +1421,7 @@ def triton_hard_route_merge_c4_direct_route(
 __all__ = [
     "triton_biased_attention",
     "triton_direct_route_biased_attention",
+    "triton_hard_route_c4_fused_full_attention",
     "triton_hard_route_merge",
     "triton_hard_route_merge_c4",
     "triton_hard_route_merge_c4_direct_route",

@@ -10,6 +10,7 @@ from .common import (
 from .hard_route_triton import (
     triton_biased_attention,
     triton_direct_route_biased_attention,
+    triton_hard_route_c4_fused_full_attention,
     triton_hard_route_merge,
     triton_hard_route_merge_c4,
     triton_hard_route_merge_c4_direct_route,
@@ -194,6 +195,36 @@ def _direct_route_merge(q, seed_rows, k, v, backend, scale):
         inline_local_seed=inline_local_seed,
     )
 
+
+def _fused_full_attention(q, k, v, backend, scale, output):
+    backend = (backend or "").lower()
+    inline_local_seed = backend.endswith("_inline_local_seed")
+    if inline_local_seed:
+        backend = backend[: -len("_inline_local_seed")]
+
+    fused_configs = {
+        "triton_c4_fused_full_m16_exp2": 16,
+        "triton_c4_fused_full_m32_exp2": 32,
+    }
+    block_m = fused_configs.get(backend)
+    if block_m is None:
+        return None
+    if not inline_local_seed:
+        raise ValueError("fused hard C4 backend requires '_inline_local_seed'.")
+
+    return triton_hard_route_c4_fused_full_attention(
+        q,
+        k,
+        v,
+        scale=scale,
+        block_m=block_m,
+        out=output if output is not None and output.is_contiguous() else None,
+        use_exp2=True,
+        num_warps=4,
+        num_stages=1,
+    )
+
+
 def hard_route_compressed_attention(query, key, value, bias, backend, scale):
     backend = (backend or "sdpa").lower()
     if backend == "sdpa":
@@ -258,6 +289,12 @@ def hard_route_attention(
         raise ValueError("inline-local-seed hard-route backend requires seed_mode='local_with_ith'.")
     if num_merge_tokens > k.size(3):
         raise ValueError("num_merge_tokens cannot exceed key columns per block.")
+
+    fused_out = None
+    if num_merge_tokens == 4:
+        fused_out = _fused_full_attention(q, k, v, hard_route_backend, scale, output)
+    if fused_out is not None:
+        return fused_out
 
     seed_rows = None
     if not inline_local_seed_backend:
