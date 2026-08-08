@@ -359,6 +359,7 @@ if triton is not None:
         USE_ASSIGNED_LOGIT: tl.constexpr,
         USE_MASK_ASSIGN: tl.constexpr,
         SEED_KEY: tl.constexpr,
+        SEED_VALUE: tl.constexpr,
         SEED_KEY_BIAS_MATCH: tl.constexpr,
         SEED_KEY_SCALE: tl.constexpr,
         SEED_KEY_LS_SCALE: tl.constexpr,
@@ -494,11 +495,12 @@ if triton is not None:
         route_group = (((batch * H + head) * A + query_outer) * J + query_offsets)
         route_token_base = (key_outer * K_ROWS + key_row) * 4
         value_base = value_ptr + (((batch * F + key_outer) * K_ROWS + key_row) * L * H + head) * D_HEAD
-        value_block = tl.load(
-            value_base + key_offsets[:, None] * H * D_HEAD + dim_offsets[None, :],
-            mask=valid_key[:, None] & valid_dim[None, :],
-            other=0.0,
-        )
+        if not SEED_VALUE:
+            value_block = tl.load(
+                value_base + key_offsets[:, None] * H * D_HEAD + dim_offsets[None, :],
+                mask=valid_key[:, None] & valid_dim[None, :],
+                other=0.0,
+            )
         for seed_idx in tl.static_range(0, 4):
             if USE_ASSIGNED_LOGIT:
                 logits = assigned_logits
@@ -553,7 +555,15 @@ if triton is not None:
             else:
                 log_denom = row_max + tl.log(safe_denom)
 
-            merged_value = tl.dot(weights.to(value_block.dtype), value_block)
+            if SEED_VALUE:
+                representative_value = tl.load(
+                    value_base + seed_idx * H * D_HEAD + dim_offsets,
+                    mask=(seed_idx < L) & valid_dim,
+                    other=0.0,
+                )
+                merged_value = representative_value[None, :] + tl.zeros((BLOCK_J, BLOCK_D), tl.float32)
+            else:
+                merged_value = tl.dot(weights.to(value_block.dtype), value_block)
             expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
             routing_bias = expected_logit - log_denom
             if SEED_KEY_BIAS_MATCH:
@@ -662,6 +672,7 @@ if triton is not None:
         USE_ASSIGNED_LOGIT: tl.constexpr,
         USE_MASK_ASSIGN: tl.constexpr,
         SEED_KEY: tl.constexpr,
+        SEED_VALUE: tl.constexpr,
         SEED_KEY_BIAS_MATCH: tl.constexpr,
         SEED_KEY_SCALE: tl.constexpr,
         SEED_KEY_LS_SCALE: tl.constexpr,
@@ -757,11 +768,12 @@ if triton is not None:
         route_group = (((batch * H + head) * A + query_outer) * J + query_offsets)
         route_token_base = (key_outer * K_ROWS + key_row) * 4
         value_base = value_ptr + (((batch * F + key_outer) * K_ROWS + key_row) * L * H + head) * D_HEAD
-        value_block = tl.load(
-            value_base + key_offsets[:, None] * H * D_HEAD + dim_offsets[None, :],
-            mask=valid_key[:, None] & valid_dim[None, :],
-            other=0.0,
-        )
+        if not SEED_VALUE:
+            value_block = tl.load(
+                value_base + key_offsets[:, None] * H * D_HEAD + dim_offsets[None, :],
+                mask=valid_key[:, None] & valid_dim[None, :],
+                other=0.0,
+            )
 
         for seed_idx in tl.static_range(0, 4):
             seed_row = seed_row0
@@ -826,7 +838,15 @@ if triton is not None:
             else:
                 log_denom = row_max + tl.log(safe_denom)
 
-            merged_value = tl.dot(weights.to(value_block.dtype), value_block)
+            if SEED_VALUE:
+                representative_value = tl.load(
+                    value_base + seed_idx * H * D_HEAD + dim_offsets,
+                    mask=(seed_idx < L) & valid_dim,
+                    other=0.0,
+                )
+                merged_value = representative_value[None, :] + tl.zeros((BLOCK_J, BLOCK_D), tl.float32)
+            else:
+                merged_value = tl.dot(weights.to(value_block.dtype), value_block)
             expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
             routing_bias = expected_logit - log_denom
             if SEED_KEY_BIAS_MATCH:
@@ -2317,6 +2337,7 @@ def triton_hard_route_merge_c4_direct_route(
     use_seed_key_scale=False,
     use_seed_key_lsq_scale=False,
     use_seed_key_affine_scale=False,
+    use_seed_value=False,
     key_scale_dtype=None,
     assume_contiguous=False,
 ):
@@ -2449,6 +2470,14 @@ def triton_hard_route_merge_c4_direct_route(
         raise ValueError("stripe C4 merge replaces hard assignment; do not combine it with bestlogit or maskassign.")
     if use_stripe_assign and key_columns < 4:
         raise ValueError("stripe C4 merge requires at least four key columns.")
+    if use_seed_value and not force_seed_keys:
+        raise ValueError("representative seed-value routing requires force_seed_keys=True.")
+    if use_seed_value and key_columns < 4:
+        raise ValueError("representative seed-value routing requires at least four key columns.")
+    if use_seed_value and use_stripe_assign:
+        raise ValueError("representative seed-value routing is not implemented for stripe C4 merge.")
+    if use_seed_value and use_key_outer_kernel:
+        raise ValueError("representative seed-value routing is not implemented for key-outer C4 merge.")
     if use_seed_key and use_key_outer_kernel:
         raise ValueError("seed-key routing is only implemented for the non-keyouter direct C4 kernel.")
     if use_seed_key and use_stripe_assign:
@@ -2597,6 +2626,7 @@ def triton_hard_route_merge_c4_direct_route(
         USE_ASSIGNED_LOGIT=bool(use_assigned_logit),
         USE_MASK_ASSIGN=bool(use_mask_assign),
         SEED_KEY=bool(use_seed_key),
+        SEED_VALUE=bool(use_seed_value),
         SEED_KEY_BIAS_MATCH=bool(use_seed_key_bias_match),
         SEED_KEY_SCALE=bool(use_seed_key_scale),
         SEED_KEY_LS_SCALE=bool(use_seed_key_lsq_scale),
