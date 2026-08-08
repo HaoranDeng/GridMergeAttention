@@ -109,9 +109,9 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
     elif writes_separate_value_index:
         value_index_bytes = 2
     elif merge_config.use_compact_weight_kv or merge_config.use_compact_weight_value:
-        # One int16 assignment per original key column, shared by the four
+        # One int8 assignment per original key column, shared by the four
         # compressed seed tokens in the key block.
-        value_index_bytes = int(width) * 2 // 4
+        value_index_bytes = int(width) // 4
     else:
         value_index_bytes = 0
     bias_dtype = (

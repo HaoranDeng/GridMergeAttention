@@ -5020,7 +5020,7 @@ def triton_hard_route_merge_c4_direct_route(
             "hard_route_c4_direct_route_compact_assignment",
             (key_blocks, route_groups, key_columns),
             key.device,
-            torch.int16,
+            torch.int8,
         )
     elif use_merge_weight_kv:
         # Routing reconstructs both K and V from original K/V plus merge
@@ -5073,7 +5073,7 @@ def triton_hard_route_merge_c4_direct_route(
                 "hard_route_c4_direct_route_compact_assignment",
                 (key_blocks, route_groups, key_columns),
                 key.device,
-                torch.int16,
+                torch.int8,
             )
         elif use_recompute_value or use_merge_weight_value:
             # Routing reconstructs merged V from original V, so this tensor is
