@@ -68,7 +68,7 @@ def _can_write_directly_to_output(layout, hard_route_routing_backend):
     )
 
 
-def _run_hard_route_chunk(
+def _run_attention_chunk(
     attention_impl,
     layout,
     q_chunk,
@@ -79,48 +79,28 @@ def _run_hard_route_chunk(
     seed_mode,
     seed,
     query_outer_offset,
+    q_init,
+    key_valid_blocks,
     hard_route_backend,
     hard_route_routing_backend,
     out_slice,
 ):
-    kwargs = {}
-    if _can_write_directly_to_output(layout, hard_route_routing_backend):
-        kwargs["output"] = out_slice
+    if num_merge_tokens == 1:
+        return attention_impl(
+            q_chunk,
+            k_blocks,
+            v_blocks,
+            scale,
+            q_init,
+            key_valid=key_valid_blocks,
+        )
 
-    return attention_impl(
-        q_chunk,
-        k_blocks,
-        v_blocks,
-        scale,
-        num_merge_tokens,
-        seed_mode,
-        seed,
-        query_outer_offset,
-        hard_route_backend,
-        hard_route_routing_backend,
-        **kwargs,
-    )
-
-
-def _run_multi_token_chunk(
-    attention_impl,
-    layout,
-    q_chunk,
-    k_blocks,
-    v_blocks,
-    scale,
-    num_merge_tokens,
-    seed_mode,
-    seed,
-    query_outer_offset,
-    hard_route_backend,
-    hard_route_routing_backend,
-    out_slice,
-):
     if layout in HARD_ROUTE_LAYOUTS:
-        chunk = _run_hard_route_chunk(
-            attention_impl,
-            layout,
+        kwargs = {}
+        if _can_write_directly_to_output(layout, hard_route_routing_backend):
+            kwargs["output"] = out_slice
+
+        return attention_impl(
             q_chunk,
             k_blocks,
             v_blocks,
@@ -131,43 +111,18 @@ def _run_multi_token_chunk(
             query_outer_offset,
             hard_route_backend,
             hard_route_routing_backend,
-            out_slice,
-        )
-    else:
-        chunk = attention_impl(
-            q_chunk,
-            k_blocks,
-            v_blocks,
-            scale,
-            num_merge_tokens,
-            seed_mode,
-            seed,
-            query_outer_offset,
+            **kwargs,
         )
 
-    if chunk is not out_slice:
-        out_slice.copy_(chunk)
-
-
-def _run_one_token_chunk(
-    attention_impl,
-    q_chunk,
-    k_blocks,
-    v_blocks,
-    scale,
-    q_init,
-    key_valid_blocks,
-    out_slice,
-):
-    out_slice.copy_(
-        attention_impl(
-            q_chunk,
-            k_blocks,
-            v_blocks,
-            scale,
-            q_init,
-            key_valid=key_valid_blocks,
-        )
+    return attention_impl(
+        q_chunk,
+        k_blocks,
+        v_blocks,
+        scale,
+        num_merge_tokens,
+        seed_mode,
+        seed,
+        query_outer_offset,
     )
 
 
@@ -242,33 +197,25 @@ def token_merging_attn(
         end = min(start + query_outer_chunk, q_blocks.size(1))
         q_chunk = q_blocks[:, start:end]
         out_slice = out[:, start:end]
-        if num_merge_tokens > 1:
-            _run_multi_token_chunk(
-                attention_impl,
-                layout,
-                q_chunk,
-                k_blocks,
-                v_blocks,
-                sm_scale,
-                num_merge_tokens,
-                seed_mode,
-                seed,
-                start,
-                hard_route_backend,
-                hard_route_routing_backend,
-                out_slice,
-            )
-        else:
-            _run_one_token_chunk(
-                attention_impl,
-                q_chunk,
-                k_blocks,
-                v_blocks,
-                sm_scale,
-                q_init,
-                key_valid_blocks,
-                out_slice,
-            )
+        chunk = _run_attention_chunk(
+            attention_impl,
+            layout,
+            q_chunk,
+            k_blocks,
+            v_blocks,
+            sm_scale,
+            num_merge_tokens,
+            seed_mode,
+            seed,
+            start,
+            q_init,
+            key_valid_blocks,
+            hard_route_backend,
+            hard_route_routing_backend,
+            out_slice,
+        )
+        if chunk is not out_slice:
+            out_slice.copy_(chunk)
 
     out = blocks_to_video(out, f_tied, h_reduce, w_reduce)
     return crop_video_tokens_from_multiples(out, original_h, original_w, h, w)

@@ -5,7 +5,7 @@ FP32_MIN = torch.finfo(torch.float32).min
 
 
 def seed_key_logits(seed_queries, key, scale):
-    """Score each seed query against each key in the same regular block.
+    """Score each seed query against keys in the same regular block.
 
     seed_queries: [B, A, F, K, J, C, H, D]
     key:          [B, F, K, L, H, D]
@@ -16,7 +16,7 @@ def seed_key_logits(seed_queries, key, scale):
 
 
 def seed_key_logits_transpose(seed_queries, key, scale):
-    """Score each seed query against each key in the transposed block.
+    """Score each seed query against keys in the transposed block.
 
     seed_queries: [B, A, F, I, L, C, H, D]
     key:          [B, F, K, L, H, D]
@@ -27,14 +27,16 @@ def seed_key_logits_transpose(seed_queries, key, scale):
 
 
 def assign_keys_to_seeds(seed_logits):
-    """Assign every key to its best seed query.
+    """Assign every key to the seed query with the largest dot product.
 
     seed_logits: [..., C, L]
       C = number of seed queries inside the block
       L = number of keys inside the block
 
-    return: [..., C, L] boolean mask. Empty seed clusters are kept alive by
-    assigning key 0 to them, matching the Triton implementation.
+    return: [..., C, L] boolean mask.
+
+    Empty seed clusters are kept alive by assigning key 0 to them. This matches
+    the Triton fast path and keeps the number of compressed tokens fixed.
     """
     best_seed = seed_logits.argmax(dim=-2, keepdim=True)
     assigned = torch.zeros_like(seed_logits, dtype=torch.bool)
@@ -46,34 +48,28 @@ def assign_keys_to_seeds(seed_logits):
     return assigned | (empty_cluster & key0)
 
 
-def _masked_logits(seed_logits, assigned):
-    return seed_logits.float().masked_fill(~assigned, FP32_MIN)
-
-
-def _assigned_key_softmax(seed_logits, assigned):
-    """Softmax over only the keys assigned to each seed."""
-    active_logits = _masked_logits(seed_logits, assigned)
-    log_denom = torch.logsumexp(active_logits, dim=-1, keepdim=True)
-    weights = (active_logits - log_denom).exp().masked_fill(~assigned, 0.0)
-    return weights, log_denom.squeeze(-1)
-
-
 def hard_route_merge_weights_and_bias(seed_logits, dtype):
-    """Build merge weights and routing bias from seed/key logits.
+    """Turn seed/key scores into KV-merge weights and routing bias.
 
     This is the core operation accelerated by Triton:
       1. assign keys to seed queries,
       2. softmax over each seed's assigned keys,
       3. reuse the same weights for KV merge and entropy/routing bias.
+
+    The routing bias is ``sum_l alpha_l log(alpha_l)``. Writing it as
+    ``E_alpha[logit] - logsumexp(logit)`` avoids materializing log-probs.
     """
     assigned = assign_keys_to_seeds(seed_logits)
     logits = seed_logits.float()
-    weights, log_denom = _assigned_key_softmax(logits, assigned)
+    active_logits = logits.masked_fill(~assigned, FP32_MIN)
+
+    log_denom = torch.logsumexp(active_logits, dim=-1, keepdim=True)
+    weights = (active_logits - log_denom).exp().masked_fill(~assigned, 0.0)
 
     merge_weights = weights.to(dtype)
-    weights_fp32 = merge_weights.float()
-    expected_logit = (weights_fp32 * logits).sum(dim=-1)
-    routing_bias = expected_logit - log_denom * weights_fp32.sum(dim=-1)
+    weights_for_bias = merge_weights.float()
+    expected_logit = (weights_for_bias * logits).sum(dim=-1)
+    routing_bias = expected_logit - log_denom.squeeze(-1) * weights_for_bias.sum(dim=-1)
     return merge_weights, routing_bias, assigned.any(dim=-1)
 
 

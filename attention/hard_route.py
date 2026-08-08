@@ -102,7 +102,7 @@ def _build_seed_rows(
 
 
 # ---------------------------------------------------------------------------
-# Backend dispatch and public attention entry point.
+# Backend dispatch.
 # ---------------------------------------------------------------------------
 def _merge_kv(seed_queries, k, v, backend, scale):
     backend = (backend or "sdpa").lower()
@@ -171,6 +171,10 @@ def _run_reference_path(q, k, v, scale, seed_rows, hard_route_backend, hard_rout
         scale,
     )
     return _restore_attention_blocks(out, q)
+
+
+def _can_skip_seed_rows(direct_config):
+    return direct_config.supported and direct_config.inline_local_seed
 
 
 def _route_direct_outputs(q, key, value, bias, direct_config, routing_backend, scale, output):
@@ -261,23 +265,22 @@ def hard_route_attention(
     # the L keys into several hard-assigned merged tokens instead of one.
     validate_block_seed_mode(seed_mode, "multi-token merging")
     direct_backend = parse_direct_route_backend(hard_route_backend)
-    if direct_backend.inline_local_seed and seed_mode != "local_with_ith":
+    if _can_skip_seed_rows(direct_backend) and seed_mode != "local_with_ith":
         raise ValueError("inline-local-seed hard-route backend requires seed_mode='local_with_ith'.")
     if num_merge_tokens > k.size(3):
         raise ValueError("num_merge_tokens cannot exceed key columns per block.")
 
-    seed_rows = None
-    if not direct_backend.inline_local_seed:
-        seed_rows = _build_seed_rows(
-            q,
-            k,
-            query_outer_offset,
-            num_merge_tokens,
-            seed,
-            seed_mode,
-        )
-
     if direct_backend.supported:
+        seed_rows = None
+        if not direct_backend.inline_local_seed:
+            seed_rows = _build_seed_rows(
+                q,
+                k,
+                query_outer_offset,
+                num_merge_tokens,
+                seed,
+                seed_mode,
+            )
         return _run_direct_path(
             q,
             k,
@@ -289,15 +292,14 @@ def hard_route_attention(
             output,
         )
 
-    if seed_rows is None:
-        seed_rows = _build_seed_rows(
-            q,
-            k,
-            query_outer_offset,
-            num_merge_tokens,
-            seed,
-            seed_mode,
-        )
+    seed_rows = _build_seed_rows(
+        q,
+        k,
+        query_outer_offset,
+        num_merge_tokens,
+        seed,
+        seed_mode,
+    )
     return _run_reference_path(
         q,
         k,
