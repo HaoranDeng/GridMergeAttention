@@ -15,7 +15,10 @@ from attention.hard_route import (
     hard_route_direct_compressed_attention,
     uses_inline_local_seed_backend,
 )
-from analysis.hard_route_nonshared_backend_real_qkv import exact_variants
+from analysis.hard_route_nonshared_backend_real_qkv import (
+    estimate_direct_intermediate_bytes,
+    exact_variants,
+)
 from generate import load_generator_checkpoint, load_prompts
 from pipeline import TokenMergingWanPipeline
 from utils.misc import set_seed
@@ -142,6 +145,7 @@ def install_probe(stats, args):
         "warmed": False,
         "dense_calls": 0,
         "dense_seconds": 0.0,
+        "intermediate_estimates": {},
     }
 
     def run_dense(q, k, v, self):
@@ -256,6 +260,14 @@ def install_probe(stats, args):
         )
         v = self.v(x).view(batch, seq_len, heads, dim)
         q, k = wan_model.apply_rope_video_tokens(q, k, rope_cache)
+        if not state["intermediate_estimates"]:
+            for name, variant in variants.items():
+                state["intermediate_estimates"][name] = estimate_direct_intermediate_bytes(
+                    q,
+                    grid_size,
+                    args.query_outer_chunk,
+                    variant,
+                )
 
         should_record = args.max_calls <= 0 or state["calls_current_prompt"] < args.max_calls
         state["calls_current_prompt"] += 1
@@ -368,6 +380,20 @@ def main():
         run_denoise_only(pipeline, config, prompt, args.seed + prompt_offset, dtype)
     sync()
 
+    variant_payload = {}
+    for name in sorted(variants):
+        variant_payload[name] = {
+            "config": {
+                key: value
+                for key, value in variants[name].items()
+                if key in {"hard_route_backend", "hard_route_routing_backend", "seed_mode"}
+            },
+            "summary": stats[name].summary(),
+        }
+        estimate = probe_state["intermediate_estimates"].get(name)
+        if estimate is not None:
+            variant_payload[name]["direct_intermediate_estimate"] = estimate
+
     payload = {
         "device": torch.cuda.get_device_name(0),
         "config": args.config,
@@ -387,17 +413,7 @@ def main():
             ),
         },
         "wall_seconds": time.perf_counter() - start,
-        "variants": {
-            name: {
-                "config": {
-                    key: value
-                    for key, value in variants[name].items()
-                    if key in {"hard_route_backend", "hard_route_routing_backend", "seed_mode"}
-                },
-                "summary": stats[name].summary(),
-            }
-            for name in sorted(variants)
-        },
+        "variants": variant_payload,
     }
     output_path = Path(args.output_json)
     output_path.parent.mkdir(parents=True, exist_ok=True)
