@@ -440,6 +440,23 @@ check before launching another speed/quality sweep.
   variants. More constrained K approximations must be separately justified and
   measured against dense error.
 
+### Merge-Side Max-Bias and Stripe Shortcuts
+
+- Result: not acceptable for the main quality-preserving hard C4 path.
+- Change tested: replace the entropy/routing-bias calculation with a max-logit
+  shortcut (`maxbias`) or replace hard assignment with fixed key stripes
+  (`stripe`) while still running full compressed attention in the second stage.
+- Evidence: Slurm job `366956` on real Wan QKV measured dense at about
+  23.39 ms/call. `hard_c4_bestlogit_maxbias_tokenmajor` was only slightly
+  faster at about 23.05 ms/call but worsened rel-L2 from the corrected
+  bestlogit value of about 0.09417 to about 0.11392. `stripe` was faster at
+  about 17.92 ms/call but worsened rel-L2 to about 0.22431.
+- Why not repeat directly: these shortcuts reduce some merge-side work, but
+  they change the compression distribution or routing correction enough to
+  break the dense-error target.
+- Rule: keep the entropy-preserving bestlogit/simplemerge merge for the main
+  path. Use `maxbias` or `stripe` only as explicit low-quality ablations.
+
 ## Current Best Direction
 
 The best accepted direction so far is still:
@@ -452,6 +469,12 @@ The best accepted direction so far is still:
 - assigned-logit reuse (`bestlogit`) inside the C4 merge kernel, which keeps
   the same assignment and full compressed-attention semantics while shaving a
   small amount of merge overhead,
+- corrected seed-3 best-logit update, which lowered dense rel-L2 from about
+  0.09970 to about 0.09417 in Slurm job `366959`,
+- specialized `bestlogit_simplemerge`, which matches corrected bestlogit output
+  exactly while removing generic merge-kernel branches and improving real-QKV
+  attention time from about 23.40 ms/call to about 23.04 ms/call in job
+  `366959`,
 - token-major intermediate compressed-KV layout, which preserves the same
   full-attention math but makes merge stores more contiguous,
 - standard K/V block layout for the current token-major `m32_n32` path, avoiding
