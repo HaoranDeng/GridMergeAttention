@@ -145,6 +145,10 @@ The current readable backend surface is intentionally small:
   compressed-attention routing kernel. This is the most aggressive exact
   intermediate-traffic experiment for hard C4; it still keeps grid-local
   compression and full compressed attention.
+- `compactweightskv`: like `mergeweightskv`, but stores one assigned seed id
+  and one merge weight per original key instead of a full `C x key_count`
+  weight row per seed. This keeps the same grid-local full-attention math while
+  reducing merge-weight traffic for hard C4.
 
 Older representative-key/value, global/shared, no-bias, and windowed-routing
 experiments are not part of the readable path. They are tracked only as

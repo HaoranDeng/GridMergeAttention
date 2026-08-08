@@ -47,6 +47,10 @@ def main():
             backend("bestlogit", "mergeweightskv"),
             {"use_assigned_logit": True, "use_merge_weight_kv": True},
         ),
+        "bestlogit_compactweightskv": (
+            backend("bestlogit", "compactweightskv"),
+            {"use_assigned_logit": True, "use_compact_weight_kv": True},
+        ),
         "topkey": (
             backend("bestlogit", "topkey"),
             {"use_assigned_logit": True, "use_top_key": True},

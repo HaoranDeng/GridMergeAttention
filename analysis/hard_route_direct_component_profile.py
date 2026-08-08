@@ -10,6 +10,7 @@ from omegaconf import OmegaConf
 from attention.common import blocks_to_video, video_to_blocks
 from attention.hard_route import _build_seed_rows, hard_route_compressed_attention
 from attention.hard_route_backend import (
+    direct_compact_weight_kv_attention,
     direct_compressed_attention,
     direct_indirect_value_attention,
     direct_recompute_value_attention,
@@ -253,6 +254,23 @@ def route_compressed_tokens(
         )
         if routed is None:
             raise ValueError("recompute-value profiling requires a triton_direct_*_tokenmajor routing backend.")
+        return routed
+
+    if config.use_compact_weight_kv:
+        routed = direct_compact_weight_kv_attention(
+            q_chunk,
+            source_key,
+            source_value,
+            merged_value,
+            key_scale,
+            routing_bias,
+            routing_backend,
+            scale,
+            output=output,
+            assume_contiguous=True,
+        )
+        if routed is None:
+            raise ValueError("compact merge-weight K/V profiling requires a triton_direct_*_tokenmajor routing backend.")
         return routed
 
     if config.use_merge_weight_kv:
