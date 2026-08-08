@@ -289,7 +289,7 @@ def _direct_attention_config(backend, allowed_group_blocks=(1,)):
     if config is None:
         return None
 
-    block_m, block_n, num_warps, num_stages, _group_block = config
+    block_m, block_n, num_warps, num_stages, group_block = config
     if group_block not in allowed_group_blocks:
         return None
     return block_m, block_n, num_warps, num_stages, group_block
