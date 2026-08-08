@@ -1934,6 +1934,8 @@ def triton_hard_route_merge_c4_direct_route(
         raise ValueError("query/key/value shapes are inconsistent for non-shared C4 direct-route merge.")
     if key_heads != heads or key_dim != dim:
         raise ValueError("query/key head dimensions are inconsistent for non-shared C4 direct-route merge.")
+    if use_seed_key and key_rows != query_rows:
+        raise ValueError("seed-key routing requires key_rows == query_rows.")
 
     block_j = min(int(block_j_target), triton.next_power_of_2(query_columns))
     block_l = triton.next_power_of_2(key_columns)
