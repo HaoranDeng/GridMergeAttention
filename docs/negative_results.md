@@ -75,6 +75,8 @@ The best accepted direction so far is still:
 - non-shared grid-local hard-route C4 compression,
 - full compressed attention in the second stage,
 - local-with-ith seed selection for lower error than random-with-ith,
+- inline local seed-row computation to avoid reading the seed table in the C4
+  merge kernel,
 - head-major K/V layout for slightly lower merge overhead,
 - direct-route Triton kernels to avoid unnecessary reshape/copy overhead.
 
