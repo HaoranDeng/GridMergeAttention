@@ -449,13 +449,14 @@ def biased_sdpa(query, key, value, bias, valid=None, scale=1.0):
     if valid is not None:
         attn_bias = attn_bias.masked_fill(~valid, torch.finfo(attn_bias.dtype).min)
 
+    query_for_attn = query.to(key.dtype) if query.dtype != key.dtype else query
     out = F.scaled_dot_product_attention(
-        query.unsqueeze(1),
+        query_for_attn.unsqueeze(1),
         key.unsqueeze(1),
         value.unsqueeze(1),
-        attn_mask=attn_bias.to(query.dtype).unsqueeze(1).unsqueeze(2),
+        attn_mask=attn_bias.to(query_for_attn.dtype).unsqueeze(1).unsqueeze(2),
         dropout_p=0.0,
         is_causal=False,
         scale=scale,
     )
-    return out.squeeze(1)
+    return out.squeeze(1).to(query.dtype)
