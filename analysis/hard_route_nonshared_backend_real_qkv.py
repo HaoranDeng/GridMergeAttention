@@ -220,6 +220,11 @@ def exact_variants():
         "hard_c4_bestlogit_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit"), seed_mode="local_with_ith"
         ),
+        "hard_c4_bestlogit_tokenmajor_sdpa": exact_backend(
+            direct_merge_backend("bestlogit"),
+            seed_mode="local_with_ith",
+            routing_backend="sdpa",
+        ),
         "hard_c4_bestlogit_tokenmajor_n32_s1": exact_backend(
             direct_merge_backend("bestlogit"),
             seed_mode="local_with_ith",

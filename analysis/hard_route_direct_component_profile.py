@@ -8,7 +8,7 @@ import torch
 from omegaconf import OmegaConf
 
 from attention.common import blocks_to_video, video_to_blocks
-from attention.hard_route import _build_seed_rows
+from attention.hard_route import _build_seed_rows, hard_route_compressed_attention
 from attention.hard_route_backend import (
     direct_compressed_attention,
     direct_compressed_attention_packed_kv,
@@ -133,6 +133,60 @@ def make_seed_rows(q_chunk, k_blocks, query_outer_offset, args, variant):
     )
 
 
+def route_compressed_tokens(q_chunk, merged_key, merged_value, routing_bias, variant, config, scale, output):
+    """Run full compressed attention after direct C4 merge.
+
+    Direct Triton routing consumes token-major [K, group, D] intermediates.
+    Generic routing backends such as SDPA consume group-major [group, K, D].
+    Both paths compute the same full compressed attention.
+    """
+    routing_backend = variant["hard_route_routing_backend"]
+    if config.use_packed_kv:
+        routed = direct_compressed_attention_packed_kv(
+            q_chunk,
+            merged_key,
+            routing_bias,
+            routing_backend,
+            scale,
+            output=output,
+            assume_contiguous=True,
+        )
+        if routed is None:
+            raise ValueError("packed-KV profiling requires a triton_direct_*_tokenmajor routing backend.")
+        return routed
+
+    routed = direct_compressed_attention(
+        q_chunk,
+        merged_key,
+        merged_value,
+        routing_bias,
+        routing_backend,
+        scale,
+        output=output,
+        assume_contiguous=True,
+    )
+    if routed is not None:
+        return routed
+
+    query = q_chunk.permute(0, 4, 1, 3, 2, 5).reshape(-1, q_chunk.size(2), q_chunk.size(5))
+    out = hard_route_compressed_attention(
+        query,
+        merged_key.transpose(0, 1),
+        merged_value.transpose(0, 1),
+        routing_bias.transpose(0, 1),
+        routing_backend,
+        scale,
+    )
+    return out.reshape(
+        q_chunk.size(0),
+        q_chunk.size(4),
+        q_chunk.size(1),
+        q_chunk.size(3),
+        q_chunk.size(2),
+        q_chunk.size(5),
+    ).permute(0, 2, 4, 3, 1, 5)
+
+
 def install_probe(stats, args):
     import wan.modules.model as wan_model
 
@@ -216,27 +270,15 @@ def install_probe(stats, args):
 
             if record:
                 routed, seconds = timed(
-                    lambda: (
-                        direct_compressed_attention_packed_kv(
-                            q_chunk,
-                            merged_key,
-                            routing_bias,
-                            variant["hard_route_routing_backend"],
-                            scale,
-                            output=output,
-                            assume_contiguous=True,
-                        )
-                        if direct_merge_config.use_packed_kv
-                        else direct_compressed_attention(
-                            q_chunk,
-                            merged_key,
-                            merged_value,
-                            routing_bias,
-                            variant["hard_route_routing_backend"],
-                            scale,
-                            output=output,
-                            assume_contiguous=True,
-                        )
+                    lambda: route_compressed_tokens(
+                        q_chunk,
+                        merged_key,
+                        merged_value,
+                        routing_bias,
+                        variant,
+                        direct_merge_config,
+                        scale,
+                        output,
                     )
                 )
                 variant_stats.add_time("direct_routing", seconds)
@@ -244,27 +286,16 @@ def install_probe(stats, args):
                     _, seconds = timed(lambda: out_slice.copy_(routed))
                     variant_stats.add_time("output_copy", seconds)
             else:
-                if direct_merge_config.use_packed_kv:
-                    routed = direct_compressed_attention_packed_kv(
-                        q_chunk,
-                        merged_key,
-                        routing_bias,
-                        variant["hard_route_routing_backend"],
-                        scale,
-                        output=output,
-                        assume_contiguous=True,
-                    )
-                else:
-                    routed = direct_compressed_attention(
-                        q_chunk,
-                        merged_key,
-                        merged_value,
-                        routing_bias,
-                        variant["hard_route_routing_backend"],
-                        scale,
-                        output=output,
-                        assume_contiguous=True,
-                    )
+                routed = route_compressed_tokens(
+                    q_chunk,
+                    merged_key,
+                    merged_value,
+                    routing_bias,
+                    variant,
+                    direct_merge_config,
+                    scale,
+                    output,
+                )
                 if routed is not out_slice:
                     out_slice.copy_(routed)
 

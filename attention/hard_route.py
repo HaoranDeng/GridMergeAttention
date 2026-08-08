@@ -215,7 +215,14 @@ def _run_direct_path(q, k, v, scale, seed_rows, direct_config, hard_route_routin
     if direct_config.use_packed_kv:
         raise ValueError("packed-KV hard-route backend requires a triton_direct_*_tokenmajor routing backend.")
 
+    # Fallback for experiments that keep the direct C4 merge but route with a
+    # generic full-attention backend such as PyTorch SDPA. The direct merge
+    # emits token-major [K, group, D]; generic attention expects
+    # group-major [group, K, D].
     query = rearrange(q, "b a i j h d -> (b h a j) i d")
+    key = key.transpose(0, 1)
+    value = value.transpose(0, 1)
+    bias = bias.transpose(0, 1)
     out = hard_route_compressed_attention(
         query,
         key,
