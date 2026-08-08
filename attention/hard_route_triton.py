@@ -2264,7 +2264,7 @@ if triton is not None:
                    + dim_offsets[None, :]),
                 mask=valid_keys[:, None] & valid_dim[None, :],
                 other=0.0,
-            )
+            ).to(tl.float16)
             acc = acc * alpha[:, None] + tl.dot(p.to(v.dtype), v)
             normalizer = normalizer * alpha + tl.sum(p, axis=1)
             max_score = next_max
