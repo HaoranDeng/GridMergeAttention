@@ -744,25 +744,39 @@ if triton is not None:
             if seed_idx == 3:
                 seed_row = seed_row3
 
-            seed = tl.load(
-                query_ptr
-                + query_base
-                + (((seed_row[:, None] * J + query_offsets[:, None]) * H + head) * D_HEAD
-                   + dim_offsets[None, :]),
-                mask=valid_query[:, None] & valid_dim[None, :],
-                other=0.0,
-            )
-            seed_logits = tl.dot(seed, tl.trans(key_block), input_precision=LOGIT_INPUT_PRECISION) * SCORE_SCALE
-            seed_logits = tl.where(valid_logits, seed_logits, -float("inf"))
-            logits = seed_logits
             if USE_ASSIGNED_LOGIT:
                 logits = best_logits
                 if FORCE_SEED_KEYS:
+                    seed = tl.load(
+                        query_ptr
+                        + query_base
+                        + (((seed_row[:, None] * J + query_offsets[:, None]) * H + head) * D_HEAD
+                           + dim_offsets[None, :]),
+                        mask=valid_query[:, None] & valid_dim[None, :],
+                        other=0.0,
+                    )
+                    forced_key = tl.load(
+                        key_base + seed_idx * H * D_HEAD + dim_offsets,
+                        mask=(seed_idx < L) & valid_dim,
+                        other=0.0,
+                    )
+                    forced_logit = tl.sum(seed * forced_key[None, :], axis=1) * SCORE_SCALE
                     logits = tl.where(
                         valid_logits & (key_offsets[None, :] == seed_idx),
-                        seed_logits,
+                        forced_logit[:, None],
                         logits,
                     )
+            else:
+                seed = tl.load(
+                    query_ptr
+                    + query_base
+                    + (((seed_row[:, None] * J + query_offsets[:, None]) * H + head) * D_HEAD
+                       + dim_offsets[None, :]),
+                    mask=valid_query[:, None] & valid_dim[None, :],
+                    other=0.0,
+                )
+                logits = tl.dot(seed, tl.trans(key_block), input_precision=LOGIT_INPUT_PRECISION) * SCORE_SCALE
+                logits = tl.where(valid_logits, logits, -float("inf"))
 
             assigned_to_seed = assignments == seed_idx
             if FORCE_SEED_KEYS:
