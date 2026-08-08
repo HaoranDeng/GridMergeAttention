@@ -584,6 +584,7 @@ if triton is not None:
             route_token = route_token_base + seed_idx
             if PRECOMPUTE_LOGITS:
                 merged_key = tl.dot(weights.to(key_block.dtype), key_block).to(tl.float16)
+                routing_bias_for_logit = routing_bias.to(tl.float16)
                 for query_row in range(0, Q_ROWS):
                     query_for_logit = tl.load(
                         query_ptr
@@ -594,7 +595,7 @@ if triton is not None:
                         other=0.0,
                     ).to(tl.float16)
                     compressed_logit = tl.sum(query_for_logit * merged_key, axis=1) * SCORE_SCALE
-                    compressed_logit = compressed_logit - routing_bias
+                    compressed_logit = compressed_logit - routing_bias_for_logit
                     logit_offset = (route_token * ROUTE_GROUPS + route_group) * Q_ROWS + query_row
                     tl.store(merged_key_ptr + logit_offset, compressed_logit, mask=valid_query)
                 value_offset = (
