@@ -355,6 +355,35 @@ check before launching another speed/quality sweep.
   without reducing total K/V/bias traffic.
 - Rule: keep `query_outer_chunk=10` for the simplemerge hard C4 default.
 
+### Simplemerge BF16 Intermediate Format
+
+- Result: slower in smoke and introduced small output differences versus the
+  fp16-intermediate simplemerge default.
+- Change tested: keep the same corrected bestlogit/simplemerge algorithm but
+  write compressed K, V, or routing bias as bf16 (`bf16kv`, `bf16k`, `bf16v`,
+  `bf16bias`) to match the Wan bf16 input dtype.
+- Evidence: Slurm job `366965` smoke-tested these variants on MI300X. Default
+  simplemerge measured about 0.1459 ms/call with exact agreement to corrected
+  bestlogit. The bf16 variants measured about 0.158-0.160 ms/call and had
+  small rel-L2 differences versus the default, about 0.0016-0.0049.
+- Why not repeat directly: changing intermediate format does not reduce bytes
+  versus fp16, but it did add conversion/scheduling cost and numerical drift.
+- Rule: keep fp16 compressed K/V/bias for the default simplemerge path.
+
+### Delayed Value-Block Load in Simplemerge
+
+- Result: no speed improvement.
+- Change tested: move the `value_block` load later in the simplemerge merge
+  kernel to shorten V's live range during seed-key assignment.
+- Evidence: Slurm job `366966` showed exact output agreement in smoke but no
+  clear speed win. Real-QKV Slurm job `366967` measured about 23.18 ms/call,
+  slower than the accepted simplemerge result from job `366959` at about
+  23.04 ms/call, with identical dense rel-L2 about 0.09417.
+- Why not repeat directly: Triton/ROCm did not translate the shorter apparent
+  live range into a faster kernel on this shape.
+- Rule: keep the original simplemerge V-load placement unless a broader kernel
+  rewrite changes register allocation substantially.
+
 ### Quantized Intermediate K/V
 
 - Result: rejected for the current optimization direction.

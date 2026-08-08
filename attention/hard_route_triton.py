@@ -1084,6 +1084,13 @@ if triton is not None:
             mask=valid_key[:, None] & valid_dim[None, :],
             other=0.0,
         )
+        value_base = value_ptr + (((batch * F + key_outer) * K_ROWS + key_row) * L * H + head) * D_HEAD
+        value_block = tl.load(
+            value_base + key_offsets[:, None] * H * D_HEAD + dim_offsets[None, :],
+            mask=valid_key[:, None] & valid_dim[None, :],
+            other=0.0,
+        )
+
         seed_row1 = tl.where(key_row > 0, key_row - 1, 1)
         seed_row2 = tl.where(
             key_row == 0,
@@ -1164,12 +1171,6 @@ if triton is not None:
 
         route_group = (((batch * H + head) * A + query_outer) * J + query_offsets)
         route_token_base = (key_outer * K_ROWS + key_row) * 4
-        value_base = value_ptr + (((batch * F + key_outer) * K_ROWS + key_row) * L * H + head) * D_HEAD
-        value_block = tl.load(
-            value_base + key_offsets[:, None] * H * D_HEAD + dim_offsets[None, :],
-            mask=valid_key[:, None] & valid_dim[None, :],
-            other=0.0,
-        )
 
         for seed_idx in tl.static_range(0, 4):
             active = valid_logits & (assignments == seed_idx)
