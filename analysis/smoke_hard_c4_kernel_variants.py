@@ -29,6 +29,22 @@ def run_variant(q, k, v, variant):
     )
 
 
+def time_variant(q, k, v, variant, warmup, repeats):
+    """Return average runtime for one attention call after Triton compilation."""
+    for _ in range(warmup):
+        run_variant(q, k, v, variant)
+    torch.cuda.synchronize()
+
+    start = torch.cuda.Event(enable_timing=True)
+    end = torch.cuda.Event(enable_timing=True)
+    start.record()
+    for _ in range(repeats):
+        run_variant(q, k, v, variant)
+    end.record()
+    torch.cuda.synchronize()
+    return float(start.elapsed_time(end) / max(repeats, 1))
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Smoke-test hard C4 Triton variants on random tensors.")
     parser.add_argument("--output_json", required=True)
@@ -41,6 +57,8 @@ def parse_args():
     parser.add_argument("--heads", type=int, default=2)
     parser.add_argument("--dim", type=int, default=128)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--warmup", type=int, default=2)
+    parser.add_argument("--repeats", type=int, default=5)
     return parser.parse_args()
 
 
@@ -83,6 +101,14 @@ def main():
             "shape": list(out.shape),
             "max_abs_vs_bestlogit": float(diff.max().item()),
             "rel_l2_vs_bestlogit": rel_l2(out, ref),
+            "mean_ms": time_variant(
+                q,
+                k,
+                v,
+                variants[name],
+                warmup=args.warmup,
+                repeats=args.repeats,
+            ),
         }
 
     payload = {
@@ -90,6 +116,8 @@ def main():
         "dtype": args.dtype,
         "shape_q": list(shape_q),
         "shape_kv": list(shape_kv),
+        "warmup": args.warmup,
+        "repeats": args.repeats,
         "results": results,
     }
     output_path = Path(args.output_json)
