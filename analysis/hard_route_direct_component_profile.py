@@ -8,11 +8,11 @@ import torch
 from omegaconf import OmegaConf
 
 from attention.common import blocks_to_video, video_to_blocks
-from attention.hard_route import (
-    _build_seed_rows,
-    _merge_kv_direct_c4,
-    _parse_direct_route_backend,
-    hard_route_direct_compressed_attention,
+from attention.hard_route import _build_seed_rows
+from attention.hard_route_backend import (
+    direct_compressed_attention,
+    merge_kv_direct_c4,
+    parse_direct_route_backend,
     uses_inline_local_seed_backend,
 )
 from analysis.hard_route_nonshared_backend_real_qkv import (
@@ -137,7 +137,7 @@ def install_probe(stats, args):
 
     variants = selected_variants(args)
     direct_merge_configs = {
-        name: _parse_direct_route_backend(variant["hard_route_backend"])
+        name: parse_direct_route_backend(variant["hard_route_backend"])
         for name, variant in variants.items()
     }
     state = {
@@ -185,7 +185,7 @@ def install_probe(stats, args):
                 seed_rows, seconds = timed(lambda: make_seed_rows(q_chunk, k_blocks, start, args, variant))
                 variant_stats.add_time("seed_rows", seconds)
                 merge_out, seconds = timed(
-                    lambda: _merge_kv_direct_c4(
+                    lambda: merge_kv_direct_c4(
                         q_chunk,
                         seed_rows,
                         k_merge_blocks,
@@ -198,7 +198,7 @@ def install_probe(stats, args):
                 variant_stats.add_time("direct_merge", seconds)
             else:
                 seed_rows = make_seed_rows(q_chunk, k_blocks, start, args, variant)
-                merge_out = _merge_kv_direct_c4(
+                merge_out = merge_kv_direct_c4(
                     q_chunk,
                     seed_rows,
                     k_merge_blocks,
@@ -215,7 +215,7 @@ def install_probe(stats, args):
 
             if record:
                 routed, seconds = timed(
-                    lambda: hard_route_direct_compressed_attention(
+                    lambda: direct_compressed_attention(
                         q_chunk,
                         merged_key,
                         merged_value,
@@ -231,7 +231,7 @@ def install_probe(stats, args):
                     _, seconds = timed(lambda: out_slice.copy_(routed))
                     variant_stats.add_time("output_copy", seconds)
             else:
-                routed = hard_route_direct_compressed_attention(
+                routed = direct_compressed_attention(
                     q_chunk,
                     merged_key,
                     merged_value,

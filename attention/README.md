@@ -13,7 +13,11 @@ or reused independently.
   and biased SDPA helpers.
 - `gridmerge_one.py`: one-token GridMerge / MonarchRT-style compression.
 - `gridmerge_one_transpose.py`: one-token transpose layout.
-- `hard_route.py`: multi-token hard-route compression.
+- `hard_route.py`: multi-token hard-route dispatcher and main control flow.
+- `hard_route_pytorch.py`: readable PyTorch reference for hard assignment,
+  masked softmax, KV merge, and routing-bias construction.
+- `hard_route_backend.py`: direct-route backend parsing and Triton wrapper
+  functions.
 - `hard_route_transpose.py`: hard-route transpose layout.
 - `hard_route_triton.py`: Triton kernels used by the current hard-route path.
 - `select_route.py`: multi-token select-route compression.

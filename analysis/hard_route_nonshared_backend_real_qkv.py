@@ -8,7 +8,7 @@ from pathlib import Path
 import torch
 from omegaconf import OmegaConf
 
-from attention.hard_route import _parse_direct_route_backend
+from attention.hard_route_backend import parse_direct_route_backend
 from generate import load_generator_checkpoint, load_prompts
 from pipeline import TokenMergingWanPipeline
 from utils.misc import set_seed
@@ -51,7 +51,7 @@ def _dtype_bytes(dtype):
 
 def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant):
     """Estimate compressed K/V/bias traffic for one self-attention call."""
-    merge_config = _parse_direct_route_backend(variant["hard_route_backend"])
+    merge_config = parse_direct_route_backend(variant["hard_route_backend"])
     if not merge_config.supported:
         return None
 

@@ -6,24 +6,9 @@ from .common import (
     seed_columns_by_mode,
     validate_block_seed_mode,
 )
-from .hard_route import hard_route_compressed_attention, hard_route_merge_weights
+from .hard_route import hard_route_compressed_attention
+from .hard_route_pytorch import hard_route_merge_kv_transpose_pytorch
 from .hard_route_triton import triton_hard_route_merge, triton_hard_route_merge_c4
-
-
-def _pytorch_merge_kv_transpose(seed_queries, k, v, scale):
-    """Reference transpose merge.
-
-    The normal hard-route block is 30 queries x 52 keys. The transpose block is
-    52 queries x 30 keys, so C seed query columns merge key rows instead.
-    """
-    seed_logits = torch.einsum("bafilchd,bfklhd->bhafilck", seed_queries, k).float()
-    seed_logits = seed_logits * float(scale)
-    merge_weights, merge_logprob, _ = hard_route_merge_weights(seed_logits, k.dtype)
-
-    merged_keys = torch.einsum("bhafilck,bfklhd->bafilchd", merge_weights, k)
-    merged_values = torch.einsum("bhafilck,bfklhe->bafilche", merge_weights, v)
-    routing_bias = (merge_weights * merge_logprob).sum(dim=-1)
-    return merged_keys, merged_values, routing_bias
 
 
 def _triton_merge_kv_transpose(seed_queries, k, v, scale, use_c4_kernel=False, block_j_target=8):
@@ -59,7 +44,7 @@ def _triton_merge_kv_transpose(seed_queries, k, v, scale, use_c4_kernel=False, b
 def _merge(seed_queries, k, v, backend, scale):
     backend = (backend or "sdpa").lower()
     if backend == "sdpa":
-        return _pytorch_merge_kv_transpose(seed_queries, k, v, scale)
+        return hard_route_merge_kv_transpose_pytorch(seed_queries, k, v, scale)
     if backend == "triton":
         return _triton_merge_kv_transpose(seed_queries, k, v, scale)
     if backend == "triton_c4":
