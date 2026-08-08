@@ -70,9 +70,11 @@ Supported local layouts:
   compresses the full key group, then each query selects the best compressed KV
   candidate using the dot-product-plus-entropy objective.
 
-For the current experiments, `seed_mode: random_with_ith` keeps the original
-index-matched query as one seed and samples the remaining seeds
-deterministically from the same block.
+For the current full-core C4 config, `seed_mode: local_with_ith` keeps the
+original index-matched query as one seed and chooses nearby query rows for the
+remaining seeds.
+`seed_mode: random_with_ith` keeps the original index-matched query as one seed
+and samples the remaining seeds deterministically from the same block.
 `seed_mode: fast_random_with_ith` keeps that index-matched seed but chooses the
 remaining seeds with a lightweight deterministic hash instead of scoring every
 candidate row.

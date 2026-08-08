@@ -22,7 +22,7 @@ token_merging_args:
   q_init: ith
   query_outer_chunk: 7
   num_merge_tokens: 4
-  seed_mode: random_with_ith
+  seed_mode: local_with_ith
   seed: 0
   # Non-shared hard-route keeps query-dependent KV compression for each
   # attention grid. The head-major suffix only changes K/V memory layout.
