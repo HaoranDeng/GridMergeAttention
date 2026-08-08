@@ -103,6 +103,25 @@ check before launching another speed/quality sweep.
 - Rule: keep token-major direct routing at `m32_n16_w1_s1_exp2` unless the
   routing layout changes substantially.
 
+### Generic SDPA Routing Fallback
+
+- Result: slower than direct Triton routing with essentially the same output
+  error.
+- Change tested: keep the direct C4 merge output, but transpose the compressed
+  KV/bias tensors to group-major layout and run the second-stage full
+  compressed attention through PyTorch SDPA instead of the direct-route Triton
+  kernel.
+- Evidence: `analysis/hard_c4_sdpa_routing_20260807/metrics.json` measured
+  about 29.83 ms/call for the SDPA routing fallback, versus about 24.50 ms/call
+  for direct-route `m32_n32` and about 22.55 ms/call for dense attention. The
+  dense-vs-output rel-L2 was effectively unchanged.
+- Why not repeat directly: SDPA must consume an additive routing bias and a
+  transposed group-major view, so it does not recover enough optimized Flash
+  Attention behavior to compensate for the layout/mask overhead.
+- Rule: keep the direct-route Triton routing kernel for the main hard C4 path.
+  Only revisit SDPA routing if the compressed KV/bias layout changes enough to
+  remove the transpose and mask overhead.
+
 ### Token-Major Routing `m16`, `n64`, and Stage Sweeps
 
 - Result: no useful speedup with unchanged error.
