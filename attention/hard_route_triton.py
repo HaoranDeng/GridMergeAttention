@@ -359,6 +359,7 @@ if triton is not None:
         USE_ASSIGNED_LOGIT: tl.constexpr,
         USE_MASK_ASSIGN: tl.constexpr,
         SEED_KEY: tl.constexpr,
+        TOP_KV: tl.constexpr,
         TOP_VALUE: tl.constexpr,
         SEED_VALUE: tl.constexpr,
         SEED_KEY_BIAS_MATCH: tl.constexpr,
@@ -496,7 +497,7 @@ if triton is not None:
         route_group = (((batch * H + head) * A + query_outer) * J + query_offsets)
         route_token_base = (key_outer * K_ROWS + key_row) * 4
         value_base = value_ptr + (((batch * F + key_outer) * K_ROWS + key_row) * L * H + head) * D_HEAD
-        if not (TOP_VALUE or SEED_VALUE):
+        if not (TOP_KV or TOP_VALUE or SEED_VALUE):
             value_block = tl.load(
                 value_base + key_offsets[:, None] * H * D_HEAD + dim_offsets[None, :],
                 mask=valid_key[:, None] & valid_dim[None, :],
@@ -550,22 +551,39 @@ if triton is not None:
                 safe_denom = tl.where(valid_query, denom, 1.0)
             else:
                 safe_denom = tl.where(denom > 0.0, denom, 1.0)
-            weights = probs / safe_denom[:, None]
+            if not TOP_KV:
+                weights = probs / safe_denom[:, None]
             if USE_EXP2:
                 log_denom = row_max + tl.log2(safe_denom) * 0.6931471805599453
             else:
                 log_denom = row_max + tl.log(safe_denom)
 
-            if TOP_VALUE:
+            if TOP_KV or TOP_VALUE:
                 top_key = tl.max(
                     tl.where(active & (logits == row_max[:, None]), key_offsets[None, :], 0),
                     axis=1,
+                )
+
+            if TOP_KV:
+                merged_key = tl.load(
+                    key_base + top_key[:, None] * H * D_HEAD + dim_offsets[None, :],
+                    mask=valid_query[:, None] & valid_dim[None, :],
+                    other=0.0,
                 )
                 merged_value = tl.load(
                     value_base + top_key[:, None] * H * D_HEAD + dim_offsets[None, :],
                     mask=valid_query[:, None] & valid_dim[None, :],
                     other=0.0,
                 )
+                routing_bias = row_max - log_denom
+            elif TOP_VALUE:
+                merged_value = tl.load(
+                    value_base + top_key[:, None] * H * D_HEAD + dim_offsets[None, :],
+                    mask=valid_query[:, None] & valid_dim[None, :],
+                    other=0.0,
+                )
+                expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
+                routing_bias = expected_logit - log_denom
             elif SEED_VALUE:
                 representative_value = tl.load(
                     value_base + seed_idx * H * D_HEAD + dim_offsets,
@@ -573,11 +591,13 @@ if triton is not None:
                     other=0.0,
                 )
                 merged_value = representative_value[None, :] + tl.zeros((BLOCK_J, BLOCK_D), tl.float32)
+                expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
+                routing_bias = expected_logit - log_denom
             else:
                 merged_value = tl.dot(weights.to(value_block.dtype), value_block)
-            expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
-            routing_bias = expected_logit - log_denom
-            if SEED_KEY_BIAS_MATCH:
+                expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
+                routing_bias = expected_logit - log_denom
+            if SEED_KEY_BIAS_MATCH and not TOP_KV:
                 seed_for_bias = seed0
                 if seed_idx == 1:
                     seed_for_bias = seed1
@@ -599,7 +619,13 @@ if triton is not None:
                 (route_token * ROUTE_GROUPS + route_group[:, None]) * D_HEAD
                 + dim_offsets[None, :]
             )
-            if not SEED_KEY:
+            if TOP_KV:
+                tl.store(
+                    merged_key_ptr + route_offset,
+                    merged_key,
+                    mask=valid_query[:, None] & valid_dim[None, :],
+                )
+            elif not SEED_KEY:
                 merged_key = tl.dot(weights.to(key_block.dtype), key_block)
                 tl.store(
                     merged_key_ptr + route_offset,
@@ -683,6 +709,7 @@ if triton is not None:
         USE_ASSIGNED_LOGIT: tl.constexpr,
         USE_MASK_ASSIGN: tl.constexpr,
         SEED_KEY: tl.constexpr,
+        TOP_KV: tl.constexpr,
         TOP_VALUE: tl.constexpr,
         SEED_VALUE: tl.constexpr,
         SEED_KEY_BIAS_MATCH: tl.constexpr,
@@ -780,7 +807,7 @@ if triton is not None:
         route_group = (((batch * H + head) * A + query_outer) * J + query_offsets)
         route_token_base = (key_outer * K_ROWS + key_row) * 4
         value_base = value_ptr + (((batch * F + key_outer) * K_ROWS + key_row) * L * H + head) * D_HEAD
-        if not (TOP_VALUE or SEED_VALUE):
+        if not (TOP_KV or TOP_VALUE or SEED_VALUE):
             value_block = tl.load(
                 value_base + key_offsets[:, None] * H * D_HEAD + dim_offsets[None, :],
                 mask=valid_key[:, None] & valid_dim[None, :],
@@ -844,22 +871,39 @@ if triton is not None:
                 safe_denom = tl.where(valid_query, denom, 1.0)
             else:
                 safe_denom = tl.where(denom > 0.0, denom, 1.0)
-            weights = probs / safe_denom[:, None]
+            if not TOP_KV:
+                weights = probs / safe_denom[:, None]
             if USE_EXP2:
                 log_denom = row_max + tl.log2(safe_denom) * 0.6931471805599453
             else:
                 log_denom = row_max + tl.log(safe_denom)
 
-            if TOP_VALUE:
+            if TOP_KV or TOP_VALUE:
                 top_key = tl.max(
                     tl.where(active & (logits == row_max[:, None]), key_offsets[None, :], 0),
                     axis=1,
+                )
+
+            if TOP_KV:
+                merged_key = tl.load(
+                    key_base + top_key[:, None] * H * D_HEAD + dim_offsets[None, :],
+                    mask=valid_query[:, None] & valid_dim[None, :],
+                    other=0.0,
                 )
                 merged_value = tl.load(
                     value_base + top_key[:, None] * H * D_HEAD + dim_offsets[None, :],
                     mask=valid_query[:, None] & valid_dim[None, :],
                     other=0.0,
                 )
+                routing_bias = row_max - log_denom
+            elif TOP_VALUE:
+                merged_value = tl.load(
+                    value_base + top_key[:, None] * H * D_HEAD + dim_offsets[None, :],
+                    mask=valid_query[:, None] & valid_dim[None, :],
+                    other=0.0,
+                )
+                expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
+                routing_bias = expected_logit - log_denom
             elif SEED_VALUE:
                 representative_value = tl.load(
                     value_base + seed_idx * H * D_HEAD + dim_offsets,
@@ -867,11 +911,13 @@ if triton is not None:
                     other=0.0,
                 )
                 merged_value = representative_value[None, :] + tl.zeros((BLOCK_J, BLOCK_D), tl.float32)
+                expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
+                routing_bias = expected_logit - log_denom
             else:
                 merged_value = tl.dot(weights.to(value_block.dtype), value_block)
-            expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
-            routing_bias = expected_logit - log_denom
-            if SEED_KEY_BIAS_MATCH:
+                expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
+                routing_bias = expected_logit - log_denom
+            if SEED_KEY_BIAS_MATCH and not TOP_KV:
                 seed_self_logit = (
                     tl.sum(seed.to(tl.float32) * seed.to(tl.float32), axis=1)
                     * SCORE_SCALE
@@ -886,7 +932,13 @@ if triton is not None:
                 (route_token * ROUTE_GROUPS + route_group[:, None]) * D_HEAD
                 + dim_offsets[None, :]
             )
-            if not SEED_KEY:
+            if TOP_KV:
+                tl.store(
+                    merged_key_ptr + route_offset,
+                    merged_key,
+                    mask=valid_query[:, None] & valid_dim[None, :],
+                )
+            elif not SEED_KEY:
                 merged_key = tl.dot(weights.to(key_block.dtype), key_block)
                 tl.store(
                     merged_key_ptr + route_offset,
@@ -2359,6 +2411,7 @@ def triton_hard_route_merge_c4_direct_route(
     use_seed_key_scale=False,
     use_seed_key_lsq_scale=False,
     use_seed_key_affine_scale=False,
+    use_top_kv=False,
     use_top_value=False,
     use_seed_value=False,
     key_scale_dtype=None,
@@ -2501,6 +2554,16 @@ def triton_hard_route_merge_c4_direct_route(
         raise ValueError("top-value routing is not implemented for stripe C4 merge.")
     if use_top_value and use_key_outer_kernel:
         raise ValueError("top-value routing is not implemented for key-outer C4 merge.")
+    if use_top_kv and not force_seed_keys:
+        raise ValueError("top-KV routing requires force_seed_keys=True.")
+    if use_top_kv and use_seed_key:
+        raise ValueError("top-KV routing writes compressed keys and cannot be combined with seed-key routing.")
+    if use_top_kv and (use_top_value or use_seed_value):
+        raise ValueError("top-KV, top-value, and seed-value are alternative V/K approximations.")
+    if use_top_kv and use_stripe_assign:
+        raise ValueError("top-KV routing is not implemented for stripe C4 merge.")
+    if use_top_kv and use_key_outer_kernel:
+        raise ValueError("top-KV routing is not implemented for key-outer C4 merge.")
     if use_seed_value and not force_seed_keys:
         raise ValueError("representative seed-value routing requires force_seed_keys=True.")
     if use_seed_value and key_columns < 4:
@@ -2657,6 +2720,7 @@ def triton_hard_route_merge_c4_direct_route(
         USE_ASSIGNED_LOGIT=bool(use_assigned_logit),
         USE_MASK_ASSIGN=bool(use_mask_assign),
         SEED_KEY=bool(use_seed_key),
+        TOP_KV=bool(use_top_kv),
         TOP_VALUE=bool(use_top_value),
         SEED_VALUE=bool(use_seed_value),
         SEED_KEY_BIAS_MATCH=bool(use_seed_key_bias_match),
