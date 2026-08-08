@@ -25,6 +25,6 @@ token_merging_args:
   seed_mode: random_with_ith
   seed: 0
   # Non-shared hard-route keeps query-dependent KV compression for each
-  # attention grid. This is the fastest measured exact full-core C4 path.
-  hard_route_backend: triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot
+  # attention grid. The head-major suffix only changes K/V memory layout.
+  hard_route_backend: triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_headmajor
   hard_route_routing_backend: triton_direct_m32_n32_w1_s1_exp2
