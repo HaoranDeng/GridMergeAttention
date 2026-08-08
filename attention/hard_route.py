@@ -1,4 +1,6 @@
+import re
 from dataclasses import dataclass
+from functools import lru_cache
 
 import torch
 from einops import rearrange
@@ -20,21 +22,13 @@ from .hard_route_triton import (
 
 _SEED_ROWS_CACHE = {}
 _DIRECT_ROUTE_C4_BASE = "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
-_DIRECT_ROUTE_ATTENTION_CONFIGS = {
-    # backend name -> (BLOCK_M, BLOCK_N, num_warps, num_stages)
-    "triton_direct_m16_n16_w1_s1_exp2": (16, 16, 1, 1),
-    "triton_direct_m16_n32_w1_s1_exp2": (16, 32, 1, 1),
-    "triton_direct_m16_n64_w1_s1_exp2": (16, 64, 1, 1),
-    "triton_direct_m16_n64_w2_s1_exp2": (16, 64, 2, 1),
-    "triton_direct_m32_n16_w1_s1_exp2": (32, 16, 1, 1),
-    "triton_direct_m32_n16_w1_s2_exp2": (32, 16, 1, 2),
-    "triton_direct_m32_n16_w1_s3_exp2": (32, 16, 1, 3),
-    "triton_direct_m32_n32_w1_s1_exp2": (32, 32, 1, 1),
-    "triton_direct_m32_n32_w1_s2_exp2": (32, 32, 1, 2),
-    "triton_direct_m32_n32_w1_s3_exp2": (32, 32, 1, 3),
-    "triton_direct_m32_n64_w1_s1_exp2": (32, 64, 1, 1),
-    "triton_direct_m32_n64_w2_s1_exp2": (32, 64, 2, 1),
-}
+_DIRECT_ROUTE_ATTENTION_RE = re.compile(
+    r"^triton_direct_m(?P<m>\d+)_n(?P<n>\d+)_w(?P<w>\d+)_s(?P<s>\d+)_exp2$"
+)
+_DIRECT_ROUTE_ALLOWED_M = {16, 32}
+_DIRECT_ROUTE_ALLOWED_N = {16, 32, 64}
+_DIRECT_ROUTE_ALLOWED_WARPS = {1, 2}
+_DIRECT_ROUTE_ALLOWED_STAGES = {1, 2, 3}
 _DIRECT_ROUTE_KEY_OUTER_BLOCKS = {
     "f1": 1,
     "f2": 2,
@@ -65,6 +59,26 @@ def _remove_suffix(text, suffix):
 def uses_inline_local_seed_backend(backend):
     backend = str(backend or "").lower()
     return backend.endswith("_inline_local_seed")
+
+
+@lru_cache(maxsize=64)
+def _parse_direct_route_attention_backend(backend):
+    match = _DIRECT_ROUTE_ATTENTION_RE.fullmatch(backend or "")
+    if match is None:
+        return None
+
+    block_m = int(match.group("m"))
+    block_n = int(match.group("n"))
+    num_warps = int(match.group("w"))
+    num_stages = int(match.group("s"))
+    if (
+        block_m not in _DIRECT_ROUTE_ALLOWED_M
+        or block_n not in _DIRECT_ROUTE_ALLOWED_N
+        or num_warps not in _DIRECT_ROUTE_ALLOWED_WARPS
+        or num_stages not in _DIRECT_ROUTE_ALLOWED_STAGES
+    ):
+        return None
+    return block_m, block_n, num_warps, num_stages
 
 
 def _parse_direct_route_backend(backend):
@@ -294,7 +308,7 @@ def hard_route_direct_compressed_attention(
     if not key_token_major:
         return None
     backend = backend[: -len("_tokenmajor")]
-    direct_config = _DIRECT_ROUTE_ATTENTION_CONFIGS.get(backend)
+    direct_config = _parse_direct_route_attention_backend(backend)
     if direct_config is None:
         return None
 
