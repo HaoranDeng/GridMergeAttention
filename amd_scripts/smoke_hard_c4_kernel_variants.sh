@@ -5,7 +5,7 @@
 #SBATCH -e out/job.%j.err
 #SBATCH -N 1
 #SBATCH -n 8
-#SBATCH -t 00:20:00
+#SBATCH -t 01:00:00
 #SBATCH -p mi3001x
 
 set -euo pipefail
