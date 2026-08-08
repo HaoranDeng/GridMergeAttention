@@ -1268,7 +1268,9 @@ def triton_hard_route_merge_c4_direct_route(
     if seed_rows is None:
         if not inline_local_seed:
             raise ValueError("seed_rows is required unless inline_local_seed=True.")
-        seed_rows = _cached_empty("hard_route_inline_seed_placeholder", (1,), query.device, torch.int64)
+        # The INLINE_LOCAL_SEED specialization never reads seed_rows_ptr.
+        # Reuse query as a harmless placeholder and avoid an extra cache lookup.
+        seed_rows = query
     else:
         if not assume_contiguous:
             seed_rows = seed_rows.contiguous()
