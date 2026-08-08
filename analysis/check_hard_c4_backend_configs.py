@@ -69,6 +69,16 @@ def main():
                 "use_top_value": True,
             },
         ),
+        "topkeyaffine_topvalue_indirectvalue": (
+            backend("bestlogit", "topkeyaffine", "topvalue", "indirectvalue"),
+            {
+                "use_assigned_logit": True,
+                "use_top_key": True,
+                "use_top_key_affine_scale": True,
+                "use_top_value": True,
+                "use_indirect_top_value": True,
+            },
+        ),
         "topkeyaffine_seedvalue": (
             backend("bestlogit", "topkeyaffine", "seedvalue"),
             {
@@ -76,6 +86,16 @@ def main():
                 "use_top_key": True,
                 "use_top_key_affine_scale": True,
                 "use_seed_value": True,
+            },
+        ),
+        "topkeyaffine_seedvalue_indirectseedvalue": (
+            backend("bestlogit", "topkeyaffine", "seedvalue", "indirectseedvalue"),
+            {
+                "use_assigned_logit": True,
+                "use_top_key": True,
+                "use_top_key_affine_scale": True,
+                "use_seed_value": True,
+                "use_indirect_seed_value": True,
             },
         ),
         "topkeyaffine_indirectkey": (
@@ -145,9 +165,25 @@ def main():
             backend("bestlogit", "topvalue"),
             {"use_assigned_logit": True, "use_top_value": True},
         ),
+        "topvalue_indirectvalue": (
+            backend("bestlogit", "topvalue", "indirectvalue"),
+            {
+                "use_assigned_logit": True,
+                "use_top_value": True,
+                "use_indirect_top_value": True,
+            },
+        ),
         "seedvalue": (
             backend("bestlogit", "seedvalue"),
             {"use_assigned_logit": True, "use_seed_value": True},
+        ),
+        "seedvalue_indirectseedvalue": (
+            backend("bestlogit", "seedvalue", "indirectseedvalue"),
+            {
+                "use_assigned_logit": True,
+                "use_seed_value": True,
+                "use_indirect_seed_value": True,
+            },
         ),
         "seedkey_topvalue": (
             backend("seedkey", "bestlogit", "topvalue"),

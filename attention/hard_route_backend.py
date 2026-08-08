@@ -7,6 +7,7 @@ import torch
 from .hard_route_triton import (
     triton_direct_route_biased_attention,
     triton_direct_route_biased_attention_g2,
+    triton_direct_route_indirect_value_attention,
     triton_direct_route_seed_key_attention,
     triton_direct_route_top_key_attention,
     triton_hard_route_merge_c4_direct_route,
@@ -349,6 +350,43 @@ def direct_top_key_attention(
     )
 
 
+def direct_indirect_value_attention(
+    q,
+    key,
+    source_value,
+    value_index,
+    bias,
+    backend,
+    scale,
+    indirect_seed_value=False,
+    output=None,
+    assume_contiguous=False,
+):
+    config = _parse_tokenmajor_attention_backend(backend)
+    if config is None:
+        return None
+
+    block_m, block_n, num_warps, num_stages, group_block = config
+    if group_block != 1:
+        return None
+    return triton_direct_route_indirect_value_attention(
+        q,
+        key,
+        source_value,
+        value_index,
+        bias,
+        block_m=block_m,
+        block_n=block_n,
+        scale=scale,
+        num_warps=num_warps,
+        num_stages=num_stages,
+        use_exp2=True,
+        indirect_seed_value=indirect_seed_value,
+        out=output,
+        assume_contiguous=assume_contiguous,
+    )
+
+
 def direct_compressed_attention(
     q,
     key,
@@ -398,6 +436,7 @@ def direct_compressed_attention(
 __all__ = [
     "DirectRouteMergeConfig",
     "direct_compressed_attention",
+    "direct_indirect_value_attention",
     "direct_seed_key_attention",
     "direct_top_key_attention",
     "merge_kv_direct_c4",

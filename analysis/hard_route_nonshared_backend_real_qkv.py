@@ -360,8 +360,16 @@ def exact_variants():
         "hard_c4_bestlogit_seedvalue_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "seedvalue"), seed_mode="local_with_ith"
         ),
+        "hard_c4_bestlogit_seedvalue_indirectseedvalue_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "seedvalue", "indirectseedvalue"),
+            seed_mode="local_with_ith",
+        ),
         "hard_c4_bestlogit_topvalue_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "topvalue"), seed_mode="local_with_ith"
+        ),
+        "hard_c4_bestlogit_topvalue_indirectvalue_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "topvalue", "indirectvalue"),
+            seed_mode="local_with_ith",
         ),
         "hard_c4_bestlogit_topkv_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "topkv"), seed_mode="local_with_ith"
@@ -391,8 +399,16 @@ def exact_variants():
             direct_merge_backend("bestlogit", "topkeyaffine", "topvalue"),
             seed_mode="local_with_ith",
         ),
+        "hard_c4_bestlogit_topkeyaffine_topvalue_indirectvalue_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "topkeyaffine", "topvalue", "indirectvalue"),
+            seed_mode="local_with_ith",
+        ),
         "hard_c4_bestlogit_topkeyaffine_seedvalue_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "topkeyaffine", "seedvalue"),
+            seed_mode="local_with_ith",
+        ),
+        "hard_c4_bestlogit_topkeyaffine_seedvalue_indirectseedvalue_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "topkeyaffine", "seedvalue", "indirectseedvalue"),
             seed_mode="local_with_ith",
         ),
         "hard_c4_bestlogit_topkeyaffine_indirectkey_tokenmajor": exact_backend(

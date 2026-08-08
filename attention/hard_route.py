@@ -9,6 +9,7 @@ from .common import (
 )
 from .hard_route_backend import (
     direct_compressed_attention,
+    direct_indirect_value_attention,
     direct_seed_key_attention,
     direct_top_key_attention,
     merge_kv_direct_c4,
@@ -216,6 +217,19 @@ def _route_direct_outputs(
             key_scale,
             routing_backend,
             scale,
+            output=output,
+            assume_contiguous=True,
+        )
+    if direct_config.use_indirect_top_value or direct_config.use_indirect_seed_value:
+        return direct_indirect_value_attention(
+            q,
+            key,
+            source_value,
+            value,
+            bias,
+            routing_backend,
+            scale,
+            indirect_seed_value=direct_config.use_indirect_seed_value,
             output=output,
             assume_contiguous=True,
         )
