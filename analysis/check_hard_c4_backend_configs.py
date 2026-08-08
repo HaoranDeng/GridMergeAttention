@@ -97,6 +97,17 @@ def main():
                 "use_indirect_top_key": True,
             },
         ),
+        "topkeyaffine_topvalue_indirectkey_indirectvalue": (
+            backend("bestlogit", "topkeyaffine", "topvalue", "indirectkey", "indirectvalue"),
+            {
+                "use_assigned_logit": True,
+                "use_top_key": True,
+                "use_top_key_affine_scale": True,
+                "use_top_value": True,
+                "use_indirect_top_key": True,
+                "use_indirect_top_value": True,
+            },
+        ),
         "topkeyaffine_seedvalue_indirectkey": (
             backend("bestlogit", "topkeyaffine", "seedvalue", "indirectkey"),
             {

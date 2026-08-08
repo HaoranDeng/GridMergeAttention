@@ -149,6 +149,8 @@ model still runs full compressed attention over every compressed token.
 - `indirectkv`: for `topkv`, store only the top-token column index instead of
   materializing compressed K/V; full compressed attention gathers original K/V
   by that index.
+- `indirectvalue`: for top-key + top-value variants, store only the top-token
+  column index and gather original V during full compressed attention.
 
 These variants are benchmark candidates only. Keep the `bestlogit` path above
 as the default until a real-QKV benchmark shows a clear speed gain with

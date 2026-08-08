@@ -366,6 +366,7 @@ if triton is not None:
         TOP_KEY_SCALE: tl.constexpr,
         TOP_KEY_AFFINE_SCALE: tl.constexpr,
         TOP_VALUE: tl.constexpr,
+        INDIRECT_TOP_VALUE: tl.constexpr,
         SEED_VALUE: tl.constexpr,
         SEED_KEY_BIAS_MATCH: tl.constexpr,
         SEED_KEY_SCALE: tl.constexpr,
@@ -589,7 +590,7 @@ if triton is not None:
                     other=0.0,
                 )
                 top_key_scale_value = tl.full((BLOCK_J,), 1.0, tl.float32)
-                if TOP_VALUE:
+                if TOP_VALUE and not INDIRECT_TOP_VALUE:
                     merged_value = tl.load(
                         value_base + top_key[:, None] * H * D_HEAD + dim_offsets[None, :],
                         mask=valid_query[:, None] & valid_dim[None, :],
@@ -724,7 +725,7 @@ if triton is not None:
                     merged_key,
                     mask=valid_query[:, None] & valid_dim[None, :],
                 )
-            if not (TOP_KV and INDIRECT_TOP_KV):
+            if not ((TOP_KV and INDIRECT_TOP_KV) or (TOP_VALUE and INDIRECT_TOP_VALUE)):
                 tl.store(
                     merged_value_ptr + route_offset,
                     merged_value,
@@ -808,6 +809,7 @@ if triton is not None:
         TOP_KEY_SCALE: tl.constexpr,
         TOP_KEY_AFFINE_SCALE: tl.constexpr,
         TOP_VALUE: tl.constexpr,
+        INDIRECT_TOP_VALUE: tl.constexpr,
         SEED_VALUE: tl.constexpr,
         SEED_KEY_BIAS_MATCH: tl.constexpr,
         SEED_KEY_SCALE: tl.constexpr,
@@ -2782,6 +2784,7 @@ def triton_hard_route_merge_c4_direct_route(
     use_seed_key_scale=False,
     use_seed_key_lsq_scale=False,
     use_seed_key_affine_scale=False,
+    use_indirect_top_value=False,
     use_indirect_top_kv=False,
     use_indirect_top_key=False,
     use_top_kv=False,
@@ -2886,12 +2889,16 @@ def triton_hard_route_merge_c4_direct_route(
             key.device,
             torch.int16,
         )
-        merged_value = _cached_empty(
-            "hard_route_c4_direct_route_value_token_major",
-            (route_tokens, route_groups, dim),
-            key.device,
-            merged_value_dtype,
-        )
+        if use_indirect_top_value:
+            # The direct top-key routing kernel gathers V from the original value tensor.
+            merged_value = merged_key
+        else:
+            merged_value = _cached_empty(
+                "hard_route_c4_direct_route_value_token_major",
+                (route_tokens, route_groups, dim),
+                key.device,
+                merged_value_dtype,
+            )
     else:
         merged_key = _cached_empty(
             "hard_route_c4_direct_route_key_token_major",
@@ -2981,6 +2988,14 @@ def triton_hard_route_merge_c4_direct_route(
         raise ValueError("indirect top-key routing is not implemented for stripe C4 merge.")
     if use_indirect_top_key and use_key_outer_kernel:
         raise ValueError("indirect top-key routing is not implemented for key-outer C4 merge.")
+    if use_indirect_top_value and not (use_top_key and use_indirect_top_key and use_top_value):
+        raise ValueError("indirect top-value routing requires top-key + indirect-key + top-value.")
+    if use_indirect_top_value and use_recompute_merge:
+        raise ValueError("indirect top-value routing is not implemented for recompute merge.")
+    if use_indirect_top_value and use_stripe_assign:
+        raise ValueError("indirect top-value routing is not implemented for stripe C4 merge.")
+    if use_indirect_top_value and use_key_outer_kernel:
+        raise ValueError("indirect top-value routing is not implemented for key-outer C4 merge.")
     if use_top_key_scale and not use_top_key:
         raise ValueError("top-key scaling requires top-key routing.")
     if use_top_key_affine_scale and not use_top_key:
@@ -3164,6 +3179,7 @@ def triton_hard_route_merge_c4_direct_route(
         TOP_KEY_SCALE=bool(use_top_key_scale),
         TOP_KEY_AFFINE_SCALE=bool(use_top_key_affine_scale),
         TOP_VALUE=bool(use_top_value),
+        INDIRECT_TOP_VALUE=bool(use_indirect_top_value),
         SEED_VALUE=bool(use_seed_value),
         SEED_KEY_BIAS_MATCH=bool(use_seed_key_bias_match),
         SEED_KEY_SCALE=bool(use_seed_key_scale),

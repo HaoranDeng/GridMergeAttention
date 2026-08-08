@@ -38,6 +38,7 @@ _DIRECT_ROUTE_FLAG_SUFFIXES = (
     ("_seedkeyproj", ("use_seed_key", "use_seed_key_scale")),
     ("_seedkeymatch", ("use_seed_key", "use_seed_key_bias_match")),
     ("_seedkey", "use_seed_key"),
+    ("_indirectvalue", "use_indirect_top_value"),
     ("_indirectkv", "use_indirect_top_kv"),
     ("_indirectkey", "use_indirect_top_key"),
     ("_topkv", "use_top_kv"),
@@ -81,6 +82,7 @@ class DirectRouteMergeConfig:
     use_fp32_key_scale: bool = False
     use_seed_key_lsq_scale: bool = False
     use_seed_key_affine_scale: bool = False
+    use_indirect_top_value: bool = False
     use_indirect_top_kv: bool = False
     use_indirect_top_key: bool = False
     use_top_kv: bool = False
@@ -157,6 +159,7 @@ def parse_direct_route_backend(backend):
         "use_fp32_key_scale": False,
         "use_seed_key_lsq_scale": False,
         "use_seed_key_affine_scale": False,
+        "use_indirect_top_value": False,
         "use_indirect_top_kv": False,
         "use_indirect_top_key": False,
         "use_top_kv": False,
@@ -254,6 +257,7 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         use_seed_key_scale=config.use_seed_key_scale,
         use_seed_key_lsq_scale=config.use_seed_key_lsq_scale,
         use_seed_key_affine_scale=config.use_seed_key_affine_scale,
+        use_indirect_top_value=config.use_indirect_top_value,
         use_indirect_top_kv=config.use_indirect_top_kv,
         use_indirect_top_key=config.use_indirect_top_key,
         use_top_kv=config.use_top_kv,
