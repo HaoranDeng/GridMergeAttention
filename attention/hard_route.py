@@ -170,6 +170,10 @@ def _direct_route_merge(q, seed_rows, k, v, backend, scale):
     token_major_output = backend.endswith("_tokenmajor")
     if token_major_output:
         backend = backend[: -len("_tokenmajor")]
+    key_outer_block = 1
+    if backend.endswith("_f2"):
+        backend = backend[: -len("_f2")]
+        key_outer_block = 2
 
     if (
         not token_major_output
@@ -192,6 +196,7 @@ def _direct_route_merge(q, seed_rows, k, v, backend, scale):
         num_stages=1,
         logit_input_precision="tf32",
         inline_local_seed=inline_local_seed,
+        key_outer_block=key_outer_block,
     )
 
 def hard_route_compressed_attention(query, key, value, bias, backend, scale):
