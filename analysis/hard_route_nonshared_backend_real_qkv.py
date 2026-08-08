@@ -14,7 +14,7 @@ from pipeline import TokenMergingWanPipeline
 from utils.misc import set_seed
 
 
-DIRECT_MERGE_TEMPLATE = "triton_c4_direct_route_j{block_j}_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
+DIRECT_MERGE_TEMPLATE = "triton_c4_direct_route_j{block_j}_w{block_w}_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
 DIRECT_ROUTING_BACKEND = "triton_direct_m32_n32_w1_s1_exp2_tokenmajor"
 CHUNK_VARIANT_RE = re.compile(r"^(?P<base>.+)_chunk(?P<chunk>\d+)$")
 
@@ -33,12 +33,12 @@ def direct_routing_g2_backend(block_m=32, block_n=16, num_warps=1, num_stages=1)
     )
 
 
-def direct_merge_backend(*suffixes, block_j=32, block_l=None):
+def direct_merge_backend(*suffixes, block_j=32, block_w=2, block_l=None):
     tile_suffixes = [*suffixes]
     if block_l is not None:
         tile_suffixes.append(f"l{int(block_l)}")
     suffix = "_".join([*tile_suffixes, "tokenmajor", "inline_local_seed"])
-    return f"{DIRECT_MERGE_TEMPLATE.format(block_j=int(block_j))}_{suffix}"
+    return f"{DIRECT_MERGE_TEMPLATE.format(block_j=int(block_j), block_w=int(block_w))}_{suffix}"
 
 
 def exact_backend(hard_route_backend, seed_mode=None, routing_backend=None):
@@ -474,6 +474,14 @@ def exact_variants():
         ),
         "hard_c4_bestlogit_simplemerge_j64_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "simplemerge", block_j=64),
+            seed_mode="local_with_ith",
+        ),
+        "hard_c4_bestlogit_simplemerge_w1_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "simplemerge", block_w=1),
+            seed_mode="local_with_ith",
+        ),
+        "hard_c4_bestlogit_simplemerge_w4_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "simplemerge", block_w=4),
             seed_mode="local_with_ith",
         ),
         "hard_c4_bestlogit_simplemerge_bf16kv_tokenmajor": exact_backend(
