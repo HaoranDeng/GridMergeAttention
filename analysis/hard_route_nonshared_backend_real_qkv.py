@@ -124,6 +124,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         "block_j_target": merge_config.block_j_target,
         "block_l_target": merge_config.block_l_target or None,
         "writes_merged_key": not merge_config.use_seed_key,
+        "uses_top_value": bool(merge_config.use_top_value),
         "uses_representative_seed_value": bool(merge_config.use_seed_value),
     }
 
@@ -322,11 +323,17 @@ def exact_variants():
         "hard_c4_bestlogit_seedvalue_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "seedvalue"), seed_mode="local_with_ith"
         ),
+        "hard_c4_bestlogit_topvalue_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "topvalue"), seed_mode="local_with_ith"
+        ),
         "hard_c4_seedkey_tokenmajor": exact_backend(
             direct_merge_backend("seedkey", "bestlogit"), seed_mode="local_with_ith"
         ),
         "hard_c4_seedkey_seedvalue_tokenmajor": exact_backend(
             direct_merge_backend("seedkey", "bestlogit", "seedvalue"), seed_mode="local_with_ith"
+        ),
+        "hard_c4_seedkey_topvalue_tokenmajor": exact_backend(
+            direct_merge_backend("seedkey", "bestlogit", "topvalue"), seed_mode="local_with_ith"
         ),
         "hard_c4_seedkeymatch_tokenmajor": exact_backend(
             direct_merge_backend("seedkeymatch", "bestlogit"), seed_mode="local_with_ith"
@@ -335,11 +342,19 @@ def exact_variants():
             direct_merge_backend("seedkeymatch", "bestlogit", "seedvalue"),
             seed_mode="local_with_ith",
         ),
+        "hard_c4_seedkeymatch_topvalue_tokenmajor": exact_backend(
+            direct_merge_backend("seedkeymatch", "bestlogit", "topvalue"),
+            seed_mode="local_with_ith",
+        ),
         "hard_c4_seedkeyproj_tokenmajor": exact_backend(
             direct_merge_backend("seedkeyproj", "bestlogit"), seed_mode="local_with_ith"
         ),
         "hard_c4_seedkeyproj_seedvalue_tokenmajor": exact_backend(
             direct_merge_backend("seedkeyproj", "bestlogit", "seedvalue"),
+            seed_mode="local_with_ith",
+        ),
+        "hard_c4_seedkeyproj_topvalue_tokenmajor": exact_backend(
+            direct_merge_backend("seedkeyproj", "bestlogit", "topvalue"),
             seed_mode="local_with_ith",
         ),
         "hard_c4_seedkeyproj_fp32scale_tokenmajor": exact_backend(
