@@ -2247,13 +2247,14 @@ if triton is not None:
             key_outer = keys // base_key_len
             base_token = keys - key_outer * base_key_len
             key_row = base_token // 4
-            value_col = tl.load(
-                value_index_ptr + keys * GROUPS + group_id,
-                mask=valid_keys,
-                other=0,
-            ).to(tl.int64)
             if INDIRECT_SEED_VALUE:
                 value_col = base_token - key_row * 4
+            else:
+                value_col = tl.load(
+                    value_index_ptr + keys * GROUPS + group_id,
+                    mask=valid_keys,
+                    other=0,
+                ).to(tl.int64)
             value_col = tl.minimum(tl.maximum(value_col, 0), L_COLS - 1)
 
             v = tl.load(
