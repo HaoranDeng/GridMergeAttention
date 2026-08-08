@@ -636,6 +636,7 @@ if triton is not None:
             other=0.0,
         )
 
+        route_group = (((batch * H + head) * A + query_outer) * J + query_offsets)
         for key_outer_delta in tl.static_range(0, KEY_OUTER_BLOCK):
             key_outer = key_outer_group * KEY_OUTER_BLOCK + key_outer_delta
             valid_outer = key_outer < F
@@ -678,7 +679,6 @@ if triton is not None:
                 assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 2), logits2, assigned_logits)
                 assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 3), logits3, assigned_logits)
 
-            route_group = (((batch * H + head) * A + query_outer) * J + query_offsets)
             route_token_base = (key_outer * K_ROWS + key_row) * 4
             value_block = tl.load(
                 value_ptr + key_base + key_offsets[:, None] * H * D_HEAD + dim_offsets[None, :],
