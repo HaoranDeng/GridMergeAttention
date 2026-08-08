@@ -11,7 +11,9 @@ from attention.common import blocks_to_video, video_to_blocks
 from attention.hard_route import _build_seed_rows, hard_route_compressed_attention
 from attention.hard_route_backend import (
     direct_compressed_attention,
+    direct_indirect_value_attention,
     direct_seed_key_attention,
+    direct_top_key_attention,
     merge_kv_direct_c4,
     parse_direct_route_backend,
     uses_inline_local_seed_backend,
@@ -136,6 +138,8 @@ def make_seed_rows(q_chunk, k_blocks, query_outer_offset, args, variant):
 
 def route_compressed_tokens(
     q_chunk,
+    source_key,
+    source_value,
     merged_key,
     merged_value,
     routing_bias,
@@ -165,6 +169,55 @@ def route_compressed_tokens(
         )
         if routed is None:
             raise ValueError("seed-key profiling requires a triton_direct_*_tokenmajor routing backend.")
+        return routed
+
+    uses_indirect_key = config.use_indirect_top_key or config.use_indirect_top_kv
+    uses_original_value = (
+        config.use_indirect_top_kv
+        or config.use_indirect_top2_value
+        or config.use_indirect_top_value
+        or config.use_indirect_seed_value
+    )
+    if uses_indirect_key:
+        routed = direct_top_key_attention(
+            q_chunk,
+            source_key,
+            source_value if uses_original_value else None,
+            merged_key,
+            merged_value,
+            routing_bias,
+            key_scale,
+            routing_backend,
+            scale,
+            indirect_seed_value=config.use_indirect_seed_value,
+            output=output,
+            assume_contiguous=True,
+        )
+        if routed is None:
+            raise ValueError("indirect top-key profiling requires a triton_direct_*_tokenmajor routing backend.")
+        return routed
+
+    if (
+        config.use_indirect_top2_value
+        or config.use_indirect_top_value
+        or config.use_indirect_seed_value
+    ):
+        routed = direct_indirect_value_attention(
+            q_chunk,
+            merged_key,
+            source_value,
+            merged_value,
+            key_scale if config.use_indirect_top2_value else None,
+            routing_bias,
+            routing_backend,
+            scale,
+            indirect_seed_value=config.use_indirect_seed_value,
+            indirect_top2_value=config.use_indirect_top2_value,
+            output=output,
+            assume_contiguous=True,
+        )
+        if routed is None:
+            raise ValueError("indirect-value profiling requires a triton_direct_*_tokenmajor routing backend.")
         return routed
 
     routed = direct_compressed_attention(
@@ -284,6 +337,8 @@ def install_probe(stats, args):
                 routed, seconds = timed(
                     lambda: route_compressed_tokens(
                         q_chunk,
+                        k_merge_blocks,
+                        v_merge_blocks,
                         merged_key,
                         merged_value,
                         routing_bias,
@@ -301,6 +356,8 @@ def install_probe(stats, args):
             else:
                 routed = route_compressed_tokens(
                     q_chunk,
+                    k_merge_blocks,
+                    v_merge_blocks,
                     merged_key,
                     merged_value,
                     routing_bias,
