@@ -2696,6 +2696,7 @@ if triton is not None:
         K_LEN: tl.constexpr,
         D_HEAD: tl.constexpr,
         BLOCK_M: tl.constexpr,
+        BLOCK_N: tl.constexpr,
         BLOCK_D: tl.constexpr,
         BLOCK_L: tl.constexpr,
         SCORE_SCALE: tl.constexpr,
@@ -2714,6 +2715,7 @@ if triton is not None:
         batch = tmp // H_HEADS
 
         query_offsets = query_block_id * BLOCK_M + tl.arange(0, BLOCK_M)
+        route_offsets = tl.arange(0, BLOCK_N)
         seed_offsets = tl.arange(0, 4)
         key_offsets = tl.arange(0, BLOCK_L)
         dim_offsets = tl.arange(0, BLOCK_D)
@@ -2740,11 +2742,8 @@ if triton is not None:
         acc = tl.zeros((BLOCK_M, BLOCK_D), tl.float32)
         base_key_len = K_ROWS * 4
 
-        for key_start in range(0, K_LEN, 4):
-            route_keys = key_start + seed_offsets
-            key_outer = key_start // base_key_len
-            base_token = key_start - key_outer * base_key_len
-            key_row = base_token // 4
+        for key_start in range(0, K_LEN, BLOCK_N):
+            route_keys = key_start + route_offsets
 
             k = tl.load(
                 key_ptr + (route_keys[:, None] * GROUPS + group_id) * D_HEAD + dim_offsets[None, :],
@@ -2777,87 +2776,107 @@ if triton is not None:
                 p = tl.exp(logits - next_max[:, None])
                 alpha = tl.exp(max_score - next_max)
 
-            source_key = tl.load(
-                source_key_ptr
-                + (((((batch * KEY_OUTERS + key_outer) * K_ROWS + key_row)
-                     * L_COLS + key_offsets[:, None]) * H_HEADS + head) * D_HEAD
-                   + dim_offsets[None, :]),
-                mask=valid_source_key[:, None] & valid_dim[None, :],
-                other=0.0,
-            )
-            source_value = tl.load(
-                source_value_ptr
-                + (((((batch * KEY_OUTERS + key_outer) * K_ROWS + key_row)
-                     * L_COLS + key_offsets[:, None]) * H_HEADS + head) * D_HEAD
-                   + dim_offsets[None, :]),
-                mask=valid_source_key[:, None] & valid_dim[None, :],
-                other=0.0,
-            )
+            merged_value = tl.zeros((BLOCK_N, BLOCK_D), tl.float32)
+            for block_idx in tl.static_range(0, BLOCK_N // 4):
+                block_start = key_start + block_idx * 4
+                valid_block = block_start < K_LEN
+                key_outer = block_start // base_key_len
+                base_token = block_start - key_outer * base_key_len
+                key_row = base_token // 4
 
-            seed1 = tl.where(key_row > 0, key_row - 1, 1)
-            seed2 = tl.where(
-                key_row == 0,
-                2,
-                tl.where(key_row == Q_ROWS - 1, Q_ROWS - 3, key_row + 1),
-            )
-            seed3 = tl.where(
-                key_row <= 1,
-                3,
-                tl.where(key_row >= Q_ROWS - 2, Q_ROWS - 4, key_row - 2),
-            )
-            seed_rows = key_row + tl.zeros((4,), tl.int64)
-            seed_rows = tl.where(seed_offsets == 1, seed1, seed_rows)
-            seed_rows = tl.where(seed_offsets == 2, seed2, seed_rows)
-            seed_rows = tl.where(seed_offsets == 3, seed3, seed_rows)
-            seed_matrix = tl.load(
-                query_base
-                + (((query_outer * Q_ROWS + seed_rows[:, None]) * J_COLS + query_col)
-                   * H_HEADS + head) * D_HEAD
-                + dim_offsets[None, :],
-                mask=valid_dim[None, :],
-                other=0.0,
-            )
-
-            seed_logits = tl.dot(seed_matrix, tl.trans(source_key), input_precision="tf32") * SCORE_SCALE
-            seed_logits = tl.where(valid_source_key[None, :], seed_logits, -float("inf"))
-            merge_logits0 = tl.max(tl.where(seed_offsets[:, None] == 0, seed_logits, -float("inf")), axis=0)
-            merge_logits1 = tl.max(tl.where(seed_offsets[:, None] == 1, seed_logits, -float("inf")), axis=0)
-            merge_logits2 = tl.max(tl.where(seed_offsets[:, None] == 2, seed_logits, -float("inf")), axis=0)
-            merge_logits3 = tl.max(tl.where(seed_offsets[:, None] == 3, seed_logits, -float("inf")), axis=0)
-
-            best_logits = merge_logits0
-            assignments = tl.zeros((BLOCK_L,), tl.int32)
-            update = merge_logits1 > best_logits
-            best_logits = tl.where(update, merge_logits1, best_logits)
-            assignments = tl.where(update, 1, assignments)
-            update = merge_logits2 > best_logits
-            best_logits = tl.where(update, merge_logits2, best_logits)
-            assignments = tl.where(update, 2, assignments)
-            update = merge_logits3 > best_logits
-            best_logits = tl.where(update, merge_logits3, best_logits)
-            assignments = tl.where(update, 3, assignments)
-
-            assignments = tl.where(valid_source_key & (key_offsets < 4), key_offsets, assignments)
-            forced_logits = best_logits
-            forced_logits = tl.where(key_offsets == 0, merge_logits0, forced_logits)
-            forced_logits = tl.where(key_offsets == 1, merge_logits1, forced_logits)
-            forced_logits = tl.where(key_offsets == 2, merge_logits2, forced_logits)
-            forced_logits = tl.where(key_offsets == 3, merge_logits3, forced_logits)
-
-            active = valid_source_key[None, :] & (assignments[None, :] == seed_offsets[:, None])
-            merge_logits = forced_logits[None, :] + tl.zeros((4, BLOCK_L), tl.float32)
-            row_max = tl.max(tl.where(active, merge_logits, -float("inf")), axis=1)
-            if USE_EXP2:
-                merge_probs = tl.where(
-                    active,
-                    tl.exp2((merge_logits - row_max[:, None]) * 1.4426950408889634),
-                    0.0,
+                source_key = tl.load(
+                    source_key_ptr
+                    + (((((batch * KEY_OUTERS + key_outer) * K_ROWS + key_row)
+                         * L_COLS + key_offsets[:, None]) * H_HEADS + head) * D_HEAD
+                       + dim_offsets[None, :]),
+                    mask=valid_block & valid_source_key[:, None] & valid_dim[None, :],
+                    other=0.0,
                 )
-            else:
-                merge_probs = tl.where(active, tl.exp(merge_logits - row_max[:, None]), 0.0)
-            denom = tl.sum(merge_probs, axis=1)
-            weights = merge_probs / tl.where(denom > 0.0, denom, 1.0)[:, None]
-            merged_value = tl.dot(weights.to(source_value.dtype), source_value)
+                source_value = tl.load(
+                    source_value_ptr
+                    + (((((batch * KEY_OUTERS + key_outer) * K_ROWS + key_row)
+                         * L_COLS + key_offsets[:, None]) * H_HEADS + head) * D_HEAD
+                       + dim_offsets[None, :]),
+                    mask=valid_block & valid_source_key[:, None] & valid_dim[None, :],
+                    other=0.0,
+                )
+
+                seed1 = tl.where(key_row > 0, key_row - 1, 1)
+                seed2 = tl.where(
+                    key_row == 0,
+                    2,
+                    tl.where(key_row == Q_ROWS - 1, Q_ROWS - 3, key_row + 1),
+                )
+                seed3 = tl.where(
+                    key_row <= 1,
+                    3,
+                    tl.where(key_row >= Q_ROWS - 2, Q_ROWS - 4, key_row - 2),
+                )
+                seed_rows = key_row + tl.zeros((4,), tl.int64)
+                seed_rows = tl.where(seed_offsets == 1, seed1, seed_rows)
+                seed_rows = tl.where(seed_offsets == 2, seed2, seed_rows)
+                seed_rows = tl.where(seed_offsets == 3, seed3, seed_rows)
+                seed_matrix = tl.load(
+                    query_base
+                    + (((query_outer * Q_ROWS + seed_rows[:, None]) * J_COLS + query_col)
+                       * H_HEADS + head) * D_HEAD
+                    + dim_offsets[None, :],
+                    mask=valid_block & valid_dim[None, :],
+                    other=0.0,
+                )
+
+                seed_logits = tl.dot(seed_matrix, tl.trans(source_key), input_precision="tf32") * SCORE_SCALE
+                seed_logits = tl.where(valid_block & valid_source_key[None, :], seed_logits, -float("inf"))
+                merge_logits0 = tl.max(tl.where(seed_offsets[:, None] == 0, seed_logits, -float("inf")), axis=0)
+                merge_logits1 = tl.max(tl.where(seed_offsets[:, None] == 1, seed_logits, -float("inf")), axis=0)
+                merge_logits2 = tl.max(tl.where(seed_offsets[:, None] == 2, seed_logits, -float("inf")), axis=0)
+                merge_logits3 = tl.max(tl.where(seed_offsets[:, None] == 3, seed_logits, -float("inf")), axis=0)
+
+                best_logits = merge_logits0
+                assignments = tl.zeros((BLOCK_L,), tl.int32)
+                update = merge_logits1 > best_logits
+                best_logits = tl.where(update, merge_logits1, best_logits)
+                assignments = tl.where(update, 1, assignments)
+                update = merge_logits2 > best_logits
+                best_logits = tl.where(update, merge_logits2, best_logits)
+                assignments = tl.where(update, 2, assignments)
+                update = merge_logits3 > best_logits
+                best_logits = tl.where(update, merge_logits3, best_logits)
+                assignments = tl.where(update, 3, assignments)
+
+                assignments = tl.where(valid_source_key & (key_offsets < 4), key_offsets, assignments)
+                forced_logits = best_logits
+                forced_logits = tl.where(key_offsets == 0, merge_logits0, forced_logits)
+                forced_logits = tl.where(key_offsets == 1, merge_logits1, forced_logits)
+                forced_logits = tl.where(key_offsets == 2, merge_logits2, forced_logits)
+                forced_logits = tl.where(key_offsets == 3, merge_logits3, forced_logits)
+
+                active = valid_source_key[None, :] & (assignments[None, :] == seed_offsets[:, None])
+                merge_logits = forced_logits[None, :] + tl.zeros((4, BLOCK_L), tl.float32)
+                row_max = tl.max(tl.where(active, merge_logits, -float("inf")), axis=1)
+                if USE_EXP2:
+                    merge_probs = tl.where(
+                        active,
+                        tl.exp2((merge_logits - row_max[:, None]) * 1.4426950408889634),
+                        0.0,
+                    )
+                else:
+                    merge_probs = tl.where(active, tl.exp(merge_logits - row_max[:, None]), 0.0)
+                denom = tl.sum(merge_probs, axis=1)
+                weights = merge_probs / tl.where(denom > 0.0, denom, 1.0)[:, None]
+                merged_block = tl.dot(weights.to(source_value.dtype), source_value)
+
+                for seed_idx in tl.static_range(0, 4):
+                    route_row = block_idx * 4 + seed_idx
+                    merged_row = tl.max(
+                        tl.where(seed_offsets[:, None] == seed_idx, merged_block, 0.0),
+                        axis=0,
+                    )
+                    merged_value = tl.where(
+                        route_offsets[:, None] == route_row,
+                        merged_row[None, :],
+                        merged_value,
+                    )
 
             acc = acc * alpha[:, None] + tl.dot(p.to(merged_value.dtype), merged_value)
             normalizer = normalizer * alpha + tl.sum(p, axis=1)
@@ -3475,7 +3494,7 @@ def triton_direct_route_recompute_value_attention(
     source_value,
     bias,
     block_m=32,
-    block_n=4,
+    block_n=16,
     scale=1.0,
     num_warps=1,
     num_stages=1,
@@ -3495,8 +3514,9 @@ def triton_direct_route_recompute_value_attention(
         raise RuntimeError("hard_route_routing_backend='triton_direct_*' requires CUDA/ROCm tensors.")
     if query.dtype not in (torch.float16, torch.bfloat16):
         raise RuntimeError("hard_route_routing_backend='triton_direct_*' requires fp16 or bf16 tensors.")
-    if int(block_n) != 4:
-        raise ValueError("recompute-value routing currently requires block_n=4.")
+    block_n = int(block_n)
+    if block_n not in {4, 8, 16}:
+        raise ValueError("recompute-value routing currently requires block_n in {4, 8, 16}.")
 
     if not assume_contiguous:
         query = query.contiguous()
@@ -3559,6 +3579,7 @@ def triton_direct_route_recompute_value_attention(
         K_LEN=key_len,
         D_HEAD=dim,
         BLOCK_M=block_m,
+        BLOCK_N=block_n,
         BLOCK_D=block_d,
         BLOCK_L=block_l,
         SCORE_SCALE=float(scale),
