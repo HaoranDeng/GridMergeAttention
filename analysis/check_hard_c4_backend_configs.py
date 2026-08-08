@@ -8,12 +8,12 @@ sys.path.insert(0, str(REPO_ROOT))
 from attention.hard_route_backend import parse_direct_route_backend
 
 
-BASE_DIRECT_C4 = "triton_c4_direct_route_j32_w{warps}_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
+BASE_DIRECT_C4 = "triton_c4_direct_route_j32_w{warps}_exp2merge_forcekeys_fp16kvbias_s{stages}_fastdot"
 
 
-def backend(*suffixes, warps=2):
+def backend(*suffixes, warps=2, stages=1):
     suffix = "_".join([*suffixes, "tokenmajor", "inline_local_seed"])
-    return f"{BASE_DIRECT_C4.format(warps=int(warps))}_{suffix}"
+    return f"{BASE_DIRECT_C4.format(warps=int(warps), stages=int(stages))}_{suffix}"
 
 
 def expect_flags(name, config, **flags):
@@ -46,6 +46,14 @@ def main():
         "bestlogit_simplemerge_w4": (
             backend("bestlogit", "simplemerge", warps=4),
             {"use_assigned_logit": True, "use_simple_merge": True, "merge_num_warps": 4},
+        ),
+        "bestlogit_simplemerge_s2": (
+            backend("bestlogit", "simplemerge", stages=2),
+            {"use_assigned_logit": True, "use_simple_merge": True, "merge_num_stages": 2},
+        ),
+        "bestlogit_simplemerge_s3": (
+            backend("bestlogit", "simplemerge", stages=3),
+            {"use_assigned_logit": True, "use_simple_merge": True, "merge_num_stages": 3},
         ),
         "bestlogit_recomputevalue": (
             backend("bestlogit", "recomputevalue"),

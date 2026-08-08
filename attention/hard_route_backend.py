@@ -20,7 +20,7 @@ from .hard_route_triton import (
 
 
 _DIRECT_ROUTE_C4_RE = re.compile(
-    r"^triton_c4_direct_route_j(?P<j>\d+)_w(?P<w>\d+)_exp2merge_forcekeys_fp16kvbias_s1_fastdot$"
+    r"^triton_c4_direct_route_j(?P<j>\d+)_w(?P<w>\d+)_exp2merge_forcekeys_fp16kvbias_s(?P<s>\d+)_fastdot$"
 )
 _DIRECT_ROUTE_ATTENTION_RE = re.compile(
     r"^triton_direct(?:_g(?P<g>\d+))?_m(?P<m>\d+)_n(?P<n>\d+)_w(?P<w>\d+)_s(?P<s>\d+)_exp2$"
@@ -128,6 +128,7 @@ class DirectRouteMergeConfig:
     inline_local_seed: bool = False
     block_j_target: int = 32
     merge_num_warps: int = 2
+    merge_num_stages: int = 1
     block_l_target: int = 0
     key_outer_block: int = 1
     use_key_outer_kernel: bool = False
@@ -283,10 +284,13 @@ def parse_direct_route_backend(backend):
     block_j_target = int(match.group("j")) if match is not None else 32
     if match is not None:
         options["merge_num_warps"] = int(match.group("w"))
+        options["merge_num_stages"] = int(match.group("s"))
     # Triton tl.arange requires power-of-two block sizes in this kernel.
     if block_j_target not in {16, 32, 64}:
         supported = False
     if options["merge_num_warps"] not in {1, 2, 4}:
+        supported = False
+    if options["merge_num_stages"] not in {1, 2, 3}:
         supported = False
     if options["block_l_target"] not in {0, 64, 128}:
         supported = False
@@ -366,7 +370,7 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         merged_value_dtype=torch.bfloat16 if config.use_bf16_merged_value else torch.float16,
         use_exp2=True,
         force_seed_keys=True,
-        num_stages=1,
+        num_stages=config.merge_num_stages,
         logit_input_precision="tf32",
         inline_local_seed=config.inline_local_seed,
         key_outer_block=config.key_outer_block,
