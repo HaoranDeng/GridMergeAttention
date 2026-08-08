@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 import torch
 from einops import rearrange
 
@@ -18,6 +20,18 @@ from .hard_route_triton import (
 
 _SEED_ROWS_CACHE = {}
 _DIRECT_ROUTE_C4_BASE = "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
+_DIRECT_ROUTE_ATTENTION_CONFIGS = {
+    "triton_direct_m32_n16_w1_s1_exp2": (32, 16, 1),
+    "triton_direct_m32_n32_w1_s1_exp2": (32, 32, 1),
+}
+
+
+@dataclass(frozen=True)
+class DirectRouteMergeConfig:
+    supported: bool
+    inline_local_seed: bool = False
+    key_outer_block: int = 1
+    use_assigned_logit: bool = False
 
 
 def uses_inline_local_seed_backend(backend):
@@ -26,6 +40,7 @@ def uses_inline_local_seed_backend(backend):
 
 
 def _parse_direct_route_backend(backend):
+    """Parse compact backend suffixes used by the direct Triton C4 fast path."""
     backend = (backend or "").lower()
     inline_local_seed = backend.endswith("_inline_local_seed")
     if inline_local_seed:
@@ -53,8 +68,12 @@ def _parse_direct_route_backend(backend):
             use_assigned_logit = True
             changed = True
 
-    supported = token_major_output and backend == _DIRECT_ROUTE_C4_BASE
-    return supported, inline_local_seed, key_outer_block, use_assigned_logit
+    return DirectRouteMergeConfig(
+        supported=token_major_output and backend == _DIRECT_ROUTE_C4_BASE,
+        inline_local_seed=inline_local_seed,
+        key_outer_block=key_outer_block,
+        use_assigned_logit=use_assigned_logit,
+    )
 
 
 def _cached_seed_rows(
@@ -168,7 +187,7 @@ def hard_route_merge_weights(seed_logits, dtype):
     return merge_weights, merge_logprob, cluster_has_keys
 
 
-def _torch_merge(seed_queries, k, v, scale):
+def _torch_hard_route_merge(seed_queries, k, v, scale):
     seed_logits = torch.einsum("bafkjchd,bfklhd->bhafkjcl", seed_queries, k).float()
     seed_logits = seed_logits * float(scale)
     merge_weights, merge_logprob, cluster_has_keys = hard_route_merge_weights(seed_logits, k.dtype)
@@ -179,10 +198,10 @@ def _torch_merge(seed_queries, k, v, scale):
     return merged_keys, merged_values, routing_bias, cluster_has_keys
 
 
-def _merge(seed_queries, k, v, backend, scale):
+def _merge_seed_clusters(seed_queries, k, v, backend, scale):
     backend = (backend or "sdpa").lower()
     if backend == "sdpa":
-        return _torch_merge(seed_queries, k, v, scale)
+        return _torch_hard_route_merge(seed_queries, k, v, scale)
     if backend == "triton":
         return triton_hard_route_merge(seed_queries, k, v, scale=scale)
     if backend == "triton_c4":
@@ -196,8 +215,8 @@ def _merge(seed_queries, k, v, backend, scale):
 
 
 def _direct_route_merge(q, seed_rows, k, v, backend, scale):
-    supported, inline_local_seed, key_outer_block, use_assigned_logit = _parse_direct_route_backend(backend)
-    if not supported:
+    config = _parse_direct_route_backend(backend)
+    if not config.supported:
         return None
 
     return triton_hard_route_merge_c4_direct_route(
@@ -214,16 +233,10 @@ def _direct_route_merge(q, seed_rows, k, v, backend, scale):
         force_seed_keys=True,
         num_stages=1,
         logit_input_precision="tf32",
-        inline_local_seed=inline_local_seed,
-        key_outer_block=key_outer_block,
-        use_assigned_logit=use_assigned_logit,
+        inline_local_seed=config.inline_local_seed,
+        key_outer_block=config.key_outer_block,
+        use_assigned_logit=config.use_assigned_logit,
     )
-
-
-def _uses_direct_route_merge_backend(backend):
-    supported, _, _, _ = _parse_direct_route_backend(backend)
-    return supported
-
 
 def hard_route_compressed_attention(query, key, value, bias, backend, scale):
     backend = (backend or "sdpa").lower()
@@ -242,11 +255,7 @@ def hard_route_direct_compressed_attention(q, key, value, bias, backend, scale, 
     if not key_token_major:
         return None
     backend = backend[: -len("_tokenmajor")]
-    direct_configs = {
-        "triton_direct_m32_n16_w1_s1_exp2": (32, 16, 1),
-        "triton_direct_m32_n32_w1_s1_exp2": (32, 32, 1),
-    }
-    direct_config = direct_configs.get(backend)
+    direct_config = _DIRECT_ROUTE_ATTENTION_CONFIGS.get(backend)
     if direct_config is None:
         return None
 
@@ -264,6 +273,96 @@ def hard_route_direct_compressed_attention(q, key, value, bias, backend, scale, 
         use_exp2=True,
         out=output,
     )
+
+
+def _restore_attention_blocks(out, q):
+    return rearrange(
+        out,
+        "(b h a j) i d -> b a i j h d",
+        b=q.size(0),
+        h=q.size(4),
+        a=q.size(1),
+        j=q.size(3),
+    )
+
+
+def _seed_rows_for_backend(
+    q,
+    k,
+    query_outer_offset,
+    num_merge_tokens,
+    seed,
+    include_ith,
+    fast_with_include,
+    seed_mode,
+    inline_local_seed,
+):
+    if inline_local_seed:
+        return None
+    return _build_seed_rows(
+        q,
+        k,
+        query_outer_offset,
+        num_merge_tokens,
+        seed,
+        include_ith,
+        fast_with_include,
+        seed_mode,
+    )
+
+
+def _run_reference_path(q, k, v, scale, seed_rows, hard_route_backend, hard_route_routing_backend):
+    """Readable PyTorch/reference path: gather seeds, merge KV, then attend."""
+    query = rearrange(q, "b a i j h d -> (b h a j) i d")
+    seed_queries = gather_seed_queries(q, seed_rows)
+    merged_keys, merged_values, routing_bias, _ = _merge_seed_clusters(
+        seed_queries,
+        k,
+        v,
+        hard_route_backend,
+        scale,
+    )
+    key = rearrange(merged_keys, "b a f j k c h d -> (b h a j) (f k c) d")
+    value = rearrange(merged_values, "b a f j k c h d -> (b h a j) (f k c) d")
+    bias = rearrange(routing_bias, "b h a f k j c -> (b h a j) (f k c)")
+    out = hard_route_compressed_attention(
+        query,
+        key,
+        value,
+        bias,
+        hard_route_routing_backend,
+        scale,
+    )
+    return _restore_attention_blocks(out, q)
+
+
+def _run_direct_path(q, k, v, scale, seed_rows, hard_route_backend, hard_route_routing_backend, output):
+    """Optimized C4 path: Triton merge writes routing-ready token-major KV."""
+    q = q.contiguous()
+    key, value, bias, _ = _direct_route_merge(q, seed_rows, k, v, hard_route_backend, scale)
+    direct_out = hard_route_direct_compressed_attention(
+        q,
+        key,
+        value,
+        bias,
+        hard_route_routing_backend,
+        scale,
+        output=output if output is not None and output.is_contiguous() else None,
+    )
+    if direct_out is not None:
+        return direct_out
+
+    query = rearrange(q, "b a i j h d -> (b h a j) i d")
+    out = hard_route_compressed_attention(
+        query,
+        key,
+        value,
+        bias,
+        hard_route_routing_backend,
+        scale,
+    )
+    return _restore_attention_blocks(out, q)
+
 
 def hard_route_attention(
     q,
@@ -284,14 +383,37 @@ def hard_route_attention(
     # the L keys into several hard-assigned merged tokens instead of one.
     include_ith = validate_block_seed_mode(seed_mode, "multi-token merging")
     fast_with_include = seed_mode == "fast_random_with_ith"
-    inline_local_seed_backend = uses_inline_local_seed_backend(hard_route_backend)
-    if inline_local_seed_backend and seed_mode != "local_with_ith":
+    direct_backend = _parse_direct_route_backend(hard_route_backend)
+    if direct_backend.inline_local_seed and seed_mode != "local_with_ith":
         raise ValueError("inline-local-seed hard-route backend requires seed_mode='local_with_ith'.")
     if num_merge_tokens > k.size(3):
         raise ValueError("num_merge_tokens cannot exceed key columns per block.")
 
-    seed_rows = None
-    if not inline_local_seed_backend:
+    seed_rows = _seed_rows_for_backend(
+        q,
+        k,
+        query_outer_offset,
+        num_merge_tokens,
+        seed,
+        include_ith,
+        fast_with_include,
+        seed_mode,
+        direct_backend.inline_local_seed,
+    )
+
+    if direct_backend.supported:
+        return _run_direct_path(
+            q,
+            k,
+            v,
+            scale,
+            seed_rows,
+            hard_route_backend,
+            hard_route_routing_backend,
+            output,
+        )
+
+    if seed_rows is None:
         seed_rows = _build_seed_rows(
             q,
             k,
@@ -302,65 +424,14 @@ def hard_route_attention(
             fast_with_include,
             seed_mode,
         )
-
-    q_direct = q.contiguous() if _uses_direct_route_merge_backend(hard_route_backend) else q
-    direct_merge = _direct_route_merge(q_direct, seed_rows, k, v, hard_route_backend, scale)
-    if direct_merge is None:
-        if seed_rows is None:
-            seed_rows = _build_seed_rows(
-                q,
-                k,
-                query_outer_offset,
-                num_merge_tokens,
-                seed,
-                include_ith,
-                fast_with_include,
-                seed_mode,
-            )
-        query = rearrange(q, "b a i j h d -> (b h a j) i d")
-        seed_queries = gather_seed_queries(q, seed_rows)
-        merged_keys, merged_values, routing_bias, cluster_has_keys = _merge(
-            seed_queries,
-            k,
-            v,
-            hard_route_backend,
-            scale,
-        )
-        key = rearrange(merged_keys, "b a f j k c h d -> (b h a j) (f k c) d")
-        value = rearrange(merged_values, "b a f j k c h d -> (b h a j) (f k c) d")
-        bias = rearrange(routing_bias, "b h a f k j c -> (b h a j) (f k c)")
-        del cluster_has_keys
-    else:
-        key, value, bias, cluster_has_keys = direct_merge
-        del cluster_has_keys
-        direct_out = hard_route_direct_compressed_attention(
-            q_direct,
-            key,
-            value,
-            bias,
-            hard_route_routing_backend,
-            scale,
-            output=output if output is not None and output.is_contiguous() else None,
-        )
-        if direct_out is not None:
-            return direct_out
-        query = rearrange(q_direct, "b a i j h d -> (b h a j) i d")
-
-    out = hard_route_compressed_attention(
-        query,
-        key,
-        value,
-        bias,
-        hard_route_routing_backend,
+    return _run_reference_path(
+        q,
+        k,
+        v,
         scale,
-    )
-    return rearrange(
-        out,
-        "(b h a j) i d -> b a i j h d",
-        b=q.size(0),
-        h=q.size(4),
-        a=q.size(1),
-        j=q.size(3),
+        seed_rows,
+        hard_route_backend,
+        hard_route_routing_backend,
     )
 
 
