@@ -82,6 +82,32 @@ def _cached_seed_rows(
     return seed_rows
 
 
+def _build_seed_rows(
+    q,
+    k,
+    query_outer_offset,
+    num_merge_tokens,
+    seed,
+    include_ith,
+    fast_with_include,
+    seed_mode,
+):
+    return _cached_seed_rows(
+        q.device,
+        query_outer_offset,
+        q.size(1),
+        k.size(1),
+        k.size(2),
+        q.size(3),
+        q.size(2),
+        num_merge_tokens,
+        seed,
+        include_ith,
+        fast_with_include,
+        seed_mode,
+    )
+
+
 def assign_keys_to_seeds(seed_logits):
     # seed_logits: [B, H, A, F, K, J, C, L].
     num_seeds = seed_logits.size(-2)
@@ -235,29 +261,39 @@ def hard_route_attention(
     # the L keys into several hard-assigned merged tokens instead of one.
     include_ith = validate_block_seed_mode(seed_mode, "multi-token merging")
     fast_with_include = seed_mode == "fast_random_with_ith"
-    if uses_inline_local_seed_backend(hard_route_backend) and seed_mode != "local_with_ith":
+    inline_local_seed_backend = uses_inline_local_seed_backend(hard_route_backend)
+    if inline_local_seed_backend and seed_mode != "local_with_ith":
         raise ValueError("inline-local-seed hard-route backend requires seed_mode='local_with_ith'.")
     key_columns = k.size(4) if uses_head_major_kv_backend(hard_route_backend) else k.size(3)
     if num_merge_tokens > key_columns:
         raise ValueError("num_merge_tokens cannot exceed key columns per block.")
 
-    seed_rows = _cached_seed_rows(
-        q.device,
-        query_outer_offset,
-        q.size(1),
-        k.size(1),
-        k.size(2),
-        q.size(3),
-        q.size(2),
-        num_merge_tokens,
-        seed,
-        include_ith,
-        fast_with_include,
-        seed_mode,
-    )
+    seed_rows = None
+    if not inline_local_seed_backend:
+        seed_rows = _build_seed_rows(
+            q,
+            k,
+            query_outer_offset,
+            num_merge_tokens,
+            seed,
+            include_ith,
+            fast_with_include,
+            seed_mode,
+        )
 
     direct_merge = _direct_route_merge(q, seed_rows, k, v, hard_route_backend, scale)
     if direct_merge is None:
+        if seed_rows is None:
+            seed_rows = _build_seed_rows(
+                q,
+                k,
+                query_outer_offset,
+                num_merge_tokens,
+                seed,
+                include_ith,
+                fast_with_include,
+                seed_mode,
+            )
         query = rearrange(q, "b a i j h d -> (b h a j) i d")
         seed_queries = gather_seed_queries(q, seed_rows)
         merged_keys, merged_values, routing_bias, cluster_has_keys = _merge(

@@ -1093,7 +1093,8 @@ def triton_hard_route_merge_c4_direct_route(
     """Exact non-shared C=4 merge that writes routing-ready K/V/bias.
 
     query:     [B, A, query_rows, query_columns, H, D]
-    seed_rows: [A, F, key_rows, query_columns, 4]
+    seed_rows: [A, F, key_rows, query_columns, 4], or None when
+        inline_local_seed=True.
     key/value: [B, F, key_rows, key_columns, H, D]
 
     Returns key/value [B*H*A*query_columns, F*key_rows*4, D] and bias
@@ -1108,7 +1109,12 @@ def triton_hard_route_merge_c4_direct_route(
         raise RuntimeError("hard_route_backend='triton_c4_direct_route' requires fp16 or bf16 tensors.")
 
     query = query.contiguous()
-    seed_rows = seed_rows.contiguous()
+    if seed_rows is None:
+        if not inline_local_seed:
+            raise ValueError("seed_rows is required unless inline_local_seed=True.")
+        seed_rows = _cached_empty("hard_route_inline_seed_placeholder", (1,), query.device, torch.int64)
+    else:
+        seed_rows = seed_rows.contiguous()
     key = key.contiguous()
     value = value.contiguous()
 
@@ -1125,7 +1131,7 @@ def triton_hard_route_merge_c4_direct_route(
         key_columns = key.size(3)
         key_heads = key.size(4)
         key_dim = key.size(5)
-    if seed_rows.shape != (query_outer, key_outer, key_rows, query_columns, 4):
+    if not inline_local_seed and seed_rows.shape != (query_outer, key_outer, key_rows, query_columns, 4):
         raise ValueError("seed_rows shape is inconsistent for non-shared C4 direct-route merge.")
     if key.shape[:3] != (batch, key_outer, key_rows) or value.shape != key.shape:
         raise ValueError("query/key/value shapes are inconsistent for non-shared C4 direct-route merge.")
