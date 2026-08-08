@@ -12,6 +12,7 @@ from attention.hard_route import (
     _direct_route_merge,
     _cached_seed_rows,
     hard_route_direct_compressed_attention,
+    uses_head_major_kv_backend,
 )
 from generate import load_generator_checkpoint, load_prompts
 from pipeline import TokenMergingWanPipeline
@@ -134,7 +135,20 @@ def install_probe(stats, args):
             k_blocks = video_to_blocks(k, 1, 1, 1, height, width)
             v_blocks = video_to_blocks(v, 1, 1, 1, height, width)
 
-        out_blocks = torch.empty_like(v_blocks)
+        if uses_head_major_kv_backend(args.hard_route_backend):
+            if record:
+                k_merge_blocks, seconds = timed(lambda: k_blocks.permute(0, 1, 2, 4, 3, 5).contiguous())
+                stats.add_time("head_major_k_blocks", seconds)
+                v_merge_blocks, seconds = timed(lambda: v_blocks.permute(0, 1, 2, 4, 3, 5).contiguous())
+                stats.add_time("head_major_v_blocks", seconds)
+            else:
+                k_merge_blocks = k_blocks.permute(0, 1, 2, 4, 3, 5).contiguous()
+                v_merge_blocks = v_blocks.permute(0, 1, 2, 4, 3, 5).contiguous()
+        else:
+            k_merge_blocks = k_blocks
+            v_merge_blocks = v_blocks
+
+        out_blocks = torch.empty_like(q_blocks)
         for start in range(0, q_blocks.size(1), args.query_outer_chunk):
             end = min(start + args.query_outer_chunk, q_blocks.size(1))
             q_chunk = q_blocks[:, start:end]
@@ -147,8 +161,8 @@ def install_probe(stats, args):
                     lambda: _direct_route_merge(
                         q_chunk,
                         seed_rows,
-                        k_blocks,
-                        v_blocks,
+                        k_merge_blocks,
+                        v_merge_blocks,
                         args.hard_route_backend,
                         scale,
                     )
@@ -159,8 +173,8 @@ def install_probe(stats, args):
                 merge_out = _direct_route_merge(
                     q_chunk,
                     seed_rows,
-                    k_blocks,
-                    v_blocks,
+                    k_merge_blocks,
+                    v_merge_blocks,
                     args.hard_route_backend,
                     scale,
                 )
