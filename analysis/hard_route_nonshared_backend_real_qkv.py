@@ -58,21 +58,25 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
     batch, _, heads, dim = q.shape
     frames, height, width = grid_size
     route_tokens = int(frames) * int(height) * 4
-    key_bytes = 0 if merge_config.use_seed_key else _dtype_bytes(
+    materialized_key_bytes = _dtype_bytes(
         torch.bfloat16 if merge_config.use_bf16_merged_key else torch.float16
     )
+    key_bytes = 0 if merge_config.use_seed_key else materialized_key_bytes
     value_bytes = _dtype_bytes(torch.bfloat16 if merge_config.use_bf16_merged_value else torch.float16)
     bias_bytes = _dtype_bytes(torch.bfloat16 if merge_config.use_bf16_routing_bias else torch.float16)
 
     chunk_count = 0
     total_bytes = 0
     max_chunk_bytes = 0
+    seed_key_query_read_bytes = 0
     for start in range(0, int(frames), int(query_outer_chunk)):
         chunk_outer = min(int(query_outer_chunk), int(frames) - start)
         route_groups = int(batch) * int(heads) * chunk_outer * int(width)
         chunk_bytes = route_tokens * route_groups * (dim * key_bytes + dim * value_bytes + bias_bytes)
         total_bytes += chunk_bytes
         max_chunk_bytes = max(max_chunk_bytes, chunk_bytes)
+        if merge_config.use_seed_key:
+            seed_key_query_read_bytes += route_tokens * route_groups * dim * materialized_key_bytes
         chunk_count += 1
 
     return {
@@ -81,6 +85,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         "max_chunk_intermediate_bytes": max_chunk_bytes,
         "intermediate_write_bytes_per_attention_call": total_bytes,
         "intermediate_read_bytes_per_attention_call": total_bytes,
+        "seed_key_query_read_bytes_per_attention_call": seed_key_query_read_bytes,
         "key_dtype": "bf16" if merge_config.use_bf16_merged_key else "fp16",
         "value_dtype": "bf16" if merge_config.use_bf16_merged_value else "fp16",
         "bias_dtype": "bf16" if merge_config.use_bf16_routing_bias else "fp16",
