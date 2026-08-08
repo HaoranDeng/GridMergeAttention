@@ -9,6 +9,7 @@ from .common import (
 )
 from .hard_route_backend import (
     direct_compressed_attention,
+    direct_compressed_attention_packed_key_bias,
     direct_compressed_attention_packed_kv,
     direct_compressed_attention_packed_kvbias,
     direct_seed_key_attention,
@@ -186,6 +187,17 @@ def _route_direct_outputs(q, key, value, bias, direct_config, routing_backend, s
             scale,
             output=output,
             assume_contiguous=True,
+        )
+    if direct_config.use_packed_key_bias:
+        return direct_compressed_attention_packed_key_bias(
+            q,
+            key,
+            value,
+            routing_backend,
+            scale,
+            output=output,
+            assume_contiguous=True,
+            compact_packed_key_bias=direct_config.use_compact_packed_key_bias,
         )
     if direct_config.use_packed_kv:
         if direct_config.use_packed_bias:

@@ -59,6 +59,13 @@ def _packed_kvbias_width(dim, compact=False):
     return ((width + 15) // 16) * 16
 
 
+def _packed_keybias_width(dim, compact=False):
+    width = int(dim) + 1
+    if compact:
+        return width
+    return ((width + 15) // 16) * 16
+
+
 def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant):
     """Estimate compressed K/V/bias traffic for one self-attention call."""
     merge_config = parse_direct_route_backend(variant["hard_route_backend"])
@@ -82,7 +89,15 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
     for start in range(0, int(frames), int(query_outer_chunk)):
         chunk_outer = min(int(query_outer_chunk), int(frames) - start)
         route_groups = int(batch) * int(heads) * chunk_outer * int(width)
-        if merge_config.use_packed_bias:
+        if merge_config.use_packed_key_bias:
+            packed_width = _packed_keybias_width(
+                dim,
+                compact=merge_config.use_compact_packed_key_bias,
+            )
+            chunk_bytes = route_tokens * route_groups * (
+                packed_width * materialized_key_bytes + dim * value_bytes
+            )
+        elif merge_config.use_packed_bias:
             packed_width = _packed_kvbias_width(dim, compact=merge_config.use_compact_packed_bias)
             chunk_bytes = route_tokens * route_groups * packed_width * materialized_key_bytes
         else:
@@ -105,11 +120,18 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         "bias_dtype": "bf16" if merge_config.use_bf16_routing_bias else "fp16",
         "packs_routing_bias": merge_config.use_packed_bias,
         "compact_packed_bias": merge_config.use_compact_packed_bias,
+        "packs_key_bias": merge_config.use_packed_key_bias,
+        "compact_packed_key_bias": merge_config.use_compact_packed_key_bias,
         "block_j_target": merge_config.block_j_target,
         "block_l_target": merge_config.block_l_target or None,
         "packed_width": (
             _packed_kvbias_width(dim, compact=merge_config.use_compact_packed_bias)
             if merge_config.use_packed_bias
+            else None
+        ),
+        "packed_keybias_width": (
+            _packed_keybias_width(dim, compact=merge_config.use_compact_packed_key_bias)
+            if merge_config.use_packed_key_bias
             else None
         ),
         "writes_merged_key": not merge_config.use_seed_key,
@@ -290,6 +312,13 @@ def exact_variants():
         ),
         "hard_c4_bestlogit_packkvbiascompact_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "packkvbiascompact"), seed_mode="local_with_ith"
+        ),
+        "hard_c4_bestlogit_packkbiascompact_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "packkbiascompact"), seed_mode="local_with_ith"
+        ),
+        "hard_c4_bestlogit_packkbiascompact_l52_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "packkbiascompact", block_l=52),
+            seed_mode="local_with_ith",
         ),
         "hard_c4_bestlogit_packkvbiascompact_l52_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "packkvbiascompact", block_l=52),

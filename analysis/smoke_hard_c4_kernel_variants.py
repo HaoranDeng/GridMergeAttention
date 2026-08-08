@@ -88,6 +88,7 @@ def main():
         "hard_c4_bestlogit_packkv_tokenmajor",
         "hard_c4_bestlogit_packkvbias_tokenmajor",
         "hard_c4_bestlogit_packkvbiascompact_tokenmajor",
+        "hard_c4_bestlogit_packkbiascompact_tokenmajor",
         "hard_c4_bestlogit_recompute_tokenmajor",
         "hard_c4_bestlogit_recompute_packkv_tokenmajor",
         "hard_c4_bestlogit_recompute_packkvbias_tokenmajor",
@@ -98,6 +99,7 @@ def main():
         "hard_c4_bestlogit_packkvbiascompact_j52_tokenmajor",
         "hard_c4_bestlogit_l52_tokenmajor",
         "hard_c4_bestlogit_packkvbiascompact_l52_tokenmajor",
+        "hard_c4_bestlogit_packkbiascompact_l52_tokenmajor",
     ]
 
     results = {}
