@@ -266,11 +266,31 @@ def exact_variants():
         "hard_c4_stripe_tokenmajor": exact_backend(
             direct_merge_backend("stripe"), seed_mode="local_with_ith"
         ),
+        "hard_c4_stripe_tokenmajor_n32_s1": exact_backend(
+            direct_merge_backend("stripe"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=32),
+        ),
         "hard_c4_stripe_packkv_tokenmajor": exact_backend(
             direct_merge_backend("stripe", "packkv"), seed_mode="local_with_ith"
         ),
+        "hard_c4_stripe_packkv_tokenmajor_n32_s1": exact_backend(
+            direct_merge_backend("stripe", "packkv"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=32),
+        ),
         "hard_c4_seedkey_tokenmajor": exact_backend(
             direct_merge_backend("seedkey", "bestlogit"), seed_mode="local_with_ith"
+        ),
+        "hard_c4_seedkey_tokenmajor_n32_s1": exact_backend(
+            direct_merge_backend("seedkey", "bestlogit"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=32),
+        ),
+        "hard_c4_seedkey_tokenmajor_n64_w1": exact_backend(
+            direct_merge_backend("seedkey", "bestlogit"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=64, num_warps=1),
         ),
         "hard_c4_bf16kv_tokenmajor": exact_backend(
             direct_merge_backend("bf16kv"), seed_mode="local_with_ith"
