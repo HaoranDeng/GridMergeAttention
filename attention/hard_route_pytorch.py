@@ -77,9 +77,21 @@ def hard_route_merge_weights(seed_logits, dtype):
     return merge_weights, merge_logprob, assigned.any(dim=-1)
 
 
-def routing_bias_from_logprob(merge_weights, merge_logprob):
-    """Entropy-derived bias used by the second compressed-attention step."""
-    return (merge_weights * merge_logprob).sum(dim=-1)
+def hard_route_merge_stats(seed_logits, dtype):
+    """Return merge weights and routing bias without materializing log-probs."""
+    assigned = assign_keys_to_seeds(seed_logits)
+    logits = seed_logits.float()
+    active_logits = logits.masked_fill(~assigned, torch.finfo(torch.float32).min)
+
+    row_max = active_logits.amax(dim=-1, keepdim=True)
+    probs = torch.exp(active_logits - row_max).masked_fill(~assigned, 0.0)
+    denom = probs.sum(dim=-1, keepdim=True).clamp_min(1e-20)
+    weights = probs / denom
+
+    log_denom = row_max.squeeze(-1) + denom.squeeze(-1).log()
+    expected_logit = (weights * logits.masked_fill(~assigned, 0.0)).sum(dim=-1)
+    routing_bias = expected_logit - log_denom
+    return weights.to(dtype), routing_bias, assigned.any(dim=-1)
 
 
 def merge_kv_from_weights(merge_weights, key, value):
@@ -110,9 +122,8 @@ def hard_route_merge_kv_pytorch(seed_queries, key, value, scale):
     bias:         [B, H, A, F, K, J, C]
     """
     logits = seed_key_logits(seed_queries, key, scale)
-    weights, logprob, cluster_has_keys = hard_route_merge_weights(logits, key.dtype)
+    weights, routing_bias, cluster_has_keys = hard_route_merge_stats(logits, key.dtype)
     merged_keys, merged_values = merge_kv_from_weights(weights, key, value)
-    routing_bias = routing_bias_from_logprob(weights, logprob)
     return merged_keys, merged_values, routing_bias, cluster_has_keys
 
 
@@ -123,20 +134,19 @@ def hard_route_merge_kv_transpose_pytorch(seed_queries, key, value, scale):
     J queries x K keys, so seed query columns compress key rows.
     """
     logits = seed_key_logits_transpose(seed_queries, key, scale)
-    weights, logprob, _ = hard_route_merge_weights(logits, key.dtype)
+    weights, routing_bias, _ = hard_route_merge_stats(logits, key.dtype)
     merged_keys, merged_values = merge_kv_from_weights_transpose(weights, key, value)
-    routing_bias = routing_bias_from_logprob(weights, logprob)
     return merged_keys, merged_values, routing_bias
 
 
 __all__ = [
     "assign_keys_to_seeds",
     "hard_route_merge_weights",
+    "hard_route_merge_stats",
     "hard_route_merge_kv_pytorch",
     "hard_route_merge_kv_transpose_pytorch",
     "masked_log_softmax_over_keys",
     "merge_kv_from_weights",
-    "routing_bias_from_logprob",
     "seed_key_logits",
     "seed_key_logits_transpose",
 ]
