@@ -176,6 +176,12 @@ def exact_variants():
         "hard_c4_bf16kv_tokenmajor": exact_backend(
             direct_merge_backend("bf16kv"), seed_mode="local_with_ith"
         ),
+        "hard_c4_bf16k_tokenmajor": exact_backend(
+            direct_merge_backend("bf16k"), seed_mode="local_with_ith"
+        ),
+        "hard_c4_bf16v_tokenmajor": exact_backend(
+            direct_merge_backend("bf16v"), seed_mode="local_with_ith"
+        ),
         "hard_c4_keyouter_f2_bestlogit_tokenmajor": exact_backend(
             direct_merge_backend("f2", "bestlogit"), seed_mode="local_with_ith"
         ),
@@ -258,6 +264,12 @@ def exact_variants():
         ),
         "hard_c4_keyouter_f6_bf16kv_tokenmajor": exact_backend(
             direct_merge_backend("f6", "bf16kv"), seed_mode="local_with_ith"
+        ),
+        "hard_c4_keyouter_f6_bf16k_tokenmajor": exact_backend(
+            direct_merge_backend("f6", "bf16k"), seed_mode="local_with_ith"
+        ),
+        "hard_c4_keyouter_f6_bf16v_tokenmajor": exact_backend(
+            direct_merge_backend("f6", "bf16v"), seed_mode="local_with_ith"
         ),
         "hard_c4_keyouter_f7_tokenmajor": exact_backend(
             direct_merge_backend("f7"), seed_mode="local_with_ith"

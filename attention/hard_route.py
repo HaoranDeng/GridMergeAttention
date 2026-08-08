@@ -47,7 +47,8 @@ class DirectRouteMergeConfig:
     key_outer_block: int = 1
     use_key_outer_kernel: bool = False
     use_assigned_logit: bool = False
-    use_bf16_merged_kv: bool = False
+    use_bf16_merged_key: bool = False
+    use_bf16_merged_value: bool = False
 
 
 def _remove_suffix(text, suffix):
@@ -90,7 +91,8 @@ def _parse_direct_route_backend(backend):
     key_outer_block = 1
     use_key_outer_kernel = False
     use_assigned_logit = False
-    use_bf16_merged_kv = False
+    use_bf16_merged_key = False
+    use_bf16_merged_value = False
     changed = True
     while changed:
         changed = False
@@ -107,7 +109,16 @@ def _parse_direct_route_backend(backend):
             changed = True
         backend, matched = _remove_suffix(backend, "_bf16kv")
         if matched:
-            use_bf16_merged_kv = True
+            use_bf16_merged_key = True
+            use_bf16_merged_value = True
+            changed = True
+        backend, matched = _remove_suffix(backend, "_bf16k")
+        if matched:
+            use_bf16_merged_key = True
+            changed = True
+        backend, matched = _remove_suffix(backend, "_bf16v")
+        if matched:
+            use_bf16_merged_value = True
             changed = True
 
     return DirectRouteMergeConfig(
@@ -116,7 +127,8 @@ def _parse_direct_route_backend(backend):
         key_outer_block=key_outer_block,
         use_key_outer_kernel=use_key_outer_kernel,
         use_assigned_logit=use_assigned_logit,
-        use_bf16_merged_kv=use_bf16_merged_kv,
+        use_bf16_merged_key=use_bf16_merged_key,
+        use_bf16_merged_value=use_bf16_merged_value,
     )
 
 
@@ -268,7 +280,8 @@ def _direct_route_merge(q, seed_rows, k, v, config, scale, assume_contiguous=Fal
         block_j_target=32,
         num_warps=2,
         bias_dtype=torch.float16,
-        merged_dtype=torch.bfloat16 if config.use_bf16_merged_kv else torch.float16,
+        merged_key_dtype=torch.bfloat16 if config.use_bf16_merged_key else torch.float16,
+        merged_value_dtype=torch.bfloat16 if config.use_bf16_merged_value else torch.float16,
         use_exp2=True,
         force_seed_keys=True,
         num_stages=1,

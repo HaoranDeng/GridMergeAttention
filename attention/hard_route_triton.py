@@ -1236,6 +1236,8 @@ def triton_hard_route_merge_c4_direct_route(
     num_warps=2,
     bias_dtype=torch.float32,
     merged_dtype=None,
+    merged_key_dtype=None,
+    merged_value_dtype=None,
     use_exp2=False,
     force_seed_keys=False,
     num_stages=None,
@@ -1304,17 +1306,21 @@ def triton_hard_route_merge_c4_direct_route(
     route_tokens = key_outer * key_rows * 4
     if merged_dtype is None:
         merged_dtype = key.dtype
+    if merged_key_dtype is None:
+        merged_key_dtype = merged_dtype
+    if merged_value_dtype is None:
+        merged_value_dtype = merged_dtype
     merged_key = _cached_empty(
         "hard_route_c4_direct_route_key_token_major",
         (route_tokens, route_groups, dim),
         key.device,
-        merged_dtype,
+        merged_key_dtype,
     )
     merged_value = _cached_empty(
         "hard_route_c4_direct_route_value_token_major",
         (route_tokens, route_groups, dim),
         key.device,
-        merged_dtype,
+        merged_value_dtype,
     )
     routing_bias = _cached_empty(
         "hard_route_c4_direct_route_bias_token_major",
@@ -1334,7 +1340,8 @@ def triton_hard_route_merge_c4_direct_route(
         or block_j != 32
         or int(num_warps) != 2
         or bias_dtype != torch.float16
-        or merged_dtype not in (torch.float16, torch.bfloat16)
+        or merged_key_dtype not in (torch.float16, torch.bfloat16)
+        or merged_value_dtype not in (torch.float16, torch.bfloat16)
         or (not use_exp2)
         or (not force_seed_keys)
         or num_stages != 1
