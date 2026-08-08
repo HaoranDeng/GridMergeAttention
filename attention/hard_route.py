@@ -17,11 +17,40 @@ from .hard_route_triton import (
 
 
 _SEED_ROWS_CACHE = {}
+_DIRECT_ROUTE_C4_BASE = "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
 
 
 def uses_inline_local_seed_backend(backend):
     backend = str(backend or "").lower()
     return backend.endswith("_inline_local_seed")
+
+
+def _parse_direct_route_backend(backend):
+    backend = (backend or "").lower()
+    inline_local_seed = backend.endswith("_inline_local_seed")
+    if inline_local_seed:
+        backend = backend[: -len("_inline_local_seed")]
+
+    token_major_output = backend.endswith("_tokenmajor")
+    if token_major_output:
+        backend = backend[: -len("_tokenmajor")]
+
+    key_outer_block = 1
+    use_assigned_logit = False
+    changed = True
+    while changed:
+        changed = False
+        if backend.endswith("_f2"):
+            backend = backend[: -len("_f2")]
+            key_outer_block = 2
+            changed = True
+        if backend.endswith("_bestlogit"):
+            backend = backend[: -len("_bestlogit")]
+            use_assigned_logit = True
+            changed = True
+
+    supported = token_major_output and backend == _DIRECT_ROUTE_C4_BASE
+    return supported, inline_local_seed, key_outer_block, use_assigned_logit
 
 
 def _cached_seed_rows(
@@ -163,25 +192,8 @@ def _merge(seed_queries, k, v, backend, scale):
 
 
 def _direct_route_merge(q, seed_rows, k, v, backend, scale):
-    backend = (backend or "").lower()
-    inline_local_seed = backend.endswith("_inline_local_seed")
-    if inline_local_seed:
-        backend = backend[: -len("_inline_local_seed")]
-    token_major_output = backend.endswith("_tokenmajor")
-    if token_major_output:
-        backend = backend[: -len("_tokenmajor")]
-    key_outer_block = 1
-    if backend.endswith("_f2"):
-        backend = backend[: -len("_f2")]
-        key_outer_block = 2
-    use_assigned_logit = backend.endswith("_bestlogit")
-    if use_assigned_logit:
-        backend = backend[: -len("_bestlogit")]
-
-    if (
-        not token_major_output
-        or backend != "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
-    ):
+    supported, inline_local_seed, key_outer_block, use_assigned_logit = _parse_direct_route_backend(backend)
+    if not supported:
         return None
 
     return triton_hard_route_merge_c4_direct_route(
@@ -205,20 +217,8 @@ def _direct_route_merge(q, seed_rows, k, v, backend, scale):
 
 
 def _uses_direct_route_merge_backend(backend):
-    backend = (backend or "").lower()
-    if backend.endswith("_inline_local_seed"):
-        backend = backend[: -len("_inline_local_seed")]
-    token_major_output = backend.endswith("_tokenmajor")
-    if token_major_output:
-        backend = backend[: -len("_tokenmajor")]
-    if backend.endswith("_f2"):
-        backend = backend[: -len("_f2")]
-    if backend.endswith("_bestlogit"):
-        backend = backend[: -len("_bestlogit")]
-    return (
-        token_major_output
-        and backend == "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
-    )
+    supported, _, _, _ = _parse_direct_route_backend(backend)
+    return supported
 
 
 def hard_route_compressed_attention(query, key, value, bias, backend, scale):
