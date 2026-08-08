@@ -12,6 +12,7 @@ from attention.hard_route import _build_seed_rows, hard_route_compressed_attenti
 from attention.hard_route_backend import (
     direct_compressed_attention,
     direct_compressed_attention_packed_kv,
+    direct_seed_key_attention,
     merge_kv_direct_c4,
     parse_direct_route_backend,
     uses_inline_local_seed_backend,
@@ -141,6 +142,20 @@ def route_compressed_tokens(q_chunk, merged_key, merged_value, routing_bias, var
     Both paths compute the same full compressed attention.
     """
     routing_backend = variant["hard_route_routing_backend"]
+    if config.use_seed_key:
+        routed = direct_seed_key_attention(
+            q_chunk,
+            merged_value,
+            routing_bias,
+            routing_backend,
+            scale,
+            output=output,
+            assume_contiguous=True,
+        )
+        if routed is None:
+            raise ValueError("seed-key profiling requires a triton_direct_*_tokenmajor routing backend.")
+        return routed
+
     if config.use_packed_kv:
         routed = direct_compressed_attention_packed_kv(
             q_chunk,

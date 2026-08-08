@@ -10,6 +10,7 @@ from .common import (
 from .hard_route_backend import (
     direct_compressed_attention,
     direct_compressed_attention_packed_kv,
+    direct_seed_key_attention,
     merge_kv_direct_c4,
     parse_direct_route_backend,
     uses_inline_local_seed_backend,
@@ -189,7 +190,17 @@ def _run_direct_path(q, k, v, scale, seed_rows, direct_config, hard_route_routin
         assume_contiguous=True,
     )
     output = output if output is not None and output.is_contiguous() else None
-    if direct_config.use_packed_kv:
+    if direct_config.use_seed_key:
+        direct_out = direct_seed_key_attention(
+            q,
+            value,
+            bias,
+            hard_route_routing_backend,
+            scale,
+            output=output,
+            assume_contiguous=True,
+        )
+    elif direct_config.use_packed_kv:
         direct_out = direct_compressed_attention_packed_kv(
             q,
             key,
@@ -212,6 +223,8 @@ def _run_direct_path(q, k, v, scale, seed_rows, direct_config, hard_route_routin
         )
     if direct_out is not None:
         return direct_out
+    if direct_config.use_seed_key:
+        raise ValueError("seed-key hard-route backend requires a triton_direct_*_tokenmajor routing backend.")
     if direct_config.use_packed_kv:
         raise ValueError("packed-KV hard-route backend requires a triton_direct_*_tokenmajor routing backend.")
 

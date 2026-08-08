@@ -261,6 +261,9 @@ def exact_variants():
         "hard_c4_stripe_packkv_tokenmajor": exact_backend(
             direct_merge_backend("stripe", "packkv"), seed_mode="local_with_ith"
         ),
+        "hard_c4_seedkey_tokenmajor": exact_backend(
+            direct_merge_backend("seedkey", "bestlogit"), seed_mode="local_with_ith"
+        ),
         "hard_c4_bf16kv_tokenmajor": exact_backend(
             direct_merge_backend("bf16kv"), seed_mode="local_with_ith"
         ),

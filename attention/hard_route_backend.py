@@ -7,6 +7,7 @@ import torch
 from .hard_route_triton import (
     triton_direct_route_biased_attention,
     triton_direct_route_biased_attention_packed_kv,
+    triton_direct_route_seed_key_attention,
     triton_hard_route_merge_c4_direct_route,
 )
 
@@ -26,6 +27,7 @@ _DIRECT_ROUTE_KEY_OUTER_BLOCKS = {
     "f7": 7,
 }
 _DIRECT_ROUTE_FLAG_SUFFIXES = (
+    ("_seedkey", "use_seed_key"),
     ("_stripe", "use_stripe_assign"),
     ("_bestlogit", "use_assigned_logit"),
     ("_maskassign", "use_mask_assign"),
@@ -52,6 +54,7 @@ class DirectRouteMergeConfig:
     use_mask_assign: bool = False
     use_packed_kv: bool = False
     use_stripe_assign: bool = False
+    use_seed_key: bool = False
 
 
 def _remove_suffix(text, suffix):
@@ -109,6 +112,7 @@ def parse_direct_route_backend(backend):
         "use_mask_assign": False,
         "use_packed_kv": False,
         "use_stripe_assign": False,
+        "use_seed_key": False,
     }
 
     while True:
@@ -164,7 +168,42 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         use_mask_assign=config.use_mask_assign,
         pack_kv=config.use_packed_kv,
         use_stripe_assign=config.use_stripe_assign,
+        use_seed_key=config.use_seed_key,
         assume_contiguous=assume_contiguous and config.inline_local_seed,
+    )
+
+
+def direct_seed_key_attention(
+    q,
+    value,
+    bias,
+    backend,
+    scale,
+    output=None,
+    assume_contiguous=False,
+):
+    backend = (backend or "").lower()
+    backend, token_major = _remove_suffix(backend, "_tokenmajor")
+    if not token_major:
+        return None
+
+    config = parse_direct_route_attention_backend(backend)
+    if config is None:
+        return None
+
+    block_m, block_n, num_warps, num_stages = config
+    return triton_direct_route_seed_key_attention(
+        q,
+        value,
+        bias,
+        block_m=block_m,
+        block_n=block_n,
+        scale=scale,
+        num_warps=num_warps,
+        num_stages=num_stages,
+        use_exp2=True,
+        out=output,
+        assume_contiguous=assume_contiguous,
     )
 
 
@@ -242,6 +281,7 @@ __all__ = [
     "DirectRouteMergeConfig",
     "direct_compressed_attention",
     "direct_compressed_attention_packed_kv",
+    "direct_seed_key_attention",
     "merge_kv_direct_c4",
     "parse_direct_route_attention_backend",
     "parse_direct_route_backend",
