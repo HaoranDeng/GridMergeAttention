@@ -361,6 +361,7 @@ if triton is not None:
         SEED_KEY: tl.constexpr,
         SEED_KEY_BIAS_MATCH: tl.constexpr,
         SEED_KEY_SCALE: tl.constexpr,
+        SEED_KEY_LS_SCALE: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -597,12 +598,27 @@ if triton is not None:
                     seed_for_scale = seed2
                 if seed_idx == 3:
                     seed_for_scale = seed3
-                seed_self_logit = (
-                    tl.sum(seed_for_scale.to(tl.float32) * seed_for_scale.to(tl.float32), axis=1)
-                    * SCORE_SCALE
-                )
-                safe_self_logit = tl.where(tl.abs(seed_self_logit) > 1.0e-20, seed_self_logit, 1.0)
-                tl.store(key_scale_ptr + bias_offset, expected_logit / safe_self_logit, mask=valid_query)
+                if SEED_KEY_LS_SCALE:
+                    merged_key_for_scale = tl.dot(weights.to(key_block.dtype), key_block)
+                    x0 = tl.sum(seed0.to(tl.float32) * seed_for_scale.to(tl.float32), axis=1) * SCORE_SCALE
+                    x1 = tl.sum(seed1.to(tl.float32) * seed_for_scale.to(tl.float32), axis=1) * SCORE_SCALE
+                    x2 = tl.sum(seed2.to(tl.float32) * seed_for_scale.to(tl.float32), axis=1) * SCORE_SCALE
+                    x3 = tl.sum(seed3.to(tl.float32) * seed_for_scale.to(tl.float32), axis=1) * SCORE_SCALE
+                    y0 = tl.sum(seed0.to(tl.float32) * merged_key_for_scale.to(tl.float32), axis=1) * SCORE_SCALE
+                    y1 = tl.sum(seed1.to(tl.float32) * merged_key_for_scale.to(tl.float32), axis=1) * SCORE_SCALE
+                    y2 = tl.sum(seed2.to(tl.float32) * merged_key_for_scale.to(tl.float32), axis=1) * SCORE_SCALE
+                    y3 = tl.sum(seed3.to(tl.float32) * merged_key_for_scale.to(tl.float32), axis=1) * SCORE_SCALE
+                    numerator = x0 * y0 + x1 * y1 + x2 * y2 + x3 * y3
+                    denominator = x0 * x0 + x1 * x1 + x2 * x2 + x3 * x3
+                    safe_denominator = tl.where(tl.abs(denominator) > 1.0e-20, denominator, 1.0)
+                    tl.store(key_scale_ptr + bias_offset, numerator / safe_denominator, mask=valid_query)
+                else:
+                    seed_self_logit = (
+                        tl.sum(seed_for_scale.to(tl.float32) * seed_for_scale.to(tl.float32), axis=1)
+                        * SCORE_SCALE
+                    )
+                    safe_self_logit = tl.where(tl.abs(seed_self_logit) > 1.0e-20, seed_self_logit, 1.0)
+                    tl.store(key_scale_ptr + bias_offset, expected_logit / safe_self_logit, mask=valid_query)
             tl.store(routing_bias_ptr + bias_offset, routing_bias, mask=valid_query)
 
     @triton.jit
@@ -637,6 +653,7 @@ if triton is not None:
         SEED_KEY: tl.constexpr,
         SEED_KEY_BIAS_MATCH: tl.constexpr,
         SEED_KEY_SCALE: tl.constexpr,
+        SEED_KEY_LS_SCALE: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -2287,6 +2304,7 @@ def triton_hard_route_merge_c4_direct_route(
     use_seed_key=False,
     use_seed_key_bias_match=False,
     use_seed_key_scale=False,
+    use_seed_key_lsq_scale=False,
     key_scale_dtype=None,
     assume_contiguous=False,
 ):
@@ -2431,6 +2449,10 @@ def triton_hard_route_merge_c4_direct_route(
         raise ValueError("seed-key scaling requires use_seed_key=True.")
     if use_seed_key_scale and use_seed_key_bias_match:
         raise ValueError("seed-key scaling and seed-key bias matching are alternative approximations.")
+    if use_seed_key_lsq_scale and not use_seed_key_scale:
+        raise ValueError("seed-key LS scaling requires use_seed_key_scale=True.")
+    if use_seed_key_lsq_scale and use_recompute_merge:
+        raise ValueError("seed-key LS scaling is not implemented for recompute merge.")
     if use_key_outer_kernel and (
         (not inline_local_seed)
         or block_j != 32
@@ -2559,6 +2581,7 @@ def triton_hard_route_merge_c4_direct_route(
         SEED_KEY=bool(use_seed_key),
         SEED_KEY_BIAS_MATCH=bool(use_seed_key_bias_match),
         SEED_KEY_SCALE=bool(use_seed_key_scale),
+        SEED_KEY_LS_SCALE=bool(use_seed_key_lsq_scale),
         **launch_kwargs,
     )
     return merged_key, merged_value, routing_bias, key_scale
