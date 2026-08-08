@@ -103,7 +103,9 @@ def main():
         "hard_c4_bestlogit_packkvbiascompact_l52_tokenmajor",
         "hard_c4_bestlogit_packkvbiascompact_j26_l52_tokenmajor",
         "hard_c4_bestlogit_packkvbiascompact_j52_l52_tokenmajor",
+        "hard_c4_bestlogit_packkbias_tokenmajor",
         "hard_c4_bestlogit_packkbiascompact_l52_tokenmajor",
+        "hard_c4_bestlogit_packkbias_j26_l52_tokenmajor",
         "hard_c4_bestlogit_packkbiascompact_j26_l52_tokenmajor",
         "hard_c4_bestlogit_packkbiascompact_j52_l52_tokenmajor",
     ]

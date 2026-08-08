@@ -324,8 +324,15 @@ def exact_variants():
         "hard_c4_bestlogit_packkbiascompact_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "packkbiascompact"), seed_mode="local_with_ith"
         ),
+        "hard_c4_bestlogit_packkbias_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "packkbias"), seed_mode="local_with_ith"
+        ),
         "hard_c4_bestlogit_packkbiascompact_l52_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "packkbiascompact", block_l=52),
+            seed_mode="local_with_ith",
+        ),
+        "hard_c4_bestlogit_packkbias_j26_l52_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "packkbias", block_j=26, block_l=52),
             seed_mode="local_with_ith",
         ),
         "hard_c4_bestlogit_packkbiascompact_j26_l52_tokenmajor": exact_backend(
