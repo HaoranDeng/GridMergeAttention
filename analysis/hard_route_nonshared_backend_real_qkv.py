@@ -73,11 +73,13 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
     )
     if merge_config.use_seed_key:
         key_bytes_per_route_token = 0
-    elif merge_config.use_indirect_top_key:
+    elif merge_config.use_indirect_top_key or merge_config.use_indirect_top_kv:
         key_bytes_per_route_token = 2
     else:
         key_bytes_per_route_token = dim * materialized_key_bytes
-    value_bytes = _dtype_bytes(torch.bfloat16 if merge_config.use_bf16_merged_value else torch.float16)
+    value_bytes = 0 if merge_config.use_indirect_top_kv else _dtype_bytes(
+        torch.bfloat16 if merge_config.use_bf16_merged_value else torch.float16
+    )
     bias_dtype = (
         torch.float32
         if merge_config.use_fp32_routing_bias
@@ -122,10 +124,14 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         "seed_key_query_read_bytes_per_attention_call": seed_key_query_read_bytes,
         "key_dtype": (
             "int16_index"
-            if merge_config.use_indirect_top_key
+            if (merge_config.use_indirect_top_key or merge_config.use_indirect_top_kv)
             else ("bf16" if merge_config.use_bf16_merged_key else "fp16")
         ),
-        "value_dtype": "bf16" if merge_config.use_bf16_merged_value else "fp16",
+        "value_dtype": (
+            "original_value_by_int16_index"
+            if merge_config.use_indirect_top_kv
+            else ("bf16" if merge_config.use_bf16_merged_value else "fp16")
+        ),
         "bias_dtype": (
             "fp32"
             if merge_config.use_fp32_routing_bias
@@ -349,6 +355,10 @@ def exact_variants():
         ),
         "hard_c4_bestlogit_topkv_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "topkv"), seed_mode="local_with_ith"
+        ),
+        "hard_c4_bestlogit_topkv_indirectkv_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "topkv", "indirectkv"),
+            seed_mode="local_with_ith",
         ),
         "hard_c4_bestlogit_topkey_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "topkey"), seed_mode="local_with_ith"

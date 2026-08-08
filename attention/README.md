@@ -146,6 +146,9 @@ model still runs full compressed attention over every compressed token.
 - `topkv`: compressed K and V are both the top-logit original token in the seed
   cluster.
 - `seedvalue`: compressed V is the forced representative seed value.
+- `indirectkv`: for `topkv`, store only the top-token column index instead of
+  materializing compressed K/V; full compressed attention gathers original K/V
+  by that index.
 
 These variants are benchmark candidates only. Keep the `bestlogit` path above
 as the default until a real-QKV benchmark shows a clear speed gain with

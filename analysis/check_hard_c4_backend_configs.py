@@ -111,6 +111,14 @@ def main():
             backend("bestlogit", "topkv"),
             {"use_assigned_logit": True, "use_top_kv": True},
         ),
+        "topkv_indirectkv": (
+            backend("bestlogit", "topkv", "indirectkv"),
+            {
+                "use_assigned_logit": True,
+                "use_top_kv": True,
+                "use_indirect_top_kv": True,
+            },
+        ),
         "topvalue": (
             backend("bestlogit", "topvalue"),
             {"use_assigned_logit": True, "use_top_value": True},
