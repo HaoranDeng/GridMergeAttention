@@ -333,7 +333,7 @@ def parse_args():
     parser.add_argument("--dtype", choices=["bf16", "fp16"], default="bf16")
     parser.add_argument("--use_ema", action="store_true")
     parser.add_argument("--max_calls", type=int, default=20)
-    parser.add_argument("--query_outer_chunk", type=int, default=5)
+    parser.add_argument("--query_outer_chunk", type=int, default=10)
     parser.add_argument("--num_merge_tokens", type=int, default=4)
     parser.add_argument("--seed_mode", default="fast_random_with_ith")
     parser.add_argument(

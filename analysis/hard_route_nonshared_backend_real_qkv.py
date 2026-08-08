@@ -529,7 +529,7 @@ def parse_args():
     parser.add_argument("--dtype", choices=["bf16", "fp16"], default="bf16")
     parser.add_argument("--use_ema", action="store_true")
     parser.add_argument("--max_calls", type=int, default=30)
-    parser.add_argument("--query_outer_chunk", type=int, default=7)
+    parser.add_argument("--query_outer_chunk", type=int, default=10)
     parser.add_argument(
         "--skip_baseline",
         action="store_true",
