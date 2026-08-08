@@ -2844,14 +2844,14 @@ if triton is not None:
                 best_logits = tl.where(update, merge_logits3, best_logits)
                 assignments = tl.where(update, 3, assignments)
 
-                assignments = tl.where(valid_source_key & (key_offsets < 4), key_offsets, assignments)
+                assignments = tl.where(valid_block & valid_source_key & (key_offsets < 4), key_offsets, assignments)
                 forced_logits = best_logits
                 forced_logits = tl.where(key_offsets == 0, merge_logits0, forced_logits)
                 forced_logits = tl.where(key_offsets == 1, merge_logits1, forced_logits)
                 forced_logits = tl.where(key_offsets == 2, merge_logits2, forced_logits)
                 forced_logits = tl.where(key_offsets == 3, merge_logits3, forced_logits)
 
-                active = valid_source_key[None, :] & (assignments[None, :] == seed_offsets[:, None])
+                active = valid_block & valid_source_key[None, :] & (assignments[None, :] == seed_offsets[:, None])
                 merge_logits = forced_logits[None, :] + tl.zeros((4, BLOCK_L), tl.float32)
                 row_max = tl.max(tl.where(active, merge_logits, -float("inf")), axis=1)
                 if USE_EXP2:
@@ -2868,7 +2868,7 @@ if triton is not None:
 
                 for seed_idx in tl.static_range(0, 4):
                     route_row = block_idx * 4 + seed_idx
-                    merged_row = tl.max(
+                    merged_row = tl.sum(
                         tl.where(seed_offsets[:, None] == seed_idx, merged_block, 0.0),
                         axis=0,
                     )
