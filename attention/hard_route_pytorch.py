@@ -1,66 +1,58 @@
 import torch
 
 
+FP32_MIN = torch.finfo(torch.float32).min
+
+
 def seed_key_logits(seed_queries, key, scale):
-    """Score every seed query against every key in the same block.
+    """Score each seed query against each key in the same regular block.
 
     seed_queries: [B, A, F, K, J, C, H, D]
     key:          [B, F, K, L, H, D]
     return:       [B, H, A, F, K, J, C, L]
-
-    C is the number of seed queries. L is the number of keys being compressed.
     """
     logits = torch.einsum("bafkjchd,bfklhd->bhafkjcl", seed_queries, key)
     return logits.float() * float(scale)
 
 
 def seed_key_logits_transpose(seed_queries, key, scale):
-    """Transposed layout version of seed_key_logits.
+    """Score each seed query against each key in the transposed block.
 
     seed_queries: [B, A, F, I, L, C, H, D]
     key:          [B, F, K, L, H, D]
     return:       [B, H, A, F, I, L, C, K]
-
-    C is the number of seed query columns. K is the number of keys compressed.
     """
     logits = torch.einsum("bafilchd,bfklhd->bhafilck", seed_queries, key)
     return logits.float() * float(scale)
 
 
 def assign_keys_to_seeds(seed_logits):
-    """Hard-route each key to the seed with the largest seed/key score.
+    """Assign every key to its best seed query.
 
     seed_logits: [..., C, L]
       C = number of seed queries inside the block
       L = number of keys inside the block
 
-    return: [..., C, L] boolean mask. Exactly one seed owns each key, except
-    empty seed clusters are kept alive by assigning key 0 to that seed too.
+    return: [..., C, L] boolean mask. Empty seed clusters are kept alive by
+    assigning key 0 to them, matching the Triton implementation.
     """
     best_seed = seed_logits.argmax(dim=-2, keepdim=True)
     assigned = torch.zeros_like(seed_logits, dtype=torch.bool)
     assigned.scatter_(dim=-2, index=best_seed, value=True)
 
-    # Keep empty clusters numerically well-defined by forcing them to own key 0.
-    fallback_to_key0 = torch.zeros_like(assigned)
-    fallback_to_key0[..., 0] = True
+    key0 = torch.zeros_like(assigned)
+    key0[..., 0] = True
     empty_cluster = ~assigned.any(dim=-1, keepdim=True)
-    return assigned | (empty_cluster & fallback_to_key0)
+    return assigned | (empty_cluster & key0)
 
 
-def mask_unassigned_keys(logits, assigned):
-    """Keep only the keys owned by each seed cluster."""
-    logits = logits.float()
-    return logits.masked_fill(~assigned, torch.finfo(logits.dtype).min)
+def _masked_logits(seed_logits, assigned):
+    return seed_logits.float().masked_fill(~assigned, FP32_MIN)
 
 
-def _assigned_key_softmax(seed_logits, assigned):
-    """Softmax over each seed's assigned keys only.
-
-    This returns fp32 weights/log-probs. Callers cast weights back to K/V dtype
-    before the KV merge, matching the original reference implementation.
-    """
-    active_logits = mask_unassigned_keys(seed_logits, assigned)
+def _masked_softmax(seed_logits, assigned):
+    """Softmax over only the keys assigned to each seed."""
+    active_logits = _masked_logits(seed_logits, assigned)
     log_denom = torch.logsumexp(active_logits, dim=-1, keepdim=True)
     logprob = active_logits - log_denom
     weights = logprob.exp().masked_fill(~assigned, 0.0)
@@ -68,58 +60,32 @@ def _assigned_key_softmax(seed_logits, assigned):
     return weights, logprob, log_denom.squeeze(-1)
 
 
-def masked_log_softmax_over_keys(logits, key_mask):
-    """Log-softmax over keys, ignoring keys that are not assigned to a seed."""
-    _, logprob, _ = _assigned_key_softmax(logits, key_mask)
-    return logprob
-
-
-def hard_route_merge_weights(seed_logits, dtype):
-    """Convert seed/key logits into per-seed merge weights.
-
-    Returns:
-      merge_weights:    [..., C, L]
-      merge_logprob:    [..., C, L]
-      cluster_has_keys: [..., C]
-    """
-    assigned = assign_keys_to_seeds(seed_logits)
-    weights, logprob, _ = _assigned_key_softmax(seed_logits, assigned)
-    return weights.to(dtype), logprob, assigned.any(dim=-1)
-
-
 def hard_route_merge_weights_and_bias(seed_logits, dtype):
-    """Core hard-route merge math used by the readable PyTorch reference.
+    """Build merge weights and routing bias from seed/key logits.
 
-    This is the operation the Triton kernels accelerate:
-      1. assign each key to the seed query with the largest seed/key score,
-      2. run a softmax over only the keys owned by that seed,
-      3. reuse those weights both for KV merging and for the routing bias.
+    This is the core operation accelerated by Triton:
+      1. assign keys to seed queries,
+      2. softmax over each seed's assigned keys,
+      3. reuse the same weights for KV merge and entropy/routing bias.
     """
     assigned = assign_keys_to_seeds(seed_logits)
     logits = seed_logits.float()
-    weights, _, log_denom = _assigned_key_softmax(logits, assigned)
+    weights, _, log_denom = _masked_softmax(logits, assigned)
 
     merge_weights = weights.to(dtype)
-    weights_for_bias = merge_weights.float()
-    expected_logit = (weights_for_bias * logits).sum(dim=-1)
-    routing_bias = expected_logit - log_denom * weights_for_bias.sum(dim=-1)
+    weights_fp32 = merge_weights.float()
+    expected_logit = (weights_fp32 * logits).sum(dim=-1)
+    routing_bias = expected_logit - log_denom * weights_fp32.sum(dim=-1)
     return merge_weights, routing_bias, assigned.any(dim=-1)
 
 
-def hard_route_merge_stats(seed_logits, dtype):
-    """Backward-compatible alias for old analysis scripts."""
-    return hard_route_merge_weights_and_bias(seed_logits, dtype)
-
-
-def merge_kv_from_weights(merge_weights, key, value):
-    """Apply regular-layout merge weights to K and V."""
+def _merge_regular(merge_weights, key, value):
     merged_keys = torch.einsum("bhafkjcl,bfklhd->bafjkchd", merge_weights, key)
     merged_values = torch.einsum("bhafkjcl,bfklhe->bafjkche", merge_weights, value)
     return merged_keys, merged_values
 
 
-def merge_kv_from_weights_transpose(merge_weights, key, value):
-    """Apply transpose-layout merge weights to K and V."""
+def _merge_transpose(merge_weights, key, value):
     merged_keys = torch.einsum("bhafilck,bfklhd->bafilchd", merge_weights, key)
     merged_values = torch.einsum("bhafilck,bfklhe->bafilche", merge_weights, value)
     return merged_keys, merged_values
@@ -128,10 +94,9 @@ def merge_kv_from_weights_transpose(merge_weights, key, value):
 def hard_route_merge_kv_pytorch(seed_queries, key, value, scale):
     """Readable PyTorch reference for one regular hard-route merge.
 
-    A fixed (query_outer, key_outer, query_column, key_row) block contains
-    I queries x L keys. This function compresses those L keys into C hard
-    routed KV tokens. The later attention step still attends to all compressed
-    tokens from all blocks.
+    A fixed (query_outer, key_outer, query_column, key_row) block has
+    I queries x L keys. This function compresses those L keys into C merged
+    KV tokens. The later attention step still attends to all compressed tokens.
 
     seed_queries: [B, A, F, K, J, C, H, D]
     key/value:    [B, F, K, L, H, D]
@@ -140,7 +105,7 @@ def hard_route_merge_kv_pytorch(seed_queries, key, value, scale):
     """
     logits = seed_key_logits(seed_queries, key, scale)
     weights, routing_bias, cluster_has_keys = hard_route_merge_weights_and_bias(logits, key.dtype)
-    merged_keys, merged_values = merge_kv_from_weights(weights, key, value)
+    merged_keys, merged_values = _merge_regular(weights, key, value)
     return merged_keys, merged_values, routing_bias, cluster_has_keys
 
 
@@ -152,8 +117,35 @@ def hard_route_merge_kv_transpose_pytorch(seed_queries, key, value, scale):
     """
     logits = seed_key_logits_transpose(seed_queries, key, scale)
     weights, routing_bias, _ = hard_route_merge_weights_and_bias(logits, key.dtype)
-    merged_keys, merged_values = merge_kv_from_weights_transpose(weights, key, value)
+    merged_keys, merged_values = _merge_transpose(weights, key, value)
     return merged_keys, merged_values, routing_bias
+
+
+def mask_unassigned_keys(logits, assigned):
+    """Compatibility helper: keep only assigned keys in fp32 logits."""
+    return _masked_logits(logits, assigned)
+
+
+def masked_log_softmax_over_keys(logits, key_mask):
+    """Compatibility helper for old analysis scripts."""
+    _, logprob, _ = _masked_softmax(logits, key_mask.to(torch.bool))
+    return logprob
+
+
+def hard_route_merge_weights(seed_logits, dtype):
+    """Compatibility helper returning only merge weights and log-probs."""
+    assigned = assign_keys_to_seeds(seed_logits)
+    weights, logprob, _ = _masked_softmax(seed_logits, assigned)
+    return weights.to(dtype), logprob, assigned.any(dim=-1)
+
+
+def hard_route_merge_stats(seed_logits, dtype):
+    """Compatibility alias for old analysis scripts."""
+    return hard_route_merge_weights_and_bias(seed_logits, dtype)
+
+
+merge_kv_from_weights = _merge_regular
+merge_kv_from_weights_transpose = _merge_transpose
 
 
 __all__ = [

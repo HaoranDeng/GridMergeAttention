@@ -55,6 +55,11 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Smoke-test hard C4 Triton variants on random tensors.")
     parser.add_argument("--output_json", required=True)
     parser.add_argument("--dtype", choices=["bf16", "fp16"], default="bf16")
+    parser.add_argument(
+        "--variants",
+        default="",
+        help="Optional comma- or whitespace-separated subset of smoke variant names.",
+    )
     parser.add_argument("--batch", type=int, default=1)
     parser.add_argument("--query_outer", type=int, default=2)
     parser.add_argument("--key_outer", type=int, default=2)
@@ -66,6 +71,14 @@ def parse_args():
     parser.add_argument("--warmup", type=int, default=2)
     parser.add_argument("--repeats", type=int, default=5)
     return parser.parse_args()
+
+
+def parse_variant_names(text):
+    names = []
+    for name in (text or "").replace(",", " ").split():
+        if name and name not in names:
+            names.append(name)
+    return names
 
 
 def main():
@@ -113,6 +126,13 @@ def main():
         "hard_c4_bestlogit_packkvbiascompact_j52_l52_tokenmajor",
         "hard_c4_bestlogit_packkbiascompact_j52_l52_tokenmajor",
     ]
+    selected_names = parse_variant_names(args.variants)
+    if selected_names:
+        missing = [name for name in selected_names if name not in variants]
+        if missing:
+            raise ValueError(f"unknown smoke variants: {', '.join(missing)}")
+        ref_name = "hard_c4_bestlogit_tokenmajor"
+        names = [ref_name, *[name for name in selected_names if name != ref_name]]
 
     results = {}
     payload = {

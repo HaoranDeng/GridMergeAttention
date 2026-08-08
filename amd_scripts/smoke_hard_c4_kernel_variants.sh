@@ -34,6 +34,7 @@ RESULT_DIR="${RESULT_DIR:-${SCRATCH_ROOT}/analysis/${RUN_ID}}"
 OUTPUT_JSON="${OUTPUT_JSON:-${RESULT_DIR}/smoke.json}"
 DTYPE="${DTYPE:-bf16}"
 GPU_ID="${GPU_ID:-0}"
+SMOKE_VARIANTS="${SMOKE_VARIANTS:-}"
 
 cd "${REPO_DIR}"
 mkdir -p out "${RESULT_DIR}"
@@ -45,10 +46,17 @@ mkdir -p "${TRITON_CACHE_DIR}"
 echo "Smoke-testing hard C4 kernel variants"
 echo "  output: ${OUTPUT_JSON}"
 echo "  dtype: ${DTYPE}"
+echo "  variants: ${SMOKE_VARIANTS:-<default>}"
 echo "  triton cache: ${TRITON_CACHE_DIR}"
+
+variant_args=()
+if [ -n "${SMOKE_VARIANTS}" ]; then
+  variant_args+=(--variants "${SMOKE_VARIANTS}")
+fi
 
 HIP_VISIBLE_DEVICES="${GPU_ID}" ROCR_VISIBLE_DEVICES="${GPU_ID}" CUDA_VISIBLE_DEVICES="${GPU_ID}" \
 PYTHONUNBUFFERED=1 \
 python analysis/smoke_hard_c4_kernel_variants.py \
   --output_json "${OUTPUT_JSON}" \
-  --dtype "${DTYPE}"
+  --dtype "${DTYPE}" \
+  "${variant_args[@]}"
