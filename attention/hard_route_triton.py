@@ -1339,7 +1339,7 @@ def triton_hard_route_merge_c4_direct_route(
         (not inline_local_seed)
         or block_j != 32
         or int(num_warps) != 2
-        or bias_dtype != torch.float16
+        or bias_dtype not in (torch.float16, torch.bfloat16)
         or merged_key_dtype not in (torch.float16, torch.bfloat16)
         or merged_value_dtype not in (torch.float16, torch.bfloat16)
         or (not use_exp2)

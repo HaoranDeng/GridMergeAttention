@@ -49,6 +49,7 @@ class DirectRouteMergeConfig:
     use_assigned_logit: bool = False
     use_bf16_merged_key: bool = False
     use_bf16_merged_value: bool = False
+    use_bf16_routing_bias: bool = False
 
 
 def _remove_suffix(text, suffix):
@@ -93,6 +94,7 @@ def _parse_direct_route_backend(backend):
     use_assigned_logit = False
     use_bf16_merged_key = False
     use_bf16_merged_value = False
+    use_bf16_routing_bias = False
     changed = True
     while changed:
         changed = False
@@ -120,6 +122,10 @@ def _parse_direct_route_backend(backend):
         if matched:
             use_bf16_merged_value = True
             changed = True
+        backend, matched = _remove_suffix(backend, "_bf16bias")
+        if matched:
+            use_bf16_routing_bias = True
+            changed = True
 
     return DirectRouteMergeConfig(
         supported=token_major_output and backend == _DIRECT_ROUTE_C4_BASE,
@@ -129,6 +135,7 @@ def _parse_direct_route_backend(backend):
         use_assigned_logit=use_assigned_logit,
         use_bf16_merged_key=use_bf16_merged_key,
         use_bf16_merged_value=use_bf16_merged_value,
+        use_bf16_routing_bias=use_bf16_routing_bias,
     )
 
 
@@ -279,7 +286,7 @@ def _direct_route_merge(q, seed_rows, k, v, config, scale, assume_contiguous=Fal
         scale=scale,
         block_j_target=32,
         num_warps=2,
-        bias_dtype=torch.float16,
+        bias_dtype=torch.bfloat16 if config.use_bf16_routing_bias else torch.float16,
         merged_key_dtype=torch.bfloat16 if config.use_bf16_merged_key else torch.float16,
         merged_value_dtype=torch.bfloat16 if config.use_bf16_merged_value else torch.float16,
         use_exp2=True,
