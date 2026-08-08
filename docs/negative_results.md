@@ -68,6 +68,17 @@ focused on variants that preserve quality against dense attention.
 - Rule: do not retry the same key-row blocking unless the memory layout or
   kernel structure changes substantially.
 
+### Token-Major Routing `n8` Tile
+
+- Result: slower than the token-major `n16` routing tile.
+- Change tested: use `triton_direct_m32_n8_w1_s1_exp2_tokenmajor` after the
+  token-major C4 merge.
+- Evidence: `analysis/hard_c4_tokenmajor_n8_n16_20260807/metrics.json` on
+  AMDHPC measured about 26.29 ms/call for `n8` versus about 23.57 ms/call for
+  `n16`, with the same output error.
+- Rule: keep `m32_n16` as the token-major routing tile unless a different
+  routing kernel structure is introduced.
+
 ## Current Best Direction
 
 The best accepted direction so far is still:

@@ -596,7 +596,6 @@ def hard_route_direct_compressed_attention(q, key, value, bias, backend, scale, 
     if key_token_major:
         backend = backend[: -len("_tokenmajor")]
     direct_configs = {
-        "triton_direct_m32_n8_w1_s1_exp2": (32, 8, 1),
         "triton_direct_m32_n16_w1_s1_exp2": (32, 16, 1),
         "triton_direct_m16_n64_w1_s1_exp2": (16, 64, 1),
         "triton_direct_m16_n128_w1_s1_exp2": (16, 128, 1),
