@@ -29,12 +29,6 @@ from .hard_route_triton import (
 
 _SEED_ROWS_CACHE = {}
 
-# Backward-compatible names used by older local analysis scripts.
-_merge_kv_direct_c4 = merge_kv_direct_c4
-_parse_direct_route_backend = parse_direct_route_backend
-hard_route_direct_compressed_attention = direct_compressed_attention
-hard_route_direct_compressed_attention_packed_kv = direct_compressed_attention_packed_kv
-
 
 # ---------------------------------------------------------------------------
 # Seed query selection.
@@ -152,9 +146,13 @@ def _restore_attention_blocks(out, q):
     )
 
 
+def _flatten_queries(q):
+    return rearrange(q, "b a i j h d -> (b h a j) i d")
+
+
 def _run_reference_path(q, k, v, scale, seed_rows, hard_route_backend, hard_route_routing_backend):
     """Readable path: gather seed queries, merge KV, then run full attention."""
-    query = rearrange(q, "b a i j h d -> (b h a j) i d")
+    query = _flatten_queries(q)
     seed_queries = gather_seed_queries(q, seed_rows)
     merged_keys, merged_values, routing_bias, _ = _merge_kv(
         seed_queries,
@@ -177,6 +175,53 @@ def _run_reference_path(q, k, v, scale, seed_rows, hard_route_backend, hard_rout
     return _restore_attention_blocks(out, q)
 
 
+def _route_direct_outputs(q, key, value, bias, direct_config, routing_backend, scale, output):
+    if direct_config.use_seed_key:
+        return direct_seed_key_attention(
+            q,
+            value,
+            bias,
+            routing_backend,
+            scale,
+            output=output,
+            assume_contiguous=True,
+        )
+    if direct_config.use_packed_kv:
+        return direct_compressed_attention_packed_kv(
+            q,
+            key,
+            bias,
+            routing_backend,
+            scale,
+            output=output,
+            assume_contiguous=True,
+        )
+    return direct_compressed_attention(
+        q,
+        key,
+        value,
+        bias,
+        routing_backend,
+        scale,
+        output=output,
+        assume_contiguous=True,
+    )
+
+
+def _run_direct_fallback_attention(q, key, value, bias, routing_backend, scale):
+    """Route direct-merge tensors through a generic group-major attention path."""
+    query = _flatten_queries(q)
+    out = hard_route_compressed_attention(
+        query,
+        key.transpose(0, 1),
+        value.transpose(0, 1),
+        bias.transpose(0, 1),
+        routing_backend,
+        scale,
+    )
+    return _restore_attention_blocks(out, q)
+
+
 def _run_direct_path(q, k, v, scale, seed_rows, direct_config, hard_route_routing_backend, output):
     """Optimized C4 path: Triton merge writes routing-ready token-major KV."""
     q = q.contiguous()
@@ -190,61 +235,25 @@ def _run_direct_path(q, k, v, scale, seed_rows, direct_config, hard_route_routin
         assume_contiguous=True,
     )
     output = output if output is not None and output.is_contiguous() else None
-    if direct_config.use_seed_key:
-        direct_out = direct_seed_key_attention(
-            q,
-            value,
-            bias,
-            hard_route_routing_backend,
-            scale,
-            output=output,
-            assume_contiguous=True,
-        )
-    elif direct_config.use_packed_kv:
-        direct_out = direct_compressed_attention_packed_kv(
-            q,
-            key,
-            bias,
-            hard_route_routing_backend,
-            scale,
-            output=output,
-            assume_contiguous=True,
-        )
-    else:
-        direct_out = direct_compressed_attention(
-            q,
-            key,
-            value,
-            bias,
-            hard_route_routing_backend,
-            scale,
-            output=output,
-            assume_contiguous=True,
-        )
+    direct_out = _route_direct_outputs(
+        q,
+        key,
+        value,
+        bias,
+        direct_config,
+        hard_route_routing_backend,
+        scale,
+        output,
+    )
     if direct_out is not None:
         return direct_out
+
     if direct_config.use_seed_key:
         raise ValueError("seed-key hard-route backend requires a triton_direct_*_tokenmajor routing backend.")
     if direct_config.use_packed_kv:
         raise ValueError("packed-KV hard-route backend requires a triton_direct_*_tokenmajor routing backend.")
 
-    # Fallback for experiments that keep the direct C4 merge but route with a
-    # generic full-attention backend such as PyTorch SDPA. The direct merge
-    # emits token-major [K, group, D]; generic attention expects
-    # group-major [group, K, D].
-    query = rearrange(q, "b a i j h d -> (b h a j) i d")
-    key = key.transpose(0, 1)
-    value = value.transpose(0, 1)
-    bias = bias.transpose(0, 1)
-    out = hard_route_compressed_attention(
-        query,
-        key,
-        value,
-        bias,
-        hard_route_routing_backend,
-        scale,
-    )
-    return _restore_attention_blocks(out, q)
+    return _run_direct_fallback_attention(q, key, value, bias, hard_route_routing_backend, scale)
 
 
 def hard_route_attention(

@@ -145,6 +145,14 @@ def parse_direct_route_backend(backend):
     )
 
 
+def _parse_tokenmajor_attention_backend(backend):
+    backend = (backend or "").lower()
+    backend, token_major = _remove_suffix(backend, "_tokenmajor")
+    if not token_major:
+        return None
+    return parse_direct_route_attention_backend(backend)
+
+
 def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguous=False):
     return triton_hard_route_merge_c4_direct_route(
         q,
@@ -182,12 +190,7 @@ def direct_seed_key_attention(
     output=None,
     assume_contiguous=False,
 ):
-    backend = (backend or "").lower()
-    backend, token_major = _remove_suffix(backend, "_tokenmajor")
-    if not token_major:
-        return None
-
-    config = parse_direct_route_attention_backend(backend)
+    config = _parse_tokenmajor_attention_backend(backend)
     if config is None:
         return None
 
@@ -217,12 +220,7 @@ def direct_compressed_attention(
     output=None,
     assume_contiguous=False,
 ):
-    backend = (backend or "").lower()
-    backend, token_major = _remove_suffix(backend, "_tokenmajor")
-    if not token_major:
-        return None
-
-    config = parse_direct_route_attention_backend(backend)
+    config = _parse_tokenmajor_attention_backend(backend)
     if config is None:
         return None
 
@@ -252,12 +250,7 @@ def direct_compressed_attention_packed_kv(
     output=None,
     assume_contiguous=False,
 ):
-    backend = (backend or "").lower()
-    backend, token_major = _remove_suffix(backend, "_tokenmajor")
-    if not token_major:
-        return None
-
-    config = parse_direct_route_attention_backend(backend)
+    config = _parse_tokenmajor_attention_backend(backend)
     if config is None:
         return None
 
