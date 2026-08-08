@@ -353,6 +353,7 @@ if triton is not None:
         USE_EXP2: tl.constexpr,
         FORCE_SEED_KEYS: tl.constexpr,
         LOGIT_INPUT_PRECISION: tl.constexpr,
+        KEY_HEAD_MAJOR: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -373,9 +374,14 @@ if triton is not None:
         valid_key = key_offsets < L
         valid_dim = dim_offsets < D_HEAD
 
-        key_base = key_ptr + (((batch * F + key_outer) * K_ROWS + key_row) * L * H + head) * D_HEAD
+        if KEY_HEAD_MAJOR:
+            key_base = key_ptr + ((((batch * F + key_outer) * K_ROWS + key_row) * H + head) * L) * D_HEAD
+            key_stride_l = D_HEAD
+        else:
+            key_base = key_ptr + (((batch * F + key_outer) * K_ROWS + key_row) * L * H + head) * D_HEAD
+            key_stride_l = H * D_HEAD
         key_block = tl.load(
-            key_base + key_offsets[:, None] * H * D_HEAD + dim_offsets[None, :],
+            key_base + key_offsets[:, None] * key_stride_l + dim_offsets[None, :],
             mask=valid_key[:, None] & valid_dim[None, :],
             other=0.0,
         )
@@ -448,9 +454,14 @@ if triton is not None:
         route_group = (((batch * H + head) * A + query_outer) * J + query_offsets)
         route_token_base = (key_outer * K_ROWS + key_row) * 4
         route_tokens = F * K_ROWS * 4
-        value_base = value_ptr + (((batch * F + key_outer) * K_ROWS + key_row) * L * H + head) * D_HEAD
+        if KEY_HEAD_MAJOR:
+            value_base = value_ptr + ((((batch * F + key_outer) * K_ROWS + key_row) * H + head) * L) * D_HEAD
+            value_stride_l = D_HEAD
+        else:
+            value_base = value_ptr + (((batch * F + key_outer) * K_ROWS + key_row) * L * H + head) * D_HEAD
+            value_stride_l = H * D_HEAD
         value_block = tl.load(
-            value_base + key_offsets[:, None] * H * D_HEAD + dim_offsets[None, :],
+            value_base + key_offsets[:, None] * value_stride_l + dim_offsets[None, :],
             mask=valid_key[:, None] & valid_dim[None, :],
             other=0.0,
         )
@@ -1778,6 +1789,7 @@ def triton_hard_route_merge_c4_direct_route(
     force_seed_keys=False,
     num_stages=None,
     logit_input_precision="ieee",
+    key_head_major=False,
 ):
     """Exact non-shared C=4 merge that writes routing-ready K/V/bias.
 
@@ -1804,12 +1816,21 @@ def triton_hard_route_merge_c4_direct_route(
     batch, query_outer, query_rows, query_columns, heads, dim = query.shape
     key_outer = key.size(1)
     key_rows = key.size(2)
-    key_columns = key.size(3)
+    if key_head_major:
+        if key.ndim != 6 or value.shape != key.shape:
+            raise ValueError("head-major key/value must have shape [B, F, K, H, L, D].")
+        key_heads = key.size(3)
+        key_columns = key.size(4)
+        key_dim = key.size(5)
+    else:
+        key_columns = key.size(3)
+        key_heads = key.size(4)
+        key_dim = key.size(5)
     if seed_rows.shape != (query_outer, key_outer, key_rows, query_columns, 4):
         raise ValueError("seed_rows shape is inconsistent for non-shared C4 direct-route merge.")
     if key.shape[:3] != (batch, key_outer, key_rows) or value.shape != key.shape:
         raise ValueError("query/key/value shapes are inconsistent for non-shared C4 direct-route merge.")
-    if key.size(4) != heads or key.size(5) != dim:
+    if key_heads != heads or key_dim != dim:
         raise ValueError("query/key head dimensions are inconsistent for non-shared C4 direct-route merge.")
 
     block_j = min(int(block_j_target), triton.next_power_of_2(query_columns))
@@ -1873,6 +1894,7 @@ def triton_hard_route_merge_c4_direct_route(
         USE_EXP2=bool(use_exp2),
         FORCE_SEED_KEYS=bool(force_seed_keys),
         LOGIT_INPUT_PRECISION=logit_input_precision,
+        KEY_HEAD_MAJOR=bool(key_head_major),
         **launch_kwargs,
     )
     return merged_key, merged_value, routing_bias, None

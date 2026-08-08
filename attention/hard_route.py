@@ -22,6 +22,10 @@ from .hard_route_triton import (
 _SEED_ROWS_CACHE = {}
 
 
+def uses_head_major_kv_backend(backend):
+    return str(backend or "").lower().endswith("_headmajor")
+
+
 def _cached_seed_rows(
     device,
     query_outer_offset,
@@ -136,6 +140,9 @@ def _merge(seed_queries, k, v, backend, scale):
 
 def _direct_route_merge(q, seed_rows, k, v, backend, scale):
     backend = (backend or "").lower()
+    key_head_major = backend.endswith("_headmajor")
+    if key_head_major:
+        backend = backend[: -len("_headmajor")]
     if backend == "triton_c4_direct_route_j16_w2":
         return triton_hard_route_merge_c4_direct_route(
             q,
@@ -277,6 +284,7 @@ def _direct_route_merge(q, seed_rows, k, v, backend, scale):
             force_seed_keys=True,
             num_stages=1,
             logit_input_precision="tf32",
+            key_head_major=key_head_major,
         )
     if backend == "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_bf16bias_s2":
         return triton_hard_route_merge_c4_direct_route(
@@ -1451,7 +1459,8 @@ def hard_route_attention(
     # the L keys into several hard-assigned merged tokens instead of one.
     include_ith = validate_block_seed_mode(seed_mode, "multi-token merging")
     fast_with_include = seed_mode == "fast_random_with_ith"
-    if num_merge_tokens > k.size(3):
+    key_columns = k.size(4) if uses_head_major_kv_backend(hard_route_backend) else k.size(3)
+    if num_merge_tokens > key_columns:
         raise ValueError("num_merge_tokens cannot exceed key columns per block.")
 
     seed_rows = _cached_seed_rows(
@@ -1524,4 +1533,5 @@ __all__ = [
     "hard_route_compressed_attention",
     "hard_route_grid_compressed_attention",
     "hard_route_merge_weights",
+    "uses_head_major_kv_backend",
 ]
