@@ -52,6 +52,15 @@ def main():
                 "use_top_value": True,
             },
         ),
+        "topkeyaffine_seedvalue": (
+            backend("bestlogit", "topkeyaffine", "seedvalue"),
+            {
+                "use_assigned_logit": True,
+                "use_top_key": True,
+                "use_top_key_affine_scale": True,
+                "use_seed_value": True,
+            },
+        ),
         "topkv": (
             backend("bestlogit", "topkv"),
             {"use_assigned_logit": True, "use_top_kv": True},

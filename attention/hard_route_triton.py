@@ -591,6 +591,13 @@ if triton is not None:
                         mask=valid_query[:, None] & valid_dim[None, :],
                         other=0.0,
                     )
+                elif SEED_VALUE:
+                    representative_value = tl.load(
+                        value_base + seed_idx * H * D_HEAD + dim_offsets,
+                        mask=(seed_idx < L) & valid_dim,
+                        other=0.0,
+                    )
+                    merged_value = representative_value[None, :] + tl.zeros((BLOCK_J, BLOCK_D), tl.float32)
                 else:
                     merged_value = tl.dot(weights.to(value_block.dtype), value_block)
                 if TOP_KEY_AFFINE_SCALE:
@@ -2665,8 +2672,10 @@ def triton_hard_route_merge_c4_direct_route(
         raise ValueError("top-key affine scaling is not implemented for recompute merge.")
     if use_top_key and use_seed_key:
         raise ValueError("top-key routing writes compressed keys and cannot be combined with seed-key routing.")
-    if use_top_key and (use_top_kv or use_seed_value):
-        raise ValueError("top-key, top-KV, and seed-value are alternative approximations.")
+    if use_top_key and use_top_kv:
+        raise ValueError("top-key and top-KV are alternative approximations.")
+    if use_top_key and use_seed_value and not use_top_key_affine_scale:
+        raise ValueError("top-key + seed-value is only implemented for top-key affine scaling.")
     if use_top_key and use_top_value and not use_top_key_affine_scale:
         raise ValueError("top-key + top-value is only implemented for top-key affine scaling.")
     if use_top_key and use_stripe_assign:
