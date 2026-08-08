@@ -201,7 +201,7 @@ def parse_direct_route_attention_backend(backend):
         return None
     if block_m not in {16, 32}:
         return None
-    if block_n not in {4, 16, 32, 64}:
+    if block_n not in {16, 32, 64}:
         return None
     if num_warps not in {1, 2}:
         return None
