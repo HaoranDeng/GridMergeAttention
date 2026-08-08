@@ -81,6 +81,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         0
         if (
             merge_config.use_indirect_top_kv
+            or merge_config.use_indirect_top3_value
             or merge_config.use_indirect_top2_seed_value
             or merge_config.use_indirect_top2_value
             or merge_config.use_indirect_top_value
@@ -93,7 +94,10 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         and not merge_config.use_indirect_top_key
         and not merge_config.use_indirect_top_kv
     )
-    if merge_config.use_indirect_top2_seed_value or merge_config.use_indirect_top2_value:
+    if merge_config.use_indirect_top3_value:
+        # Three int16 source-value columns are stored for each compressed token.
+        value_index_bytes = 6
+    elif merge_config.use_indirect_top2_seed_value or merge_config.use_indirect_top2_value:
         # Two int16 source-value columns are stored for each compressed token.
         value_index_bytes = 4
     elif writes_separate_value_index:
@@ -108,6 +112,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
     bias_bytes = _dtype_bytes(bias_dtype)
     writes_key_scale = bool(
         merge_config.use_seed_key_scale
+        or merge_config.use_indirect_top3_value
         or merge_config.use_indirect_top2_seed_value
         or merge_config.use_indirect_top2_value
         or (
@@ -115,8 +120,9 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
             and (merge_config.use_top_key_scale or merge_config.use_top_key_affine_scale)
         )
     )
-    if merge_config.use_indirect_top2_seed_value:
-        # Two fp16 weights for top-1 and top-2; the remaining mass goes to the seed value.
+    if merge_config.use_indirect_top3_value or merge_config.use_indirect_top2_seed_value:
+        # Two fp16 weights. Top-3 uses the remaining mass for the third value;
+        # top2+seed uses the remaining mass for the seed value.
         key_scale_bytes = 4
     elif writes_key_scale:
         key_scale_bytes = _dtype_bytes(torch.float32 if merge_config.use_fp32_key_scale else torch.float16)
@@ -159,6 +165,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
             "original_value_by_int16_index"
             if (
                 merge_config.use_indirect_top_kv
+                or merge_config.use_indirect_top3_value
                 or merge_config.use_indirect_top2_seed_value
                 or merge_config.use_indirect_top2_value
                 or merge_config.use_indirect_top_value
@@ -177,7 +184,9 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
             "fp32"
             if writes_key_scale and merge_config.use_fp32_key_scale
             else (
-                "fp16_top2_value_pair_weights"
+                "fp16_top3_value_pair_weights"
+                if merge_config.use_indirect_top3_value
+                else "fp16_top2_value_pair_weights"
                 if merge_config.use_indirect_top2_seed_value
                 else "fp16_top2_value_mix"
                 if merge_config.use_indirect_top2_value
@@ -189,6 +198,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         "writes_merged_key": not (merge_config.use_seed_key or merge_config.use_indirect_top_key),
         "uses_indirect_top_key": bool(merge_config.use_indirect_top_key),
         "uses_top_kv": bool(merge_config.use_top_kv),
+        "uses_top3_value": bool(merge_config.use_top3_value),
         "uses_top2_seed_value": bool(merge_config.use_top2_seed_value),
         "uses_top2_value": bool(merge_config.use_top2_value),
         "uses_top_key": bool(merge_config.use_top_key),
@@ -410,6 +420,10 @@ def exact_variants():
         ),
         "hard_c4_bestlogit_top2seedvalue_indirecttop2seedvalue_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "top2seedvalue", "indirecttop2seedvalue"),
+            seed_mode="local_with_ith",
+        ),
+        "hard_c4_bestlogit_top3value_indirecttop3value_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "top3value", "indirecttop3value"),
             seed_mode="local_with_ith",
         ),
         "hard_c4_bestlogit_topkv_tokenmajor": exact_backend(

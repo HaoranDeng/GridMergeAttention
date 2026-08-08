@@ -174,6 +174,7 @@ def route_compressed_tokens(
     uses_indirect_key = config.use_indirect_top_key or config.use_indirect_top_kv
     uses_original_value = (
         config.use_indirect_top_kv
+        or config.use_indirect_top3_value
         or config.use_indirect_top2_seed_value
         or config.use_indirect_top2_value
         or config.use_indirect_top_value
@@ -199,7 +200,8 @@ def route_compressed_tokens(
         return routed
 
     if (
-        config.use_indirect_top2_seed_value
+        config.use_indirect_top3_value
+        or config.use_indirect_top2_seed_value
         or config.use_indirect_top2_value
         or config.use_indirect_top_value
         or config.use_indirect_seed_value
@@ -210,12 +212,17 @@ def route_compressed_tokens(
             source_value,
             merged_value,
             key_scale
-            if (config.use_indirect_top2_value or config.use_indirect_top2_seed_value)
+            if (
+                config.use_indirect_top3_value
+                or config.use_indirect_top2_value
+                or config.use_indirect_top2_seed_value
+            )
             else None,
             routing_bias,
             routing_backend,
             scale,
             indirect_seed_value=config.use_indirect_seed_value,
+            indirect_top3_value=config.use_indirect_top3_value,
             indirect_top2_value=config.use_indirect_top2_value,
             indirect_top2_seed_value=config.use_indirect_top2_seed_value,
             output=output,

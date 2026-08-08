@@ -39,6 +39,7 @@ _DIRECT_ROUTE_FLAG_SUFFIXES = (
     ("_seedkeyproj", ("use_seed_key", "use_seed_key_scale")),
     ("_seedkeymatch", ("use_seed_key", "use_seed_key_bias_match")),
     ("_seedkey", "use_seed_key"),
+    ("_indirecttop3value", "use_indirect_top3_value"),
     ("_indirecttop2seedvalue", "use_indirect_top2_seed_value"),
     ("_indirecttop2value", "use_indirect_top2_value"),
     ("_indirectseedvalue", "use_indirect_seed_value"),
@@ -49,6 +50,7 @@ _DIRECT_ROUTE_FLAG_SUFFIXES = (
     ("_topkeyaffine", ("use_top_key", "use_top_key_affine_scale")),
     ("_topkeyscale", ("use_top_key", "use_top_key_scale")),
     ("_topkey", "use_top_key"),
+    ("_top3value", "use_top3_value"),
     ("_top2seedvalue", "use_top2_seed_value"),
     ("_top2value", "use_top2_value"),
     ("_topvalue", "use_top_value"),
@@ -88,6 +90,7 @@ class DirectRouteMergeConfig:
     use_fp32_key_scale: bool = False
     use_seed_key_lsq_scale: bool = False
     use_seed_key_affine_scale: bool = False
+    use_indirect_top3_value: bool = False
     use_indirect_top2_seed_value: bool = False
     use_indirect_top2_value: bool = False
     use_indirect_seed_value: bool = False
@@ -98,6 +101,7 @@ class DirectRouteMergeConfig:
     use_top_key: bool = False
     use_top_key_scale: bool = False
     use_top_key_affine_scale: bool = False
+    use_top3_value: bool = False
     use_top2_seed_value: bool = False
     use_top2_value: bool = False
     use_top_value: bool = False
@@ -249,6 +253,7 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         use_seed_key_scale=config.use_seed_key_scale,
         use_seed_key_lsq_scale=config.use_seed_key_lsq_scale,
         use_seed_key_affine_scale=config.use_seed_key_affine_scale,
+        use_indirect_top3_value=config.use_indirect_top3_value,
         use_indirect_top2_seed_value=config.use_indirect_top2_seed_value,
         use_indirect_top2_value=config.use_indirect_top2_value,
         use_indirect_seed_value=config.use_indirect_seed_value,
@@ -259,6 +264,7 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         use_top_key=config.use_top_key,
         use_top_key_scale=config.use_top_key_scale,
         use_top_key_affine_scale=config.use_top_key_affine_scale,
+        use_top3_value=config.use_top3_value,
         use_top2_seed_value=config.use_top2_seed_value,
         use_top2_value=config.use_top2_value,
         use_top_value=config.use_top_value,
@@ -352,6 +358,7 @@ def direct_indirect_value_attention(
     backend,
     scale,
     indirect_seed_value=False,
+    indirect_top3_value=False,
     indirect_top2_value=False,
     indirect_top2_seed_value=False,
     output=None,
@@ -378,6 +385,7 @@ def direct_indirect_value_attention(
         num_stages=num_stages,
         use_exp2=True,
         indirect_seed_value=indirect_seed_value,
+        indirect_top3_value=indirect_top3_value,
         indirect_top2_value=indirect_top2_value,
         indirect_top2_seed_value=indirect_top2_seed_value,
         out=output,
