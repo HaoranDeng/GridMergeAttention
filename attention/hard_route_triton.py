@@ -354,6 +354,7 @@ if triton is not None:
         FORCE_SEED_KEYS: tl.constexpr,
         LOGIT_INPUT_PRECISION: tl.constexpr,
         KEY_HEAD_MAJOR: tl.constexpr,
+        INLINE_LOCAL_SEED: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -385,14 +386,31 @@ if triton is not None:
             mask=valid_key[:, None] & valid_dim[None, :],
             other=0.0,
         )
-        seed_rows_base = (
-            seed_rows_ptr
-            + ((((query_outer * F + key_outer) * K_ROWS + key_row) * J + query_offsets) * 4)
-        )
-        seed_row0 = tl.load(seed_rows_base, mask=valid_query, other=0)
-        seed_row1 = tl.load(seed_rows_base + 1, mask=valid_query, other=0)
-        seed_row2 = tl.load(seed_rows_base + 2, mask=valid_query, other=0)
-        seed_row3 = tl.load(seed_rows_base + 3, mask=valid_query, other=0)
+        if INLINE_LOCAL_SEED:
+            seed1 = tl.where(key_row > 0, key_row - 1, 1)
+            seed2 = tl.where(
+                key_row == 0,
+                2,
+                tl.where(key_row == Q_ROWS - 1, Q_ROWS - 3, key_row + 1),
+            )
+            seed3 = tl.where(
+                key_row <= 1,
+                3,
+                tl.where(key_row >= Q_ROWS - 2, Q_ROWS - 4, key_row - 2),
+            )
+            seed_row0 = tl.full((BLOCK_J,), key_row, tl.int64)
+            seed_row1 = tl.full((BLOCK_J,), seed1, tl.int64)
+            seed_row2 = tl.full((BLOCK_J,), seed2, tl.int64)
+            seed_row3 = tl.full((BLOCK_J,), seed3, tl.int64)
+        else:
+            seed_rows_base = (
+                seed_rows_ptr
+                + ((((query_outer * F + key_outer) * K_ROWS + key_row) * J + query_offsets) * 4)
+            )
+            seed_row0 = tl.load(seed_rows_base, mask=valid_query, other=0)
+            seed_row1 = tl.load(seed_rows_base + 1, mask=valid_query, other=0)
+            seed_row2 = tl.load(seed_rows_base + 2, mask=valid_query, other=0)
+            seed_row3 = tl.load(seed_rows_base + 3, mask=valid_query, other=0)
 
         query_base = (batch * A + query_outer) * Q_ROWS * J * H * D_HEAD
         seed0 = tl.load(
@@ -1790,6 +1808,7 @@ def triton_hard_route_merge_c4_direct_route(
     num_stages=None,
     logit_input_precision="ieee",
     key_head_major=False,
+    inline_local_seed=False,
 ):
     """Exact non-shared C=4 merge that writes routing-ready K/V/bias.
 
@@ -1895,6 +1914,7 @@ def triton_hard_route_merge_c4_direct_route(
         FORCE_SEED_KEYS=bool(force_seed_keys),
         LOGIT_INPUT_PRECISION=logit_input_precision,
         KEY_HEAD_MAJOR=bool(key_head_major),
+        INLINE_LOCAL_SEED=bool(inline_local_seed),
         **launch_kwargs,
     )
     return merged_key, merged_value, routing_bias, None
