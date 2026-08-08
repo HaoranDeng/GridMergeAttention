@@ -60,6 +60,65 @@ def _local_attention_impl(layout, num_merge_tokens):
     return gridmerge_one_transpose
 
 
+def _run_multi_token_chunk(
+    attention_impl,
+    layout,
+    q_chunk,
+    k_blocks,
+    v_blocks,
+    scale,
+    num_merge_tokens,
+    seed_mode,
+    seed,
+    query_outer_offset,
+    hard_route_backend,
+    hard_route_routing_backend,
+    out_slice,
+):
+    args = [
+        q_chunk,
+        k_blocks,
+        v_blocks,
+        scale,
+        num_merge_tokens,
+        seed_mode,
+        seed,
+        query_outer_offset,
+    ]
+    if layout in HARD_ROUTE_LAYOUTS:
+        args.extend([hard_route_backend, hard_route_routing_backend])
+
+    if layout == LAYOUT_HARD_ROUTE and str(hard_route_routing_backend).startswith("triton_direct_"):
+        chunk = attention_impl(*args, output=out_slice)
+    else:
+        chunk = attention_impl(*args)
+
+    if chunk is not out_slice:
+        out_slice.copy_(chunk)
+
+
+def _run_one_token_chunk(
+    attention_impl,
+    q_chunk,
+    k_blocks,
+    v_blocks,
+    scale,
+    q_init,
+    key_valid_blocks,
+    out_slice,
+):
+    out_slice.copy_(
+        attention_impl(
+            q_chunk,
+            k_blocks,
+            v_blocks,
+            scale,
+            q_init,
+            key_valid=key_valid_blocks,
+        )
+    )
+
+
 def token_merging_attn(
     q,
     k,
@@ -133,9 +192,13 @@ def token_merging_attn(
     out = torch.empty_like(q_blocks)
     for start in range(0, q_blocks.size(1), query_outer_chunk):
         end = min(start + query_outer_chunk, q_blocks.size(1))
+        q_chunk = q_blocks[:, start:end]
+        out_slice = out[:, start:end]
         if num_merge_tokens > 1:
-            args = [
-                q_blocks[:, start:end],
+            _run_multi_token_chunk(
+                attention_impl,
+                layout,
+                q_chunk,
                 k_blocks,
                 v_blocks,
                 sm_scale,
@@ -143,25 +206,20 @@ def token_merging_attn(
                 seed_mode,
                 seed,
                 start,
-            ]
-            if layout in HARD_ROUTE_LAYOUTS:
-                args.append(hard_route_backend)
-                args.append(hard_route_routing_backend)
-            out_slice = out[:, start:end]
-            if layout == LAYOUT_HARD_ROUTE and str(hard_route_routing_backend).startswith("triton_direct_"):
-                chunk = attention_impl(*args, output=out_slice)
-                if chunk is not out_slice:
-                    out_slice.copy_(chunk)
-            else:
-                out_slice.copy_(attention_impl(*args))
+                hard_route_backend,
+                hard_route_routing_backend,
+                out_slice,
+            )
         else:
-            out[:, start:end] = attention_impl(
-                q_blocks[:, start:end],
+            _run_one_token_chunk(
+                attention_impl,
+                q_chunk,
                 k_blocks,
                 v_blocks,
                 sm_scale,
                 q_init,
-                key_valid=key_valid_blocks,
+                key_valid_blocks,
+                out_slice,
             )
 
     out = blocks_to_video(out, f_tied, h_reduce, w_reduce)
