@@ -8,17 +8,10 @@ from .common import (
     validate_block_seed_mode,
 )
 from .hard_route_backend import (
-    direct_compact_weight_kv_attention,
-    direct_compact_weight_value_attention,
-    direct_compressed_attention,
-    direct_indirect_value_attention,
-    direct_recompute_value_attention,
-    direct_seed_key_attention,
-    direct_top_key_attention,
-    direct_weight_kv_attention,
-    direct_weight_value_attention,
+    direct_route_only_feature,
     merge_kv_direct_c4,
     parse_direct_route_backend,
+    run_direct_route_attention,
 )
 from .hard_route_pytorch import hard_route_merge_kv_pytorch
 from .hard_route_triton import (
@@ -29,21 +22,6 @@ from .hard_route_triton import (
 
 
 _SEED_ROWS_CACHE = {}
-_DIRECT_ROUTE_ONLY_FLAGS = (
-    ("use_seed_key", "seed-key"),
-    ("use_indirect_top_key", "indirect top-key"),
-    ("use_indirect_top_kv", "indirect top-KV"),
-    ("use_indirect_top3_seed_value", "indirect top-3 plus seed value"),
-    ("use_indirect_top3_value", "indirect top-3 value"),
-    ("use_indirect_top2_seed_value", "indirect top-2 plus seed value"),
-    ("use_indirect_top2_value", "indirect top-2 value"),
-    ("use_indirect_top_value", "indirect top-value"),
-    ("use_indirect_seed_value", "indirect seed-value"),
-    ("use_compact_weight_kv", "compact merge-weight K/V"),
-    ("use_compact_weight_value", "compact merge-weight value"),
-    ("use_merge_weight_kv", "merge-weight K/V"),
-    ("use_merge_weight_value", "merge-weight value"),
-)
 
 
 # ---------------------------------------------------------------------------
@@ -195,152 +173,6 @@ def _run_reference_path(q, k, v, scale, seed_rows, hard_route_backend, hard_rout
     return _restore_attention_blocks(out, q)
 
 
-def _route_direct_outputs(
-    q,
-    source_key,
-    source_value,
-    key,
-    value,
-    bias,
-    key_scale,
-    direct_config,
-    routing_backend,
-    scale,
-    output,
-):
-    if direct_config.use_seed_key:
-        return direct_seed_key_attention(
-            q,
-            value,
-            bias,
-            key_scale,
-            routing_backend,
-            scale,
-            output=output,
-            assume_contiguous=True,
-        )
-
-    if direct_config.uses_indirect_key:
-        return direct_top_key_attention(
-            q,
-            source_key,
-            source_value if direct_config.uses_original_value else None,
-            key,
-            value,
-            bias,
-            key_scale,
-            routing_backend,
-            scale,
-            output=output,
-            assume_contiguous=True,
-        )
-
-    if direct_config.uses_indirect_value_attention:
-        return direct_indirect_value_attention(
-            q,
-            key,
-            source_value,
-            value,
-            key_scale if direct_config.uses_weighted_indirect_value else None,
-            bias,
-            routing_backend,
-            scale,
-            indirect_seed_value=direct_config.use_indirect_seed_value,
-            indirect_top3_seed_value=direct_config.use_indirect_top3_seed_value,
-            indirect_top3_value=direct_config.use_indirect_top3_value,
-            indirect_top2_value=direct_config.use_indirect_top2_value,
-            indirect_top2_seed_value=direct_config.use_indirect_top2_seed_value,
-            output=output,
-            assume_contiguous=True,
-        )
-
-    if direct_config.use_recompute_value:
-        return direct_recompute_value_attention(
-            q,
-            key,
-            source_key,
-            source_value,
-            bias,
-            routing_backend,
-            scale,
-            output=output,
-            assume_contiguous=True,
-        )
-
-    if direct_config.use_compact_weight_kv:
-        return direct_compact_weight_kv_attention(
-            q,
-            source_key,
-            source_value,
-            value,
-            key_scale,
-            bias,
-            routing_backend,
-            scale,
-            output=output,
-            assume_contiguous=True,
-        )
-
-    if direct_config.use_compact_weight_value:
-        return direct_compact_weight_value_attention(
-            q,
-            key,
-            source_value,
-            value,
-            key_scale,
-            bias,
-            routing_backend,
-            scale,
-            output=output,
-            assume_contiguous=True,
-        )
-
-    if direct_config.use_merge_weight_kv:
-        return direct_weight_kv_attention(
-            q,
-            source_key,
-            source_value,
-            key_scale,
-            bias,
-            routing_backend,
-            scale,
-            output=output,
-            assume_contiguous=True,
-        )
-
-    if direct_config.use_merge_weight_value:
-        return direct_weight_value_attention(
-            q,
-            key,
-            source_value,
-            key_scale,
-            bias,
-            routing_backend,
-            scale,
-            output=output,
-            assume_contiguous=True,
-        )
-
-    return direct_compressed_attention(
-        q,
-        key,
-        value,
-        bias,
-        routing_backend,
-        scale,
-        output=output,
-        assume_contiguous=True,
-    )
-
-
-def _raise_for_unsupported_direct_attention(direct_config):
-    for flag, name in _DIRECT_ROUTE_ONLY_FLAGS:
-        if getattr(direct_config, flag):
-            raise ValueError(
-                f"{name} hard-route backend requires a triton_direct_*_tokenmajor routing backend."
-            )
-
-
 def _run_direct_fallback_attention(q, key, value, bias, routing_backend, scale):
     """Route direct-merge tensors through a generic group-major attention path."""
     query = _flatten_queries(q)
@@ -368,7 +200,7 @@ def _run_direct_path(q, k, v, scale, seed_rows, direct_config, hard_route_routin
         assume_contiguous=True,
     )
     output = output if output is not None and output.is_contiguous() else None
-    direct_out = _route_direct_outputs(
+    direct_out = run_direct_route_attention(
         q,
         k,
         v,
@@ -380,11 +212,17 @@ def _run_direct_path(q, k, v, scale, seed_rows, direct_config, hard_route_routin
         hard_route_routing_backend,
         scale,
         output,
+        assume_contiguous=True,
     )
     if direct_out is not None:
         return direct_out
 
-    _raise_for_unsupported_direct_attention(direct_config)
+    direct_only_feature = direct_route_only_feature(direct_config)
+    if direct_only_feature is not None:
+        raise ValueError(
+            f"{direct_only_feature} hard-route backend requires a "
+            "triton_direct_*_tokenmajor routing backend."
+        )
 
     return _run_direct_fallback_attention(q, key, value, bias, hard_route_routing_backend, scale)
 

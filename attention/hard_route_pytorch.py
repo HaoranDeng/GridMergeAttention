@@ -13,6 +13,13 @@ import torch
 
 FLOAT_NEG_INF = torch.finfo(torch.float32).min
 
+# Shape letters used below:
+#   B: batch, H: attention head, D: head dim
+#   A: query outer block, F: key outer block
+#   I: query rows, J: query columns
+#   K: key rows, L: key columns
+#   C: merged tokens / seed queries per block
+
 
 def assign_keys_to_seeds(seed_key_logits):
     """Assign each key to the seed query with the largest dot product.
@@ -41,7 +48,7 @@ def masked_cluster_log_softmax(seed_key_logits, assignment):
 
 
 def hard_route_merge_weights(seed_key_logits, dtype):
-    """Compute the K/V merge weights and entropy routing bias.
+    """Turn seed-key logits into merge weights and entropy routing bias.
 
     merge_weights[..., c, l] is nonzero only when key l is assigned to seed c.
     routing_bias[..., c] = sum_l alpha_l log(alpha_l). The second attention
@@ -68,12 +75,15 @@ def hard_route_merge_kv_pytorch(seed_queries, key, value, scale):
       merged_key/value: [B, A, F, J, K, C, H, D]
       routing_bias:     [B, H, A, F, K, J, C]
     """
+    # seed_key_logits: [B, H, A, F, K, J, C, L]
     seed_key_logits = torch.einsum(
         "bafkjchd,bfklhd->bhafkjcl",
         seed_queries,
         key,
     ).float() * float(scale)
     merge_weights, routing_bias = hard_route_merge_weights(seed_key_logits, key.dtype)
+
+    # merge_weights softmax-compresses the L keys inside each 30q x 52k block.
     merged_key = torch.einsum("bhafkjcl,bfklhd->bafjkchd", merge_weights, key)
     merged_value = torch.einsum("bhafkjcl,bfklhe->bafjkche", merge_weights, value)
     return merged_key, merged_value, routing_bias
@@ -92,6 +102,7 @@ def hard_route_merge_kv_transpose_pytorch(seed_queries, key, value, scale):
       merged_key/value: [B, A, F, I, L, C, H, D]
       routing_bias:     [B, H, A, F, I, L, C]
     """
+    # seed_key_logits: [B, H, A, F, I, L, C, K]
     seed_key_logits = torch.einsum(
         "bafilchd,bfklhd->bhafilck",
         seed_queries,

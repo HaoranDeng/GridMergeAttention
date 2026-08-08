@@ -63,6 +63,7 @@ _DIRECT_ROUTE_FLAG_SUFFIXES = (
     ("_topvalue", "use_top_value"),
     ("_seedvalue", "use_seed_value"),
     ("_stripe", "use_stripe_assign"),
+    ("_simplemerge", "use_simple_merge"),
     ("_recomputevalue", "use_recompute_value"),
     ("_recompute", "use_recompute_merge"),
     ("_compactweightskv", "use_compact_weight_kv"),
@@ -102,6 +103,22 @@ _WEIGHTED_INDIRECT_VALUE_FLAGS = (
     "use_indirect_top2_value",
 )
 
+_DIRECT_ROUTE_ONLY_FLAGS = (
+    ("use_seed_key", "seed-key"),
+    ("use_indirect_top_key", "indirect top-key"),
+    ("use_indirect_top_kv", "indirect top-KV"),
+    ("use_indirect_top3_seed_value", "indirect top-3 plus seed value"),
+    ("use_indirect_top3_value", "indirect top-3 value"),
+    ("use_indirect_top2_seed_value", "indirect top-2 plus seed value"),
+    ("use_indirect_top2_value", "indirect top-2 value"),
+    ("use_indirect_top_value", "indirect top-value"),
+    ("use_indirect_seed_value", "indirect seed-value"),
+    ("use_compact_weight_kv", "compact merge-weight K/V"),
+    ("use_compact_weight_value", "compact merge-weight value"),
+    ("use_merge_weight_kv", "merge-weight K/V"),
+    ("use_merge_weight_value", "merge-weight value"),
+)
+
 
 @dataclass(frozen=True)
 class DirectRouteMergeConfig:
@@ -126,6 +143,7 @@ class DirectRouteMergeConfig:
     use_merge_weight_kv: bool = False
     use_merge_weight_value: bool = False
     use_stripe_assign: bool = False
+    use_simple_merge: bool = False
     use_max_bias: bool = False
     use_seed_key: bool = False
     use_seed_key_bias_match: bool = False
@@ -357,6 +375,7 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         use_merge_weight_kv=config.use_merge_weight_kv,
         use_merge_weight_value=config.use_merge_weight_value,
         use_stripe_assign=config.use_stripe_assign,
+        use_simple_merge=config.use_simple_merge,
         use_max_bias=config.use_max_bias,
         use_seed_key=config.use_seed_key,
         use_seed_key_bias_match=config.use_seed_key_bias_match,
@@ -618,6 +637,158 @@ def direct_compressed_attention(
     )
 
 
+def direct_route_only_feature(config):
+    """Return a human-readable feature name that cannot use generic SDPA."""
+    for flag, name in _DIRECT_ROUTE_ONLY_FLAGS:
+        if getattr(config, flag):
+            return name
+    return None
+
+
+def run_direct_route_attention(
+    q,
+    source_key,
+    source_value,
+    key,
+    value,
+    bias,
+    key_scale,
+    config,
+    routing_backend,
+    scale,
+    output=None,
+    assume_contiguous=False,
+):
+    """Run the second-stage full compressed attention for direct C4 merge output.
+
+    Returns None when the requested routing backend is not a supported
+    triton_direct_* backend, allowing callers to fall back to generic SDPA.
+    """
+    if config.use_seed_key:
+        return direct_seed_key_attention(
+            q,
+            value,
+            bias,
+            key_scale,
+            routing_backend,
+            scale,
+            output=output,
+            assume_contiguous=assume_contiguous,
+        )
+
+    if config.uses_indirect_key:
+        return direct_top_key_attention(
+            q,
+            source_key,
+            source_value if config.uses_original_value else None,
+            key,
+            value,
+            bias,
+            key_scale,
+            routing_backend,
+            scale,
+            output=output,
+            assume_contiguous=assume_contiguous,
+        )
+
+    if config.uses_indirect_value_attention:
+        return direct_indirect_value_attention(
+            q,
+            key,
+            source_value,
+            value,
+            key_scale if config.uses_weighted_indirect_value else None,
+            bias,
+            routing_backend,
+            scale,
+            indirect_seed_value=config.use_indirect_seed_value,
+            indirect_top3_seed_value=config.use_indirect_top3_seed_value,
+            indirect_top3_value=config.use_indirect_top3_value,
+            indirect_top2_value=config.use_indirect_top2_value,
+            indirect_top2_seed_value=config.use_indirect_top2_seed_value,
+            output=output,
+            assume_contiguous=assume_contiguous,
+        )
+
+    if config.use_recompute_value:
+        return direct_recompute_value_attention(
+            q,
+            key,
+            source_key,
+            source_value,
+            bias,
+            routing_backend,
+            scale,
+            output=output,
+            assume_contiguous=assume_contiguous,
+        )
+
+    if config.use_compact_weight_kv:
+        return direct_compact_weight_kv_attention(
+            q,
+            source_key,
+            source_value,
+            value,
+            key_scale,
+            bias,
+            routing_backend,
+            scale,
+            output=output,
+            assume_contiguous=assume_contiguous,
+        )
+
+    if config.use_compact_weight_value:
+        return direct_compact_weight_value_attention(
+            q,
+            key,
+            source_value,
+            value,
+            key_scale,
+            bias,
+            routing_backend,
+            scale,
+            output=output,
+            assume_contiguous=assume_contiguous,
+        )
+
+    if config.use_merge_weight_kv:
+        return direct_weight_kv_attention(
+            q,
+            source_key,
+            source_value,
+            key_scale,
+            bias,
+            routing_backend,
+            scale,
+            output=output,
+            assume_contiguous=assume_contiguous,
+        )
+
+    if config.use_merge_weight_value:
+        return direct_weight_value_attention(
+            q,
+            key,
+            source_value,
+            key_scale,
+            bias,
+            routing_backend,
+            scale,
+            output=output,
+            assume_contiguous=assume_contiguous,
+        )
+
+    return direct_compressed_attention(
+        q,
+        key,
+        value,
+        bias,
+        routing_backend,
+        scale,
+        output=output,
+        assume_contiguous=assume_contiguous,
+    )
+
+
 __all__ = [
     "DirectRouteMergeConfig",
     "direct_compact_weight_kv_attention",
@@ -629,8 +800,10 @@ __all__ = [
     "direct_top_key_attention",
     "direct_weight_kv_attention",
     "direct_weight_value_attention",
+    "direct_route_only_feature",
     "merge_kv_direct_c4",
     "parse_direct_route_attention_backend",
     "parse_direct_route_backend",
+    "run_direct_route_attention",
     "uses_inline_local_seed_backend",
 ]

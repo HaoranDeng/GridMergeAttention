@@ -13,11 +13,13 @@ or reused independently.
   and biased SDPA helpers.
 - `gridmerge_one.py`: one-token GridMerge / MonarchRT-style compression.
 - `gridmerge_one_transpose.py`: one-token transpose layout.
-- `hard_route.py`: multi-token hard-route dispatcher and main control flow.
+- `hard_route.py`: thin multi-token hard-route entry point. It chooses seed
+  queries, then runs either the readable reference path or the optimized C4
+  path.
 - `hard_route_pytorch.py`: readable PyTorch reference for hard assignment,
   masked softmax, KV merge, and routing-bias construction.
-- `hard_route_backend.py`: direct-route backend parsing and Triton wrapper
-  functions.
+- `hard_route_backend.py`: direct-route backend parsing and optimized routing
+  dispatch. This file is backend plumbing, not the algorithmic reference.
 - `hard_route_transpose.py`: hard-route transpose layout.
 - `hard_route_triton.py`: Triton kernels used by the current hard-route path.
 - `select_route.py`: multi-token select-route compression.
@@ -104,6 +106,12 @@ seed/key logits -> hard assignment -> masked softmax -> merge K/V -> routing bia
 
 The Triton code should be treated as an optimization of that reference path,
 not as the source of the algorithm.
+
+Then read `hard_route.py` only for the end-to-end control flow:
+
+```text
+seed query selection -> KV merge -> full compressed attention
+```
 
 The current recommended C4 config keeps the original index-matched query as one
 seed:

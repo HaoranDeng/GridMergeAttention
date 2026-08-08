@@ -465,6 +465,9 @@ def exact_variants():
         "hard_c4_bestlogit_maxbias_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "maxbias"), seed_mode="local_with_ith"
         ),
+        "hard_c4_bestlogit_simplemerge_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "simplemerge"), seed_mode="local_with_ith"
+        ),
         "hard_c4_bestlogit_bf16kv_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "bf16kv"), seed_mode="local_with_ith"
         ),
