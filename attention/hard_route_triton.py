@@ -24,6 +24,11 @@ if triton is not None:
         return out
 
 
+    def _packed_kvbias_width(dim):
+        """K, V, and one bias scalar with row stride aligned to 16 elements."""
+        return ((2 * int(dim) + 1 + 15) // 16) * 16
+
+
     @triton.jit
     def _hard_route_merge_kernel(
         seed_ptr,
@@ -1820,7 +1825,7 @@ def triton_direct_route_biased_attention_packed_kv(
 
     batch, query_outer, query_rows, query_columns, heads, dim = query.shape
     key_len, groups, packed_dim = packed_kv.shape
-    expected_packed_dim = 2 * dim + int(bool(bias_in_packed_kv))
+    expected_packed_dim = _packed_kvbias_width(dim) if bias_in_packed_kv else 2 * dim
     expected_groups = batch * heads * query_outer * query_columns
     if groups != expected_groups:
         raise ValueError(
@@ -2238,7 +2243,7 @@ def triton_hard_route_merge_c4_direct_route(
             merged_value_dtype,
         )
     elif pack_kv:
-        packed_dim = 2 * dim + int(bool(pack_bias))
+        packed_dim = _packed_kvbias_width(dim) if pack_bias else 2 * dim
         merged_key = _cached_empty(
             (
                 "hard_route_c4_direct_route_packed_kvbias_token_major"
@@ -2431,7 +2436,7 @@ def triton_hard_route_merge_c4_direct_route(
         USE_MASK_ASSIGN=bool(use_mask_assign),
         PACK_KV=bool(pack_kv),
         PACK_BIAS=bool(pack_bias),
-        PACKED_WIDTH=2 * dim + int(bool(pack_bias)),
+        PACKED_WIDTH=_packed_kvbias_width(dim) if pack_bias else 2 * dim,
         SEED_KEY=bool(use_seed_key),
         **launch_kwargs,
     )
