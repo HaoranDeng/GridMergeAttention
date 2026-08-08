@@ -13,6 +13,7 @@ from .hard_route_triton import (
     triton_grid_biased_attention,
     triton_grid_outer_exact_local_biased_attention,
     triton_grid_outer_local_biased_attention,
+    triton_hard_route_c4_split_full_attention,
     triton_hard_route_merge,
     triton_hard_route_merge_c4,
     triton_hard_route_merge_c4_direct_route,
@@ -1477,6 +1478,15 @@ def hard_route_attention(
         fast_with_include,
         seed_mode,
     )
+
+    if (hard_route_backend or "").lower() == "triton_c4_split_full_headmajor":
+        return triton_hard_route_c4_split_full_attention(
+            q,
+            seed_rows,
+            k,
+            v,
+            scale=scale,
+        )
 
     direct_merge = _direct_route_merge(q, seed_rows, k, v, hard_route_backend, scale)
     if direct_merge is None:

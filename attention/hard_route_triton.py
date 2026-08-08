@@ -998,6 +998,251 @@ if triton is not None:
         )
 
     @triton.jit
+    def _hard_route_c4_split_full_partial_kernel(
+        query_ptr,
+        seed_rows_ptr,
+        key_ptr,
+        value_ptr,
+        partial_max_ptr,
+        partial_sum_ptr,
+        partial_acc_ptr,
+        A: tl.constexpr,
+        F: tl.constexpr,
+        Q_ROWS: tl.constexpr,
+        K_ROWS: tl.constexpr,
+        J: tl.constexpr,
+        H: tl.constexpr,
+        L: tl.constexpr,
+        D_HEAD: tl.constexpr,
+        BLOCK_Q: tl.constexpr,
+        BLOCK_L: tl.constexpr,
+        BLOCK_D: tl.constexpr,
+        SCORE_SCALE: tl.constexpr,
+        LOGIT_INPUT_PRECISION: tl.constexpr,
+    ):
+        group_id = tl.program_id(0)
+        key_outer = tl.program_id(1)
+
+        query_col = group_id % J
+        tmp = group_id // J
+        query_outer = tmp % A
+        tmp = tmp // A
+        head = tmp % H
+        batch = tmp // H
+
+        q_offsets = tl.arange(0, BLOCK_Q)
+        key_offsets = tl.arange(0, BLOCK_L)
+        dim_offsets = tl.arange(0, BLOCK_D)
+        valid_q = q_offsets < Q_ROWS
+        valid_key = key_offsets < L
+        valid_dim = dim_offsets < D_HEAD
+
+        query_batch_base = query_ptr + batch * A * Q_ROWS * J * H * D_HEAD
+        q = tl.load(
+            query_batch_base
+            + (((query_outer * Q_ROWS + q_offsets[:, None]) * J + query_col) * H + head) * D_HEAD
+            + dim_offsets[None, :],
+            mask=valid_q[:, None] & valid_dim[None, :],
+            other=0.0,
+        )
+        q_dot = q.to(tl.float16)
+
+        max_score = tl.full((BLOCK_Q,), -float("inf"), tl.float32)
+        normalizer = tl.zeros((BLOCK_Q,), tl.float32)
+        acc = tl.zeros((BLOCK_Q, BLOCK_D), tl.float32)
+
+        for key_row in tl.static_range(0, K_ROWS):
+            kv_base = ((((batch * F + key_outer) * K_ROWS + key_row) * H + head) * L) * D_HEAD
+            key_block = tl.load(
+                key_ptr + kv_base + key_offsets[:, None] * D_HEAD + dim_offsets[None, :],
+                mask=valid_key[:, None] & valid_dim[None, :],
+                other=0.0,
+            )
+            value_block = tl.load(
+                value_ptr + kv_base + key_offsets[:, None] * D_HEAD + dim_offsets[None, :],
+                mask=valid_key[:, None] & valid_dim[None, :],
+                other=0.0,
+            )
+
+            seed_base = (
+                seed_rows_ptr
+                + ((((query_outer * F + key_outer) * K_ROWS + key_row) * J + query_col) * 4)
+            )
+            seed_row0 = tl.load(seed_base)
+            seed_row1 = tl.load(seed_base + 1)
+            seed_row2 = tl.load(seed_base + 2)
+            seed_row3 = tl.load(seed_base + 3)
+
+            seed_base_q = query_batch_base + query_outer * Q_ROWS * J * H * D_HEAD
+            seed0 = tl.load(
+                seed_base_q + ((seed_row0 * J + query_col) * H + head) * D_HEAD + dim_offsets,
+                mask=valid_dim,
+                other=0.0,
+            )
+            seed1 = tl.load(
+                seed_base_q + ((seed_row1 * J + query_col) * H + head) * D_HEAD + dim_offsets,
+                mask=valid_dim,
+                other=0.0,
+            )
+            seed2 = tl.load(
+                seed_base_q + ((seed_row2 * J + query_col) * H + head) * D_HEAD + dim_offsets,
+                mask=valid_dim,
+                other=0.0,
+            )
+            seed3 = tl.load(
+                seed_base_q + ((seed_row3 * J + query_col) * H + head) * D_HEAD + dim_offsets,
+                mask=valid_dim,
+                other=0.0,
+            )
+
+            logits0 = tl.sum(seed0[None, :] * key_block, axis=1) * SCORE_SCALE
+            logits1 = tl.sum(seed1[None, :] * key_block, axis=1) * SCORE_SCALE
+            logits2 = tl.sum(seed2[None, :] * key_block, axis=1) * SCORE_SCALE
+            logits3 = tl.sum(seed3[None, :] * key_block, axis=1) * SCORE_SCALE
+            logits0 = tl.where(valid_key, logits0, -float("inf"))
+            logits1 = tl.where(valid_key, logits1, -float("inf"))
+            logits2 = tl.where(valid_key, logits2, -float("inf"))
+            logits3 = tl.where(valid_key, logits3, -float("inf"))
+
+            best_logits = logits0
+            assignments = tl.zeros((BLOCK_L,), tl.int32)
+            update = logits1 > best_logits
+            best_logits = tl.where(update, logits1, best_logits)
+            assignments = tl.where(update, 1, assignments)
+            update = logits2 > best_logits
+            best_logits = tl.where(update, logits2, best_logits)
+            assignments = tl.where(update, 2, assignments)
+            update = logits3 > best_logits
+            assignments = tl.where(update, 3, assignments)
+            assignments = tl.where(valid_key & (key_offsets < 4), key_offsets, assignments)
+
+            for seed_idx in tl.static_range(0, 4):
+                logits = logits0
+                if seed_idx == 1:
+                    logits = logits1
+                if seed_idx == 2:
+                    logits = logits2
+                if seed_idx == 3:
+                    logits = logits3
+
+                active = valid_key & (assignments == seed_idx)
+                row_max = tl.max(tl.where(active, logits, -float("inf")), axis=0)
+                probs = tl.where(
+                    active,
+                    tl.exp2((logits - row_max) * 1.4426950408889634),
+                    0.0,
+                )
+                denom = tl.sum(probs, axis=0)
+                safe_denom = tl.where(denom > 0.0, denom, 1.0)
+                weights = probs / safe_denom
+                log_denom = row_max + tl.log2(safe_denom) * 0.6931471805599453
+                merged_key = tl.sum(weights[:, None].to(key_block.dtype) * key_block, axis=0)
+                merged_value = tl.sum(weights[:, None].to(value_block.dtype) * value_block, axis=0)
+                expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=0)
+                routing_bias = expected_logit - log_denom
+
+                token_score = tl.sum(q_dot * merged_key[None, :], axis=1) * SCORE_SCALE - routing_bias
+                token_score = tl.where(valid_q, token_score, -float("inf"))
+                next_max = tl.maximum(max_score, token_score)
+                p = tl.exp2((token_score - next_max) * 1.4426950408889634)
+                alpha = tl.where(
+                    normalizer > 0.0,
+                    tl.exp2((max_score - next_max) * 1.4426950408889634),
+                    0.0,
+                )
+                acc = acc * alpha[:, None] + p[:, None] * merged_value[None, :]
+                normalizer = normalizer * alpha + p
+                max_score = next_max
+
+        partial_group = group_id * F + key_outer
+        tl.store(
+            partial_max_ptr + partial_group * Q_ROWS + q_offsets,
+            max_score,
+            mask=valid_q,
+        )
+        tl.store(
+            partial_sum_ptr + partial_group * Q_ROWS + q_offsets,
+            normalizer,
+            mask=valid_q,
+        )
+        tl.store(
+            partial_acc_ptr + (partial_group * Q_ROWS + q_offsets[:, None]) * D_HEAD + dim_offsets[None, :],
+            acc,
+            mask=valid_q[:, None] & valid_dim[None, :],
+        )
+
+    @triton.jit
+    def _hard_route_c4_split_full_reduce_kernel(
+        partial_max_ptr,
+        partial_sum_ptr,
+        partial_acc_ptr,
+        out_ptr,
+        A: tl.constexpr,
+        F: tl.constexpr,
+        Q_ROWS: tl.constexpr,
+        J: tl.constexpr,
+        H: tl.constexpr,
+        D_HEAD: tl.constexpr,
+        BLOCK_Q: tl.constexpr,
+        BLOCK_D: tl.constexpr,
+    ):
+        group_id = tl.program_id(0)
+        q_offsets = tl.arange(0, BLOCK_Q)
+        dim_offsets = tl.arange(0, BLOCK_D)
+        valid_q = q_offsets < Q_ROWS
+        valid_dim = dim_offsets < D_HEAD
+
+        query_col = group_id % J
+        tmp = group_id // J
+        query_outer = tmp % A
+        tmp = tmp // A
+        head = tmp % H
+        batch = tmp // H
+
+        global_max = tl.full((BLOCK_Q,), -float("inf"), tl.float32)
+        for key_outer in tl.static_range(0, F):
+            partial_group = group_id * F + key_outer
+            split_max = tl.load(
+                partial_max_ptr + partial_group * Q_ROWS + q_offsets,
+                mask=valid_q,
+                other=-float("inf"),
+            )
+            global_max = tl.maximum(global_max, split_max)
+
+        total_sum = tl.zeros((BLOCK_Q,), tl.float32)
+        total_acc = tl.zeros((BLOCK_Q, BLOCK_D), tl.float32)
+        for key_outer in tl.static_range(0, F):
+            partial_group = group_id * F + key_outer
+            split_max = tl.load(
+                partial_max_ptr + partial_group * Q_ROWS + q_offsets,
+                mask=valid_q,
+                other=-float("inf"),
+            )
+            split_sum = tl.load(
+                partial_sum_ptr + partial_group * Q_ROWS + q_offsets,
+                mask=valid_q,
+                other=0.0,
+            )
+            split_acc = tl.load(
+                partial_acc_ptr + (partial_group * Q_ROWS + q_offsets[:, None]) * D_HEAD + dim_offsets[None, :],
+                mask=valid_q[:, None] & valid_dim[None, :],
+                other=0.0,
+            )
+            alpha = tl.exp2((split_max - global_max) * 1.4426950408889634)
+            total_sum += split_sum * alpha
+            total_acc += split_acc * alpha[:, None]
+
+        out = total_acc / total_sum[:, None]
+        out_base = out_ptr + batch * A * Q_ROWS * J * H * D_HEAD
+        tl.store(
+            out_base
+            + (((query_outer * Q_ROWS + q_offsets[:, None]) * J + query_col) * H + head) * D_HEAD
+            + dim_offsets[None, :],
+            out,
+            mask=valid_q[:, None] & valid_dim[None, :],
+        )
+
+    @triton.jit
     def _grid_outer_local_biased_attention_kernel(
         query_ptr,
         key_ptr,
@@ -1354,6 +1599,123 @@ def triton_direct_route_biased_attention(
         USE_EXP2=bool(use_exp2),
         CAST_Q_TO_FP16=bool(key.dtype == torch.float16 and query.dtype != torch.float16),
         **meta,
+    )
+    return out
+
+
+def triton_hard_route_c4_split_full_attention(
+    query,
+    seed_rows,
+    key,
+    value,
+    scale=1.0,
+    num_warps=4,
+    num_stages=1,
+    logit_input_precision="tf32",
+):
+    """Fused exact non-shared C=4 hard-route attention with full routing.
+
+    query/out: [B, A, query_rows, query_columns, H, D]
+    seed_rows: [A, F, key_rows, query_columns, 4]
+    key/value: head-major [B, F, key_rows, H, key_columns, D]
+
+    The first kernel computes exact C4 grid-local KV compression and partial
+    full-attention softmax stats per key outer. The second kernel reduces all
+    key outers, so every query still attends to every compressed KV token.
+    """
+    if triton is None:
+        raise RuntimeError("hard_route_backend='triton_c4_split_full_headmajor' requires Triton.")
+    if not query.is_cuda:
+        raise RuntimeError("hard_route_backend='triton_c4_split_full_headmajor' requires CUDA/ROCm tensors.")
+    if query.dtype not in (torch.float16, torch.bfloat16):
+        raise RuntimeError("hard_route_backend='triton_c4_split_full_headmajor' requires fp16 or bf16 tensors.")
+
+    query = query.contiguous()
+    seed_rows = seed_rows.contiguous()
+    key = key.contiguous()
+    value = value.contiguous()
+
+    batch, query_outer, query_rows, query_columns, heads, dim = query.shape
+    key_outer = key.size(1)
+    key_rows = key.size(2)
+    if key.shape != (batch, key_outer, key_rows, heads, key.size(4), dim):
+        raise ValueError("head-major key must have shape [B, F, K, H, L, D].")
+    key_columns = key.size(4)
+    if value.shape != key.shape:
+        raise ValueError("head-major key/value shapes must match.")
+    if seed_rows.shape != (query_outer, key_outer, key_rows, query_columns, 4):
+        raise ValueError("seed_rows shape is inconsistent for split-full C4 attention.")
+
+    block_q = triton.next_power_of_2(query_rows)
+    block_l = triton.next_power_of_2(key_columns)
+    block_d = triton.next_power_of_2(dim)
+    if block_q > 64:
+        raise ValueError(f"split-full C4 attention supports query_rows <= 64, got {query_rows}.")
+    if block_l > 128:
+        raise ValueError(f"split-full C4 attention supports key_columns <= 128, got {key_columns}.")
+    if block_d > 128:
+        raise ValueError(f"split-full C4 attention supports head dim <= 128, got {dim}.")
+
+    groups = batch * heads * query_outer * query_columns
+    partial_max = _cached_empty(
+        "hard_route_c4_split_full_partial_max",
+        (groups, key_outer, query_rows),
+        query.device,
+        torch.float32,
+    )
+    partial_sum = _cached_empty(
+        "hard_route_c4_split_full_partial_sum",
+        (groups, key_outer, query_rows),
+        query.device,
+        torch.float32,
+    )
+    partial_acc = _cached_empty(
+        "hard_route_c4_split_full_partial_acc",
+        (groups, key_outer, query_rows, dim),
+        query.device,
+        torch.float32,
+    )
+    out = _cached_empty("hard_route_c4_split_full_out", query.shape, query.device, query.dtype)
+
+    _hard_route_c4_split_full_partial_kernel[(groups, key_outer)](
+        query,
+        seed_rows,
+        key,
+        value,
+        partial_max,
+        partial_sum,
+        partial_acc,
+        A=query_outer,
+        F=key_outer,
+        Q_ROWS=query_rows,
+        K_ROWS=key_rows,
+        J=query_columns,
+        H=heads,
+        L=key_columns,
+        D_HEAD=dim,
+        BLOCK_Q=block_q,
+        BLOCK_L=block_l,
+        BLOCK_D=block_d,
+        SCORE_SCALE=float(scale),
+        LOGIT_INPUT_PRECISION=logit_input_precision,
+        num_warps=int(num_warps),
+        num_stages=int(num_stages),
+    )
+    _hard_route_c4_split_full_reduce_kernel[(groups,)](
+        partial_max,
+        partial_sum,
+        partial_acc,
+        out,
+        A=query_outer,
+        F=key_outer,
+        Q_ROWS=query_rows,
+        J=query_columns,
+        H=heads,
+        D_HEAD=dim,
+        BLOCK_Q=block_q,
+        BLOCK_D=block_d,
+        num_warps=1,
+        num_stages=1,
     )
     return out
 
@@ -2259,6 +2621,7 @@ __all__ = [
     "triton_grid_biased_attention",
     "triton_grid_outer_exact_local_biased_attention",
     "triton_grid_outer_local_biased_attention",
+    "triton_hard_route_c4_split_full_attention",
     "triton_hard_route_merge",
     "triton_hard_route_merge_c4",
     "triton_hard_route_merge_c4_direct_route",
