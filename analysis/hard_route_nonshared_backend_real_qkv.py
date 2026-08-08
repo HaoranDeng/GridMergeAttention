@@ -79,7 +79,11 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         key_bytes_per_route_token = dim * materialized_key_bytes
     value_bytes = (
         0
-        if (merge_config.use_indirect_top_kv or merge_config.use_indirect_top_value)
+        if (
+            merge_config.use_indirect_top_kv
+            or merge_config.use_indirect_top_value
+            or merge_config.use_indirect_seed_value
+        )
         else _dtype_bytes(torch.bfloat16 if merge_config.use_bf16_merged_value else torch.float16)
     )
     bias_dtype = (
@@ -131,7 +135,11 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         ),
         "value_dtype": (
             "original_value_by_int16_index"
-            if (merge_config.use_indirect_top_kv or merge_config.use_indirect_top_value)
+            if (
+                merge_config.use_indirect_top_kv
+                or merge_config.use_indirect_top_value
+                or merge_config.use_indirect_seed_value
+            )
             else ("bf16" if merge_config.use_bf16_merged_value else "fp16")
         ),
         "bias_dtype": (
@@ -407,6 +415,16 @@ def exact_variants():
         ),
         "hard_c4_bestlogit_topkeyaffine_seedvalue_indirectkey_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "topkeyaffine", "seedvalue", "indirectkey"),
+            seed_mode="local_with_ith",
+        ),
+        "hard_c4_bestlogit_topkeyaffine_seedvalue_indirectkey_indirectseedvalue_tokenmajor": exact_backend(
+            direct_merge_backend(
+                "bestlogit",
+                "topkeyaffine",
+                "seedvalue",
+                "indirectkey",
+                "indirectseedvalue",
+            ),
             seed_mode="local_with_ith",
         ),
         "hard_c4_seedkey_tokenmajor": exact_backend(

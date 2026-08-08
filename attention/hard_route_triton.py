@@ -368,6 +368,7 @@ if triton is not None:
         TOP_VALUE: tl.constexpr,
         INDIRECT_TOP_VALUE: tl.constexpr,
         SEED_VALUE: tl.constexpr,
+        INDIRECT_SEED_VALUE: tl.constexpr,
         SEED_KEY_BIAS_MATCH: tl.constexpr,
         SEED_KEY_SCALE: tl.constexpr,
         SEED_KEY_LS_SCALE: tl.constexpr,
@@ -596,7 +597,7 @@ if triton is not None:
                         mask=valid_query[:, None] & valid_dim[None, :],
                         other=0.0,
                     )
-                elif SEED_VALUE:
+                elif SEED_VALUE and not INDIRECT_SEED_VALUE:
                     representative_value = tl.load(
                         value_base + seed_idx * H * D_HEAD + dim_offsets,
                         mask=(seed_idx < L) & valid_dim,
@@ -725,7 +726,11 @@ if triton is not None:
                     merged_key,
                     mask=valid_query[:, None] & valid_dim[None, :],
                 )
-            if not ((TOP_KV and INDIRECT_TOP_KV) or (TOP_VALUE and INDIRECT_TOP_VALUE)):
+            if not (
+                (TOP_KV and INDIRECT_TOP_KV)
+                or (TOP_VALUE and INDIRECT_TOP_VALUE)
+                or (SEED_VALUE and INDIRECT_SEED_VALUE)
+            ):
                 tl.store(
                     merged_value_ptr + route_offset,
                     merged_value,
@@ -811,6 +816,7 @@ if triton is not None:
         TOP_VALUE: tl.constexpr,
         INDIRECT_TOP_VALUE: tl.constexpr,
         SEED_VALUE: tl.constexpr,
+        INDIRECT_SEED_VALUE: tl.constexpr,
         SEED_KEY_BIAS_MATCH: tl.constexpr,
         SEED_KEY_SCALE: tl.constexpr,
         SEED_KEY_LS_SCALE: tl.constexpr,
@@ -2024,6 +2030,7 @@ if triton is not None:
         USE_EXP2: tl.constexpr,
         USE_KEY_SCALE: tl.constexpr,
         INDIRECT_TOP_VALUE: tl.constexpr,
+        INDIRECT_SEED_VALUE: tl.constexpr,
         GROUPS: tl.constexpr,
     ):
         group_id = tl.program_id(0)
@@ -2111,11 +2118,14 @@ if triton is not None:
                 p = tl.exp(logits - next_max[:, None])
                 alpha = tl.exp(max_score - next_max)
 
-            if INDIRECT_TOP_VALUE:
+            if INDIRECT_TOP_VALUE or INDIRECT_SEED_VALUE:
+                value_col = key_col
+                if INDIRECT_SEED_VALUE:
+                    value_col = base_token - key_row * 4
                 v = tl.load(
                     source_value_ptr
                     + (((((batch * KEY_OUTERS + key_outer[:, None]) * K_ROWS + key_row[:, None])
-                         * L_COLS + key_col[:, None]) * H_HEADS + head) * D_HEAD
+                         * L_COLS + value_col[:, None]) * H_HEADS + head) * D_HEAD
                        + dim_offsets[None, :]),
                     mask=valid_keys[:, None] & valid_dim[None, :],
                     other=0.0,
@@ -2484,6 +2494,7 @@ def triton_direct_route_top_key_attention(
     num_warps=1,
     num_stages=1,
     use_exp2=True,
+    indirect_seed_value=False,
     out=None,
     assume_contiguous=False,
 ):
@@ -2491,8 +2502,8 @@ def triton_direct_route_top_key_attention(
 
     query/out:  [B, A, query_rows, query_columns, heads, dim]
     source_key: [B, key_outer, key_rows, key_columns, heads, dim]
-    source_value: optional original V with the same shape as source_key. When
-      provided, values are gathered by key_index instead of read from value.
+    source_value: optional original V with the same shape as source_key.
+      When provided, values are gathered either by key_index or by seed id.
     key_index:  [compressed_tokens, B*heads*A*query_columns]
     value:      [compressed_tokens, B*heads*A*query_columns, dim]
     bias:       [compressed_tokens, B*heads*A*query_columns]
@@ -2525,6 +2536,8 @@ def triton_direct_route_top_key_attention(
         raise ValueError("query/source_key batch and key layout are inconsistent.")
     if key_heads != heads or key_dim != dim:
         raise ValueError("query/source_key head dimensions are inconsistent.")
+    if indirect_seed_value and source_value is None:
+        raise ValueError("indirect seed-value attention requires source_value.")
     if source_value is not None and source_value.shape != source_key.shape:
         raise ValueError("source_value must match source_key for indirect top-KV attention.")
     if groups != expected_groups:
@@ -2581,7 +2594,8 @@ def triton_direct_route_top_key_attention(
         SCORE_SCALE=float(scale),
         USE_EXP2=bool(use_exp2),
         USE_KEY_SCALE=bool(key_scale is not None),
-        INDIRECT_TOP_VALUE=bool(source_value is not None),
+        INDIRECT_TOP_VALUE=bool(source_value is not None and not indirect_seed_value),
+        INDIRECT_SEED_VALUE=bool(indirect_seed_value),
         GROUPS=groups,
         **meta,
     )
@@ -2784,6 +2798,7 @@ def triton_hard_route_merge_c4_direct_route(
     use_seed_key_scale=False,
     use_seed_key_lsq_scale=False,
     use_seed_key_affine_scale=False,
+    use_indirect_seed_value=False,
     use_indirect_top_value=False,
     use_indirect_top_kv=False,
     use_indirect_top_key=False,
@@ -2889,7 +2904,7 @@ def triton_hard_route_merge_c4_direct_route(
             key.device,
             torch.int16,
         )
-        if use_indirect_top_value:
+        if use_indirect_top_value or use_indirect_seed_value:
             # The direct top-key routing kernel gathers V from the original value tensor.
             merged_value = merged_key
         else:
@@ -2996,6 +3011,14 @@ def triton_hard_route_merge_c4_direct_route(
         raise ValueError("indirect top-value routing is not implemented for stripe C4 merge.")
     if use_indirect_top_value and use_key_outer_kernel:
         raise ValueError("indirect top-value routing is not implemented for key-outer C4 merge.")
+    if use_indirect_seed_value and not (use_top_key and use_indirect_top_key and use_seed_value):
+        raise ValueError("indirect seed-value routing requires top-key + indirect-key + seed-value.")
+    if use_indirect_seed_value and use_recompute_merge:
+        raise ValueError("indirect seed-value routing is not implemented for recompute merge.")
+    if use_indirect_seed_value and use_stripe_assign:
+        raise ValueError("indirect seed-value routing is not implemented for stripe C4 merge.")
+    if use_indirect_seed_value and use_key_outer_kernel:
+        raise ValueError("indirect seed-value routing is not implemented for key-outer C4 merge.")
     if use_top_key_scale and not use_top_key:
         raise ValueError("top-key scaling requires top-key routing.")
     if use_top_key_affine_scale and not use_top_key:
@@ -3181,6 +3204,7 @@ def triton_hard_route_merge_c4_direct_route(
         TOP_VALUE=bool(use_top_value),
         INDIRECT_TOP_VALUE=bool(use_indirect_top_value),
         SEED_VALUE=bool(use_seed_value),
+        INDIRECT_SEED_VALUE=bool(use_indirect_seed_value),
         SEED_KEY_BIAS_MATCH=bool(use_seed_key_bias_match),
         SEED_KEY_SCALE=bool(use_seed_key_scale),
         SEED_KEY_LS_SCALE=bool(use_seed_key_lsq_scale),

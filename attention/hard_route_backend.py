@@ -38,6 +38,7 @@ _DIRECT_ROUTE_FLAG_SUFFIXES = (
     ("_seedkeyproj", ("use_seed_key", "use_seed_key_scale")),
     ("_seedkeymatch", ("use_seed_key", "use_seed_key_bias_match")),
     ("_seedkey", "use_seed_key"),
+    ("_indirectseedvalue", "use_indirect_seed_value"),
     ("_indirectvalue", "use_indirect_top_value"),
     ("_indirectkv", "use_indirect_top_kv"),
     ("_indirectkey", "use_indirect_top_key"),
@@ -82,6 +83,7 @@ class DirectRouteMergeConfig:
     use_fp32_key_scale: bool = False
     use_seed_key_lsq_scale: bool = False
     use_seed_key_affine_scale: bool = False
+    use_indirect_seed_value: bool = False
     use_indirect_top_value: bool = False
     use_indirect_top_kv: bool = False
     use_indirect_top_key: bool = False
@@ -159,6 +161,7 @@ def parse_direct_route_backend(backend):
         "use_fp32_key_scale": False,
         "use_seed_key_lsq_scale": False,
         "use_seed_key_affine_scale": False,
+        "use_indirect_seed_value": False,
         "use_indirect_top_value": False,
         "use_indirect_top_kv": False,
         "use_indirect_top_key": False,
@@ -257,6 +260,7 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         use_seed_key_scale=config.use_seed_key_scale,
         use_seed_key_lsq_scale=config.use_seed_key_lsq_scale,
         use_seed_key_affine_scale=config.use_seed_key_affine_scale,
+        use_indirect_seed_value=config.use_indirect_seed_value,
         use_indirect_top_value=config.use_indirect_top_value,
         use_indirect_top_kv=config.use_indirect_top_kv,
         use_indirect_top_key=config.use_indirect_top_key,
@@ -314,6 +318,7 @@ def direct_top_key_attention(
     key_scale,
     backend,
     scale,
+    indirect_seed_value=False,
     output=None,
     assume_contiguous=False,
 ):
@@ -338,6 +343,7 @@ def direct_top_key_attention(
         num_warps=num_warps,
         num_stages=num_stages,
         use_exp2=True,
+        indirect_seed_value=indirect_seed_value,
         out=output,
         assume_contiguous=assume_contiguous,
     )

@@ -151,6 +151,9 @@ model still runs full compressed attention over every compressed token.
   by that index.
 - `indirectvalue`: for top-key + top-value variants, store only the top-token
   column index and gather original V during full compressed attention.
+- `indirectseedvalue`: for top-key + seed-value variants, avoid materializing
+  seed-value V and gather original V by seed id during full compressed
+  attention.
 
 These variants are benchmark candidates only. Keep the `bestlogit` path above
 as the default until a real-QKV benchmark shows a clear speed gain with

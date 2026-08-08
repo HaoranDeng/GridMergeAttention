@@ -195,6 +195,7 @@ def _route_direct_outputs(
             key_scale,
             routing_backend,
             scale,
+            indirect_seed_value=direct_config.use_indirect_seed_value,
             output=output,
             assume_contiguous=True,
         )
@@ -203,7 +204,11 @@ def _route_direct_outputs(
             q,
             source_key,
             source_value
-            if (direct_config.use_indirect_top_kv or direct_config.use_indirect_top_value)
+            if (
+                direct_config.use_indirect_top_kv
+                or direct_config.use_indirect_top_value
+                or direct_config.use_indirect_seed_value
+            )
             else None,
             key,
             value,
@@ -277,6 +282,8 @@ def _run_direct_path(q, k, v, scale, seed_rows, direct_config, hard_route_routin
         raise ValueError("indirect top-KV hard-route backend requires a triton_direct_*_tokenmajor routing backend.")
     if direct_config.use_indirect_top_value:
         raise ValueError("indirect top-value hard-route backend requires a triton_direct_*_tokenmajor routing backend.")
+    if direct_config.use_indirect_seed_value:
+        raise ValueError("indirect seed-value hard-route backend requires a triton_direct_*_tokenmajor routing backend.")
 
     return _run_direct_fallback_attention(q, key, value, bias, hard_route_routing_backend, scale)
 
