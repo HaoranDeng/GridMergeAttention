@@ -3223,7 +3223,7 @@ if triton is not None:
                     merged_key = tl.where(row_mask, key_row_value[None, :], merged_key)
                     merged_value = tl.where(row_mask, value_row_value[None, :], merged_value)
 
-            k_dot = merged_key
+            k_dot = merged_key.to(source_key.dtype)
             if CAST_Q_TO_FP16:
                 k_dot = merged_key.to(tl.float16)
             bias = tl.load(
@@ -3551,7 +3551,7 @@ if triton is not None:
                     merged_key = tl.where(row_mask, key_row_value[None, :], merged_key)
                     merged_value = tl.where(row_mask, value_row_value[None, :], merged_value)
 
-            k_dot = merged_key
+            k_dot = merged_key.to(source_key.dtype)
             if CAST_Q_TO_FP16:
                 k_dot = merged_key.to(tl.float16)
             bias = tl.load(
