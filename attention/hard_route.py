@@ -196,7 +196,6 @@ def _route_direct_outputs(
             key_scale,
             routing_backend,
             scale,
-            indirect_seed_value=direct_config.use_indirect_seed_value,
             output=output,
             assume_contiguous=True,
         )

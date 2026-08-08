@@ -86,6 +86,12 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         )
         else _dtype_bytes(torch.bfloat16 if merge_config.use_bf16_merged_value else torch.float16)
     )
+    writes_separate_value_index = bool(
+        merge_config.use_indirect_top_value
+        and not merge_config.use_indirect_top_key
+        and not merge_config.use_indirect_top_kv
+    )
+    value_index_bytes = 2 if writes_separate_value_index else 0
     bias_dtype = (
         torch.float32
         if merge_config.use_fp32_routing_bias
@@ -113,7 +119,11 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         chunk_outer = min(int(query_outer_chunk), int(frames) - start)
         route_groups = int(batch) * int(heads) * chunk_outer * int(width)
         chunk_bytes = route_tokens * route_groups * (
-            key_bytes_per_route_token + dim * value_bytes + bias_bytes + key_scale_bytes
+            key_bytes_per_route_token
+            + value_index_bytes
+            + dim * value_bytes
+            + bias_bytes
+            + key_scale_bytes
         )
         total_bytes += chunk_bytes
         max_chunk_bytes = max(max_chunk_bytes, chunk_bytes)
@@ -142,6 +152,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
             )
             else ("bf16" if merge_config.use_bf16_merged_value else "fp16")
         ),
+        "writes_separate_value_index": writes_separate_value_index,
         "bias_dtype": (
             "fp32"
             if merge_config.use_fp32_routing_bias
