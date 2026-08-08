@@ -569,6 +569,7 @@ if triton is not None:
         BLOCK_L: tl.constexpr,
         BLOCK_D: tl.constexpr,
         SCORE_SCALE: tl.constexpr,
+        USE_ASSIGNED_LOGIT: tl.constexpr,
     ):
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
@@ -664,12 +665,19 @@ if triton is not None:
             best_logits = tl.where(update, logits2, best_logits)
             assignments = tl.where(update, 2, assignments)
             update = logits3 > best_logits
+            best_logits = tl.where(update, logits3, best_logits)
             assignments = tl.where(update, 3, assignments)
             assignments = tl.where(
                 valid_logits & (key_offsets[None, :] < 4),
                 key_offsets[None, :],
                 assignments,
             )
+            assigned_logits = best_logits
+            if USE_ASSIGNED_LOGIT:
+                assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 0), logits0, assigned_logits)
+                assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 1), logits1, assigned_logits)
+                assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 2), logits2, assigned_logits)
+                assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 3), logits3, assigned_logits)
 
             route_group = (((batch * H + head) * A + query_outer) * J + query_offsets)
             route_token_base = (key_outer * K_ROWS + key_row) * 4
@@ -679,13 +687,16 @@ if triton is not None:
                 other=0.0,
             )
             for seed_idx in tl.static_range(0, 4):
-                logits = logits0
-                if seed_idx == 1:
-                    logits = logits1
-                if seed_idx == 2:
-                    logits = logits2
-                if seed_idx == 3:
-                    logits = logits3
+                if USE_ASSIGNED_LOGIT:
+                    logits = assigned_logits
+                else:
+                    logits = logits0
+                    if seed_idx == 1:
+                        logits = logits1
+                    if seed_idx == 2:
+                        logits = logits2
+                    if seed_idx == 3:
+                        logits = logits3
 
                 active = valid_logits & (assignments == seed_idx)
                 row_max = tl.max(tl.where(active, logits, -float("inf")), axis=1)
@@ -1352,6 +1363,7 @@ def triton_hard_route_merge_c4_direct_route(
             BLOCK_L=block_l,
             BLOCK_D=block_d,
             SCORE_SCALE=float(scale),
+            USE_ASSIGNED_LOGIT=bool(use_assigned_logit),
             num_warps=2,
             num_stages=1,
         )
