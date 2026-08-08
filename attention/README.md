@@ -114,6 +114,22 @@ The `bestlogit` suffix reuses the already computed winning seed/key logit when
 forming each assigned cluster. It keeps the same assignment and full compressed
 attention semantics as the full-core path.
 
+The following suffixes are experimental memory-traffic/merge-compute
+approximations. They do not change the second stage: after compression, the
+model still runs full compressed attention over every compressed token.
+
+- `topkey`: compressed K is the top-logit original key in the seed cluster;
+  compressed V still uses the normal softmax merge.
+- `topvalue`: compressed K still uses the normal softmax merge; compressed V is
+  the top-logit original value in the seed cluster.
+- `topkv`: compressed K and V are both the top-logit original token in the seed
+  cluster.
+- `seedvalue`: compressed V is the forced representative seed value.
+
+These variants are benchmark candidates only. Keep the `bestlogit` path above
+as the default until a real-QKV benchmark shows a clear speed gain with
+acceptable dense-attention error.
+
 ## Select Route
 
 With `layout: select_route` and `num_merge_tokens=C`, each seed independently
