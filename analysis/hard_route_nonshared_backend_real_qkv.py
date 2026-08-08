@@ -87,6 +87,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
             or merge_config.use_indirect_top2_value
             or merge_config.use_indirect_top_value
             or merge_config.use_indirect_seed_value
+            or merge_config.use_recompute_value
         )
         else _dtype_bytes(torch.bfloat16 if merge_config.use_bf16_merged_value else torch.float16)
     )
@@ -176,6 +177,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
                 or merge_config.use_indirect_top2_value
                 or merge_config.use_indirect_top_value
                 or merge_config.use_indirect_seed_value
+                or merge_config.use_recompute_value
             )
             else ("bf16" if merge_config.use_bf16_merged_value else "fp16")
         ),
@@ -216,6 +218,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         "uses_top_value": bool(merge_config.use_top_value),
         "uses_representative_seed_value": bool(merge_config.use_seed_value),
         "uses_max_bias": bool(merge_config.use_max_bias),
+        "uses_recompute_value": bool(merge_config.use_recompute_value),
     }
 
 
@@ -353,6 +356,11 @@ def exact_variants():
         ),
         "hard_c4_bestlogit_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit"), seed_mode="local_with_ith"
+        ),
+        "hard_c4_bestlogit_recomputevalue_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "recomputevalue"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=4),
         ),
         "hard_c4_bestlogit_maxbias_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "maxbias"), seed_mode="local_with_ith"

@@ -378,6 +378,7 @@ if triton is not None:
         INDIRECT_TOP_VALUE: tl.constexpr,
         SEED_VALUE: tl.constexpr,
         INDIRECT_SEED_VALUE: tl.constexpr,
+        RECOMPUTE_VALUE: tl.constexpr,
         SEED_KEY_BIAS_MATCH: tl.constexpr,
         SEED_KEY_SCALE: tl.constexpr,
         SEED_KEY_LS_SCALE: tl.constexpr,
@@ -513,7 +514,16 @@ if triton is not None:
         route_group = (((batch * H + head) * A + query_outer) * J + query_offsets)
         route_token_base = (key_outer * K_ROWS + key_row) * 4
         value_base = value_ptr + (((batch * F + key_outer) * K_ROWS + key_row) * L * H + head) * D_HEAD
-        if not (TOP_KV or TOP3_SEED_VALUE or TOP3_VALUE or TOP2_SEED_VALUE or TOP2_VALUE or TOP_VALUE or SEED_VALUE):
+        if not (
+            RECOMPUTE_VALUE
+            or TOP_KV
+            or TOP3_SEED_VALUE
+            or TOP3_VALUE
+            or TOP2_SEED_VALUE
+            or TOP2_VALUE
+            or TOP_VALUE
+            or SEED_VALUE
+        ):
             value_block = tl.load(
                 value_base + key_offsets[:, None] * H * D_HEAD + dim_offsets[None, :],
                 mask=valid_key[:, None] & valid_dim[None, :],
@@ -826,7 +836,7 @@ if triton is not None:
                 merged_value = representative_value[None, :] + tl.zeros((BLOCK_J, BLOCK_D), tl.float32)
                 expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
                 routing_bias = expected_logit - log_denom
-            else:
+            elif not RECOMPUTE_VALUE:
                 merged_value = tl.dot(weights.to(value_block.dtype), value_block)
                 if USE_MAX_BIAS:
                     expected_logit = row_max
@@ -834,6 +844,9 @@ if triton is not None:
                 else:
                     expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
                     routing_bias = expected_logit - log_denom
+            else:
+                expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
+                routing_bias = expected_logit - log_denom
             if SEED_KEY_BIAS_MATCH and not TOP_KV:
                 seed_for_bias = seed0
                 if seed_idx == 1:
@@ -913,6 +926,7 @@ if triton is not None:
                 or (TOP2_VALUE and INDIRECT_TOP2_VALUE)
                 or (TOP_VALUE and INDIRECT_TOP_VALUE)
                 or (SEED_VALUE and INDIRECT_SEED_VALUE)
+                or RECOMPUTE_VALUE
             ):
                 tl.store(
                     merged_value_ptr + route_offset,
@@ -1009,6 +1023,7 @@ if triton is not None:
         INDIRECT_TOP_VALUE: tl.constexpr,
         SEED_VALUE: tl.constexpr,
         INDIRECT_SEED_VALUE: tl.constexpr,
+        RECOMPUTE_VALUE: tl.constexpr,
         SEED_KEY_BIAS_MATCH: tl.constexpr,
         SEED_KEY_SCALE: tl.constexpr,
         SEED_KEY_LS_SCALE: tl.constexpr,
@@ -2663,6 +2678,201 @@ if triton is not None:
             mask=(query_offsets[:, None] < Q_ROWS) & valid_dim[None, :],
         )
 
+    @triton.jit
+    def _direct_route_recompute_value_attention_kernel(
+        query_ptr,
+        key_ptr,
+        source_key_ptr,
+        source_value_ptr,
+        bias_ptr,
+        out_ptr,
+        A_OUTER: tl.constexpr,
+        Q_ROWS: tl.constexpr,
+        J_COLS: tl.constexpr,
+        H_HEADS: tl.constexpr,
+        KEY_OUTERS: tl.constexpr,
+        K_ROWS: tl.constexpr,
+        L_COLS: tl.constexpr,
+        K_LEN: tl.constexpr,
+        D_HEAD: tl.constexpr,
+        BLOCK_M: tl.constexpr,
+        BLOCK_D: tl.constexpr,
+        BLOCK_L: tl.constexpr,
+        SCORE_SCALE: tl.constexpr,
+        USE_EXP2: tl.constexpr,
+        CAST_Q_TO_FP16: tl.constexpr,
+        GROUPS: tl.constexpr,
+    ):
+        group_id = tl.program_id(0)
+        query_block_id = tl.program_id(1)
+
+        query_col = group_id % J_COLS
+        tmp = group_id // J_COLS
+        query_outer = tmp % A_OUTER
+        tmp = tmp // A_OUTER
+        head = tmp % H_HEADS
+        batch = tmp // H_HEADS
+
+        query_offsets = query_block_id * BLOCK_M + tl.arange(0, BLOCK_M)
+        seed_offsets = tl.arange(0, 4)
+        key_offsets = tl.arange(0, BLOCK_L)
+        dim_offsets = tl.arange(0, BLOCK_D)
+        valid_dim = dim_offsets < D_HEAD
+        valid_source_key = key_offsets < L_COLS
+
+        query_base = query_ptr + batch * A_OUTER * Q_ROWS * J_COLS * H_HEADS * D_HEAD
+        out_base = out_ptr + batch * A_OUTER * Q_ROWS * J_COLS * H_HEADS * D_HEAD
+
+        q = tl.load(
+            query_base
+            + (((query_outer * Q_ROWS + query_offsets[:, None]) * J_COLS + query_col)
+               * H_HEADS + head) * D_HEAD
+            + dim_offsets[None, :],
+            mask=(query_offsets[:, None] < Q_ROWS) & valid_dim[None, :],
+            other=0.0,
+        )
+        q_dot = q
+        if CAST_Q_TO_FP16:
+            q_dot = q.to(tl.float16)
+
+        max_score = tl.full((BLOCK_M,), -float("inf"), tl.float32)
+        normalizer = tl.zeros((BLOCK_M,), tl.float32)
+        acc = tl.zeros((BLOCK_M, BLOCK_D), tl.float32)
+        base_key_len = K_ROWS * 4
+
+        for key_start in range(0, K_LEN, 4):
+            route_keys = key_start + seed_offsets
+            key_outer = key_start // base_key_len
+            base_token = key_start - key_outer * base_key_len
+            key_row = base_token // 4
+
+            k = tl.load(
+                key_ptr + (route_keys[:, None] * GROUPS + group_id) * D_HEAD + dim_offsets[None, :],
+                mask=(route_keys[:, None] < K_LEN) & valid_dim[None, :],
+                other=0.0,
+            )
+            k_dot = k
+            if CAST_Q_TO_FP16:
+                k_dot = k.to(tl.float16)
+
+            bias = tl.load(
+                bias_ptr + route_keys * GROUPS + group_id,
+                mask=route_keys < K_LEN,
+                other=float("inf"),
+            )
+
+            logits = tl.dot(q_dot, tl.trans(k_dot)) * SCORE_SCALE - bias[None, :]
+            logits = tl.where(
+                (query_offsets[:, None] < Q_ROWS) & (route_keys[None, :] < K_LEN),
+                logits,
+                -float("inf"),
+            )
+
+            block_max = tl.max(logits, axis=1)
+            next_max = tl.maximum(max_score, block_max)
+            if USE_EXP2:
+                p = tl.exp2((logits - next_max[:, None]) * 1.4426950408889634)
+                alpha = tl.exp2((max_score - next_max) * 1.4426950408889634)
+            else:
+                p = tl.exp(logits - next_max[:, None])
+                alpha = tl.exp(max_score - next_max)
+
+            source_key = tl.load(
+                source_key_ptr
+                + (((((batch * KEY_OUTERS + key_outer) * K_ROWS + key_row)
+                     * L_COLS + key_offsets[:, None]) * H_HEADS + head) * D_HEAD
+                   + dim_offsets[None, :]),
+                mask=valid_source_key[:, None] & valid_dim[None, :],
+                other=0.0,
+            )
+            source_value = tl.load(
+                source_value_ptr
+                + (((((batch * KEY_OUTERS + key_outer) * K_ROWS + key_row)
+                     * L_COLS + key_offsets[:, None]) * H_HEADS + head) * D_HEAD
+                   + dim_offsets[None, :]),
+                mask=valid_source_key[:, None] & valid_dim[None, :],
+                other=0.0,
+            )
+
+            seed1 = tl.where(key_row > 0, key_row - 1, 1)
+            seed2 = tl.where(
+                key_row == 0,
+                2,
+                tl.where(key_row == Q_ROWS - 1, Q_ROWS - 3, key_row + 1),
+            )
+            seed3 = tl.where(
+                key_row <= 1,
+                3,
+                tl.where(key_row >= Q_ROWS - 2, Q_ROWS - 4, key_row - 2),
+            )
+            seed_rows = key_row + tl.zeros((4,), tl.int64)
+            seed_rows = tl.where(seed_offsets == 1, seed1, seed_rows)
+            seed_rows = tl.where(seed_offsets == 2, seed2, seed_rows)
+            seed_rows = tl.where(seed_offsets == 3, seed3, seed_rows)
+            seed_matrix = tl.load(
+                query_base
+                + (((query_outer * Q_ROWS + seed_rows[:, None]) * J_COLS + query_col)
+                   * H_HEADS + head) * D_HEAD
+                + dim_offsets[None, :],
+                mask=valid_dim[None, :],
+                other=0.0,
+            )
+
+            seed_logits = tl.dot(seed_matrix, tl.trans(source_key), input_precision="tf32") * SCORE_SCALE
+            seed_logits = tl.where(valid_source_key[None, :], seed_logits, -float("inf"))
+            merge_logits0 = tl.max(tl.where(seed_offsets[:, None] == 0, seed_logits, -float("inf")), axis=0)
+            merge_logits1 = tl.max(tl.where(seed_offsets[:, None] == 1, seed_logits, -float("inf")), axis=0)
+            merge_logits2 = tl.max(tl.where(seed_offsets[:, None] == 2, seed_logits, -float("inf")), axis=0)
+            merge_logits3 = tl.max(tl.where(seed_offsets[:, None] == 3, seed_logits, -float("inf")), axis=0)
+
+            best_logits = merge_logits0
+            assignments = tl.zeros((BLOCK_L,), tl.int32)
+            update = merge_logits1 > best_logits
+            best_logits = tl.where(update, merge_logits1, best_logits)
+            assignments = tl.where(update, 1, assignments)
+            update = merge_logits2 > best_logits
+            best_logits = tl.where(update, merge_logits2, best_logits)
+            assignments = tl.where(update, 2, assignments)
+            update = merge_logits3 > best_logits
+            best_logits = tl.where(update, merge_logits3, best_logits)
+            assignments = tl.where(update, 3, assignments)
+
+            assignments = tl.where(valid_source_key & (key_offsets < 4), key_offsets, assignments)
+            forced_logits = best_logits
+            forced_logits = tl.where(key_offsets == 0, merge_logits0, forced_logits)
+            forced_logits = tl.where(key_offsets == 1, merge_logits1, forced_logits)
+            forced_logits = tl.where(key_offsets == 2, merge_logits2, forced_logits)
+            forced_logits = tl.where(key_offsets == 3, merge_logits3, forced_logits)
+
+            active = valid_source_key[None, :] & (assignments[None, :] == seed_offsets[:, None])
+            merge_logits = forced_logits[None, :] + tl.zeros((4, BLOCK_L), tl.float32)
+            row_max = tl.max(tl.where(active, merge_logits, -float("inf")), axis=1)
+            if USE_EXP2:
+                merge_probs = tl.where(
+                    active,
+                    tl.exp2((merge_logits - row_max[:, None]) * 1.4426950408889634),
+                    0.0,
+                )
+            else:
+                merge_probs = tl.where(active, tl.exp(merge_logits - row_max[:, None]), 0.0)
+            denom = tl.sum(merge_probs, axis=1)
+            weights = merge_probs / tl.where(denom > 0.0, denom, 1.0)[:, None]
+            merged_value = tl.dot(weights.to(source_value.dtype), source_value)
+
+            acc = acc * alpha[:, None] + tl.dot(p.to(merged_value.dtype), merged_value)
+            normalizer = normalizer * alpha + tl.sum(p, axis=1)
+            max_score = next_max
+
+        out = acc / normalizer[:, None]
+        tl.store(
+            out_base
+            + (((query_outer * Q_ROWS + query_offsets[:, None]) * J_COLS + query_col)
+               * H_HEADS + head) * D_HEAD
+            + dim_offsets[None, :],
+            out,
+            mask=(query_offsets[:, None] < Q_ROWS) & valid_dim[None, :],
+        )
+
 
 def triton_biased_attention(
     query,
@@ -3258,6 +3468,108 @@ def triton_direct_route_indirect_value_attention(
     return out
 
 
+def triton_direct_route_recompute_value_attention(
+    query,
+    key,
+    source_key,
+    source_value,
+    bias,
+    block_m=32,
+    block_n=4,
+    scale=1.0,
+    num_warps=1,
+    num_stages=1,
+    use_exp2=True,
+    out=None,
+    assume_contiguous=False,
+):
+    """Full compressed attention that recomputes exact merged V during routing.
+
+    The merge stage still materializes compressed K and routing bias. This
+    routing stage recomputes only the exact softmax-merged V for each group of
+    four seed tokens, avoiding the large merged-V intermediate tensor.
+    """
+    if triton is None:
+        raise RuntimeError("hard_route_routing_backend='triton_direct_*' requires Triton.")
+    if not query.is_cuda:
+        raise RuntimeError("hard_route_routing_backend='triton_direct_*' requires CUDA/ROCm tensors.")
+    if query.dtype not in (torch.float16, torch.bfloat16):
+        raise RuntimeError("hard_route_routing_backend='triton_direct_*' requires fp16 or bf16 tensors.")
+    if int(block_n) != 4:
+        raise ValueError("recompute-value routing currently requires block_n=4.")
+
+    if not assume_contiguous:
+        query = query.contiguous()
+        key = key.contiguous()
+        source_key = source_key.contiguous()
+        source_value = source_value.contiguous()
+        bias = bias.contiguous()
+
+    batch, query_outer, query_rows, query_columns, heads, dim = query.shape
+    key_batch, key_outer, key_rows, key_columns, key_heads, key_dim = source_key.shape
+    key_len, groups, merged_dim = key.shape
+    expected_groups = batch * heads * query_outer * query_columns
+    if source_value.shape != source_key.shape:
+        raise ValueError("source_key and source_value must have the same shape.")
+    if key_batch != batch or key_heads != heads or key_dim != dim:
+        raise ValueError("query/source_key dimensions are inconsistent.")
+    if groups != expected_groups:
+        raise ValueError(
+            "recompute-value attention expects route-layout K with "
+            f"{expected_groups} groups, got {groups}."
+        )
+    if merged_dim != dim or bias.shape != (key_len, groups):
+        raise ValueError("query/key/bias shapes are inconsistent for recompute-value attention.")
+    if key_len != key_outer * key_rows * 4:
+        raise ValueError("recompute-value attention expects K_LEN = key_outer * key_rows * 4.")
+
+    block_d = triton.next_power_of_2(dim)
+    block_l = triton.next_power_of_2(key_columns)
+    if block_d > 128:
+        raise ValueError(f"Triton hard-route attention supports head dim <= 128, got {dim}.")
+    if block_l > 128:
+        raise ValueError(f"Triton recompute-value attention supports <=128 key columns, got {key_columns}.")
+
+    if out is None:
+        out = _cached_empty("direct_route_recompute_value_attention_out", query.shape, query.device, query.dtype)
+    else:
+        if out.shape != query.shape or out.device != query.device or out.dtype != query.dtype:
+            raise ValueError("recompute-value direct-route output tensor has inconsistent shape/device/dtype.")
+        if not out.is_contiguous():
+            raise ValueError("recompute-value direct-route output tensor must be contiguous.")
+
+    grid = (groups, triton.cdiv(query_rows, block_m))
+    meta = {"num_warps": int(num_warps)}
+    if num_stages is not None:
+        meta["num_stages"] = int(num_stages)
+    _direct_route_recompute_value_attention_kernel[grid](
+        query,
+        key,
+        source_key,
+        source_value,
+        bias,
+        out,
+        A_OUTER=query_outer,
+        Q_ROWS=query_rows,
+        J_COLS=query_columns,
+        H_HEADS=heads,
+        KEY_OUTERS=key_outer,
+        K_ROWS=key_rows,
+        L_COLS=key_columns,
+        K_LEN=key_len,
+        D_HEAD=dim,
+        BLOCK_M=block_m,
+        BLOCK_D=block_d,
+        BLOCK_L=block_l,
+        SCORE_SCALE=float(scale),
+        USE_EXP2=bool(use_exp2),
+        CAST_Q_TO_FP16=bool(key.dtype == torch.float16 and query.dtype != torch.float16),
+        GROUPS=groups,
+        **meta,
+    )
+    return out
+
+
 def triton_hard_route_merge(seed_queries, key, value, scale=1.0):
     """Fuse hard assignment, per-cluster softmax, KV merge, and routing bias.
 
@@ -3448,6 +3760,7 @@ def triton_hard_route_merge_c4_direct_route(
     use_assigned_logit=False,
     use_mask_assign=False,
     use_recompute_merge=False,
+    use_recompute_value=False,
     use_stripe_assign=False,
     use_max_bias=False,
     use_seed_key=False,
@@ -3586,7 +3899,11 @@ def triton_hard_route_merge_c4_direct_route(
             key.device,
             merged_key_dtype,
         )
-        if use_indirect_seed_value:
+        if use_recompute_value:
+            # Routing recomputes exact merged V from original V, so this tensor
+            # is ignored. Reuse merged_key as a harmless placeholder.
+            merged_value = merged_key
+        elif use_indirect_seed_value:
             # Seed-value routing gathers V by route-token seed id, so no value
             # index buffer is needed. The routing kernel ignores this tensor.
             merged_value = merged_key
@@ -3679,6 +3996,8 @@ def triton_hard_route_merge_c4_direct_route(
         raise ValueError("use_mask_assign is only implemented for the non-keyouter direct C4 kernel.")
     if use_recompute_merge and use_stripe_assign:
         raise ValueError("recompute merge is not implemented for stripe C4 merge.")
+    if use_recompute_value and use_recompute_merge:
+        raise ValueError("recompute-value routing is separate from recompute merge.")
     if use_recompute_merge and use_key_outer_kernel:
         raise ValueError("recompute merge is not implemented for key-outer C4 merge.")
     if use_recompute_merge and use_mask_assign:
@@ -3704,6 +4023,34 @@ def triton_hard_route_merge_c4_direct_route(
         or use_key_outer_kernel
     ):
         raise ValueError("max-bias routing is currently only implemented for exact materialized K/V C4 merge.")
+    if use_recompute_value and (
+        use_seed_key
+        or use_top_kv
+        or use_top_key
+        or use_top3_seed_value
+        or use_top3_value
+        or use_top2_seed_value
+        or use_top2_value
+        or use_top_value
+        or use_seed_value
+        or use_indirect_top_kv
+        or use_indirect_top_key
+        or use_indirect_top3_seed_value
+        or use_indirect_top3_value
+        or use_indirect_top2_seed_value
+        or use_indirect_top2_value
+        or use_indirect_top_value
+        or use_indirect_seed_value
+        or use_seed_key_scale
+        or use_seed_key_bias_match
+        or use_mask_assign
+        or use_max_bias
+        or use_stripe_assign
+        or use_key_outer_kernel
+    ):
+        raise ValueError("recompute-value is only implemented for exact bestlogit C4 merge.")
+    if use_recompute_value and (not inline_local_seed or not force_seed_keys or not use_assigned_logit):
+        raise ValueError("recompute-value requires inline local seeds, force-seed keys, and bestlogit.")
     if use_top3_seed_value and not force_seed_keys:
         raise ValueError("top-3 plus seed-value routing requires force_seed_keys=True.")
     if use_top3_seed_value and not use_indirect_top3_seed_value:
@@ -4032,6 +4379,7 @@ def triton_hard_route_merge_c4_direct_route(
         INDIRECT_TOP_VALUE=bool(use_indirect_top_value),
         SEED_VALUE=bool(use_seed_value),
         INDIRECT_SEED_VALUE=bool(use_indirect_seed_value),
+        RECOMPUTE_VALUE=bool(use_recompute_value),
         SEED_KEY_BIAS_MATCH=bool(use_seed_key_bias_match),
         SEED_KEY_SCALE=bool(use_seed_key_scale),
         SEED_KEY_LS_SCALE=bool(use_seed_key_lsq_scale),
@@ -4047,6 +4395,7 @@ __all__ = [
     "triton_direct_route_biased_attention",
     "triton_direct_route_biased_attention_g2",
     "triton_direct_route_indirect_value_attention",
+    "triton_direct_route_recompute_value_attention",
     "triton_direct_route_seed_key_attention",
     "triton_direct_route_top_key_attention",
     "triton_hard_route_merge",

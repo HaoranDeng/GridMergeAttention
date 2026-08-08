@@ -35,6 +35,10 @@ def main():
             backend("bestlogit", "maxbias"),
             {"use_assigned_logit": True, "use_max_bias": True},
         ),
+        "bestlogit_recomputevalue": (
+            backend("bestlogit", "recomputevalue"),
+            {"use_assigned_logit": True, "use_recompute_value": True},
+        ),
         "topkey": (
             backend("bestlogit", "topkey"),
             {"use_assigned_logit": True, "use_top_key": True},

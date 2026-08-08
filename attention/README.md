@@ -185,6 +185,10 @@ model still runs full compressed attention over every compressed token.
 - `indirectseedvalue`: for seed-value variants, avoid materializing compressed
   V; full compressed attention gathers original V by seed id. This can be used
   with materialized K or indirect top-key K.
+- `recomputevalue`: materialize exact compressed K and routing bias, skip the
+  merged-V intermediate, and recompute exact merged V inside the full
+  compressed-attention routing kernel. This preserves the hard C4 math and is
+  a memory-traffic experiment.
 
 These variants are benchmark candidates only. Keep the `bestlogit` path above
 as the default until a real-QKV benchmark shows a clear speed gain with

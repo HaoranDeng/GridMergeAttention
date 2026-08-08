@@ -8,6 +8,7 @@ from .hard_route_triton import (
     triton_direct_route_biased_attention,
     triton_direct_route_biased_attention_g2,
     triton_direct_route_indirect_value_attention,
+    triton_direct_route_recompute_value_attention,
     triton_direct_route_seed_key_attention,
     triton_direct_route_top_key_attention,
     triton_hard_route_merge_c4_direct_route,
@@ -58,6 +59,7 @@ _DIRECT_ROUTE_FLAG_SUFFIXES = (
     ("_topvalue", "use_top_value"),
     ("_seedvalue", "use_seed_value"),
     ("_stripe", "use_stripe_assign"),
+    ("_recomputevalue", "use_recompute_value"),
     ("_recompute", "use_recompute_merge"),
     ("_maxbias", "use_max_bias"),
     ("_bestlogit", "use_assigned_logit"),
@@ -110,6 +112,7 @@ class DirectRouteMergeConfig:
     use_fp32_routing_bias: bool = False
     use_mask_assign: bool = False
     use_recompute_merge: bool = False
+    use_recompute_value: bool = False
     use_stripe_assign: bool = False
     use_max_bias: bool = False
     use_seed_key: bool = False
@@ -198,7 +201,7 @@ def parse_direct_route_attention_backend(backend):
         return None
     if block_m not in {16, 32}:
         return None
-    if block_n not in {16, 32, 64}:
+    if block_n not in {4, 16, 32, 64}:
         return None
     if num_warps not in {1, 2}:
         return None
@@ -296,6 +299,7 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         use_assigned_logit=config.use_assigned_logit,
         use_mask_assign=config.use_mask_assign,
         use_recompute_merge=config.use_recompute_merge,
+        use_recompute_value=config.use_recompute_value,
         use_stripe_assign=config.use_stripe_assign,
         use_max_bias=config.use_max_bias,
         use_seed_key=config.use_seed_key,
@@ -447,6 +451,41 @@ def direct_indirect_value_attention(
     )
 
 
+def direct_recompute_value_attention(
+    q,
+    key,
+    source_key,
+    source_value,
+    bias,
+    backend,
+    scale,
+    output=None,
+    assume_contiguous=False,
+):
+    config = _parse_tokenmajor_attention_backend(backend)
+    if config is None:
+        return None
+
+    block_m, block_n, num_warps, num_stages, group_block = config
+    if group_block != 1:
+        return None
+    return triton_direct_route_recompute_value_attention(
+        q,
+        key,
+        source_key,
+        source_value,
+        bias,
+        block_m=block_m,
+        block_n=block_n,
+        scale=scale,
+        num_warps=num_warps,
+        num_stages=num_stages,
+        use_exp2=True,
+        out=output,
+        assume_contiguous=assume_contiguous,
+    )
+
+
 def direct_compressed_attention(
     q,
     key,
@@ -497,6 +536,7 @@ __all__ = [
     "DirectRouteMergeConfig",
     "direct_compressed_attention",
     "direct_indirect_value_attention",
+    "direct_recompute_value_attention",
     "direct_seed_key_attention",
     "direct_top_key_attention",
     "merge_kv_direct_c4",
