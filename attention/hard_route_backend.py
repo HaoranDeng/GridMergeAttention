@@ -36,6 +36,12 @@ _DIRECT_ROUTE_KEY_OUTER_BLOCKS = {
     "f6": 6,
     "f7": 7,
 }
+_DIRECT_ROUTE_LOGIT_PRECISION_SUFFIXES = (
+    ("_bf16x6", "bf16x6"),
+    ("_bf16x3", "bf16x3"),
+    ("_ieee", "ieee"),
+    ("_tf32", "tf32"),
+)
 _DIRECT_ROUTE_FLAG_SUFFIXES = (
     ("_fp32scale", "use_fp32_key_scale"),
     ("_fp32bias", "use_fp32_routing_bias"),
@@ -129,6 +135,7 @@ class DirectRouteMergeConfig:
     block_j_target: int = 32
     merge_num_warps: int = 2
     merge_num_stages: int = 1
+    logit_input_precision: str = "tf32"
     block_l_target: int = 0
     key_outer_block: int = 1
     use_key_outer_kernel: bool = False
@@ -269,6 +276,16 @@ def parse_direct_route_backend(backend):
             backend = match.group("base")
             continue
 
+        for suffix, precision in _DIRECT_ROUTE_LOGIT_PRECISION_SUFFIXES:
+            backend, matched = _remove_suffix(backend, suffix)
+            if matched:
+                options["logit_input_precision"] = precision
+                matched_any_suffix = True
+                break
+
+        if matched_any_suffix:
+            continue
+
         for suffix, field in _DIRECT_ROUTE_FLAG_SUFFIXES:
             backend, matched = _remove_suffix(backend, suffix)
             if matched:
@@ -291,6 +308,8 @@ def parse_direct_route_backend(backend):
     if options["merge_num_warps"] not in {1, 2, 4}:
         supported = False
     if options["merge_num_stages"] not in {1, 2, 3}:
+        supported = False
+    if options["logit_input_precision"] not in {"tf32", "ieee", "bf16x3", "bf16x6"}:
         supported = False
     if options["block_l_target"] not in {0, 64, 128}:
         supported = False
@@ -371,7 +390,7 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         use_exp2=True,
         force_seed_keys=True,
         num_stages=config.merge_num_stages,
-        logit_input_precision="tf32",
+        logit_input_precision=config.logit_input_precision,
         inline_local_seed=config.inline_local_seed,
         key_outer_block=config.key_outer_block,
         use_key_outer_kernel=config.use_key_outer_kernel,

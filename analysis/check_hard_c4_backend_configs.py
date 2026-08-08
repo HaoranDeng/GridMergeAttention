@@ -55,6 +55,18 @@ def main():
             backend("bestlogit", "simplemerge", stages=3),
             {"use_assigned_logit": True, "use_simple_merge": True, "merge_num_stages": 3},
         ),
+        "bestlogit_simplemerge_ieee": (
+            backend("bestlogit", "simplemerge", "ieee"),
+            {"use_assigned_logit": True, "use_simple_merge": True, "logit_input_precision": "ieee"},
+        ),
+        "bestlogit_simplemerge_bf16x3": (
+            backend("bestlogit", "simplemerge", "bf16x3"),
+            {"use_assigned_logit": True, "use_simple_merge": True, "logit_input_precision": "bf16x3"},
+        ),
+        "bestlogit_simplemerge_bf16x6": (
+            backend("bestlogit", "simplemerge", "bf16x6"),
+            {"use_assigned_logit": True, "use_simple_merge": True, "logit_input_precision": "bf16x6"},
+        ),
         "bestlogit_recomputevalue": (
             backend("bestlogit", "recomputevalue"),
             {"use_assigned_logit": True, "use_recompute_value": True},
