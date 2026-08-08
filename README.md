@@ -164,7 +164,8 @@ Useful configs:
   attention grid gets its own C=4 compression. The second step runs full
   compressed core attention with direct Triton routing, avoiding both shared
   compression and exact/local R* sliding-window routing. It uses local-with-ith
-  seed rows and computes those seed rows inside the merge kernel.
+  seed rows, computes those seed rows inside the merge kernel, and writes the
+  intermediate compressed KV in token-major layout for faster merge stores.
 - `configs/token_merging_wan_hard_route_c4_fastseed_outer_exact_r4_fewstep.yaml`:
   backward-compatible alias for old scripts. Despite the historical filename,
   it now uses the same non-shared full-core path as the recommended config.

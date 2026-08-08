@@ -77,6 +77,8 @@ The best accepted direction so far is still:
 - local-with-ith seed selection for lower error than random-with-ith,
 - inline local seed-row computation to avoid reading the seed table in the C4
   merge kernel,
+- token-major intermediate compressed-KV layout, which preserves the same
+  full-attention math but makes merge stores more contiguous,
 - head-major K/V layout for slightly lower merge overhead,
 - direct-route Triton kernels to avoid unnecessary reshape/copy overhead.
 
