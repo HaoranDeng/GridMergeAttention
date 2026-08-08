@@ -67,6 +67,30 @@ _DIRECT_ROUTE_FLAG_SUFFIXES = (
     ("_bf16v", "use_bf16_merged_value"),
     ("_bf16bias", "use_bf16_routing_bias"),
 )
+_INDIRECT_KEY_FLAGS = ("use_indirect_top_key", "use_indirect_top_kv")
+_ORIGINAL_VALUE_FLAGS = (
+    "use_indirect_top_kv",
+    "use_indirect_top3_seed_value",
+    "use_indirect_top3_value",
+    "use_indirect_top2_seed_value",
+    "use_indirect_top2_value",
+    "use_indirect_top_value",
+    "use_indirect_seed_value",
+)
+_INDIRECT_VALUE_FLAGS = (
+    "use_indirect_top3_seed_value",
+    "use_indirect_top3_value",
+    "use_indirect_top2_seed_value",
+    "use_indirect_top2_value",
+    "use_indirect_top_value",
+    "use_indirect_seed_value",
+)
+_WEIGHTED_INDIRECT_VALUE_FLAGS = (
+    "use_indirect_top3_seed_value",
+    "use_indirect_top3_value",
+    "use_indirect_top2_seed_value",
+    "use_indirect_top2_value",
+)
 
 
 @dataclass(frozen=True)
@@ -112,6 +136,25 @@ class DirectRouteMergeConfig:
     use_top2_value: bool = False
     use_top_value: bool = False
     use_seed_value: bool = False
+
+    def _has_any(self, flags):
+        return any(getattr(self, flag) for flag in flags)
+
+    @property
+    def uses_indirect_key(self):
+        return self._has_any(_INDIRECT_KEY_FLAGS)
+
+    @property
+    def uses_original_value(self):
+        return self._has_any(_ORIGINAL_VALUE_FLAGS)
+
+    @property
+    def uses_indirect_value_attention(self):
+        return self._has_any(_INDIRECT_VALUE_FLAGS)
+
+    @property
+    def uses_weighted_indirect_value(self):
+        return self._has_any(_WEIGHTED_INDIRECT_VALUE_FLAGS)
 
 
 def _remove_suffix(text, suffix):

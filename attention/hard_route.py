@@ -37,42 +37,6 @@ _DIRECT_ROUTE_ONLY_FLAGS = (
 )
 
 
-def _uses_indirect_key(config):
-    return config.use_indirect_top_key or config.use_indirect_top_kv
-
-
-def _uses_original_value(config):
-    return (
-        config.use_indirect_top_kv
-        or config.use_indirect_top3_seed_value
-        or config.use_indirect_top3_value
-        or config.use_indirect_top2_seed_value
-        or config.use_indirect_top2_value
-        or config.use_indirect_top_value
-        or config.use_indirect_seed_value
-    )
-
-
-def _uses_indirect_value_attention(config):
-    return (
-        config.use_indirect_top3_seed_value
-        or config.use_indirect_top3_value
-        or config.use_indirect_top2_seed_value
-        or config.use_indirect_top2_value
-        or config.use_indirect_top_value
-        or config.use_indirect_seed_value
-    )
-
-
-def _uses_weighted_indirect_value(config):
-    return (
-        config.use_indirect_top3_seed_value
-        or config.use_indirect_top3_value
-        or config.use_indirect_top2_seed_value
-        or config.use_indirect_top2_value
-    )
-
-
 # ---------------------------------------------------------------------------
 # Seed query selection.
 # ---------------------------------------------------------------------------
@@ -247,11 +211,11 @@ def _route_direct_outputs(
             assume_contiguous=True,
         )
 
-    if _uses_indirect_key(direct_config):
+    if direct_config.uses_indirect_key:
         return direct_top_key_attention(
             q,
             source_key,
-            source_value if _uses_original_value(direct_config) else None,
+            source_value if direct_config.uses_original_value else None,
             key,
             value,
             bias,
@@ -262,13 +226,13 @@ def _route_direct_outputs(
             assume_contiguous=True,
         )
 
-    if _uses_indirect_value_attention(direct_config):
+    if direct_config.uses_indirect_value_attention:
         return direct_indirect_value_attention(
             q,
             key,
             source_value,
             value,
-            key_scale if _uses_weighted_indirect_value(direct_config) else None,
+            key_scale if direct_config.uses_weighted_indirect_value else None,
             bias,
             routing_backend,
             scale,
