@@ -83,15 +83,14 @@ def hard_route_merge_stats(seed_logits, dtype):
     logits = seed_logits.float()
     active_logits = logits.masked_fill(~assigned, torch.finfo(torch.float32).min)
 
-    row_max = active_logits.amax(dim=-1, keepdim=True)
-    probs = torch.exp(active_logits - row_max).masked_fill(~assigned, 0.0)
-    denom = probs.sum(dim=-1, keepdim=True).clamp_min(1e-20)
-    weights = probs / denom
+    log_denom = torch.logsumexp(active_logits, dim=-1, keepdim=True)
+    weights = torch.exp(logits - log_denom).masked_fill(~assigned, 0.0).to(dtype)
 
-    log_denom = row_max.squeeze(-1) + denom.squeeze(-1).log()
-    expected_logit = (weights * logits.masked_fill(~assigned, 0.0)).sum(dim=-1)
-    routing_bias = expected_logit - log_denom
-    return weights.to(dtype), routing_bias, assigned.any(dim=-1)
+    weights_for_bias = weights.float()
+    expected_logit = (weights_for_bias * logits.masked_fill(~assigned, 0.0)).sum(dim=-1)
+    weight_sum = weights_for_bias.sum(dim=-1)
+    routing_bias = expected_logit - log_denom.squeeze(-1) * weight_sum
+    return weights, routing_bias, assigned.any(dim=-1)
 
 
 def merge_kv_from_weights(merge_weights, key, value):
