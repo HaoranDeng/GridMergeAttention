@@ -506,6 +506,22 @@ def parse_variant_names(text):
     return [name for name in (text or "").replace(",", " ").split() if name]
 
 
+def load_smoke_variant_errors(path):
+    """Return {variant_name: error} entries from a previous smoke JSON."""
+    if not path:
+        return {}
+    smoke_path = Path(path)
+    if not smoke_path.exists():
+        return {}
+    payload = json.loads(smoke_path.read_text(encoding="utf-8"))
+    results = payload.get("results", {})
+    return {
+        name: str(result["error"])
+        for name, result in results.items()
+        if isinstance(result, dict) and result.get("error")
+    }
+
+
 def sync():
     if torch.cuda.is_available():
         torch.cuda.synchronize()
@@ -536,6 +552,8 @@ def install_probe(stats, args):
 
     all_variants = exact_variants()
     selected = parse_variant_names(args.variants)
+    smoke_variant_errors = load_smoke_variant_errors(args.skip_variant_errors_from_json)
+    skipped_from_smoke = {}
     if selected:
         variants = {}
         missing = []
@@ -543,12 +561,19 @@ def install_probe(stats, args):
             variant = resolve_variant(name, all_variants)
             if variant is None:
                 missing.append(name)
+            elif name in smoke_variant_errors:
+                skipped_from_smoke[name] = smoke_variant_errors[name]
             else:
                 variants[name] = variant
         if missing:
             raise ValueError(f"unknown variants: {', '.join(missing)}")
     else:
-        variants = all_variants
+        variants = {}
+        for name, variant in all_variants.items():
+            if name in smoke_variant_errors:
+                skipped_from_smoke[name] = smoke_variant_errors[name]
+            else:
+                variants[name] = variant
     if not args.skip_baseline and "hard_c4_baseline" not in variants:
         variants = {"hard_c4_baseline": all_variants["hard_c4_baseline"], **variants}
 
@@ -558,6 +583,7 @@ def install_probe(stats, args):
         "warmed": False,
         "intermediate_estimates": {},
         "disabled_variants": set(),
+        "skipped_variants_from_smoke": skipped_from_smoke,
         "variant_errors": {},
     }
 
@@ -703,6 +729,11 @@ def parse_args():
         default="",
         help="Comma-separated subset. Empty runs all exact variants.",
     )
+    parser.add_argument(
+        "--skip_variant_errors_from_json",
+        default="",
+        help="Optional smoke JSON. Variants with an error in that JSON are skipped.",
+    )
     parser.add_argument("--output_json", required=True)
     return parser.parse_args()
 
@@ -764,6 +795,7 @@ def main():
         "query_outer_chunk": args.query_outer_chunk,
         "wall_seconds": wall_seconds,
         "variants": variant_summaries,
+        "skipped_variants_from_smoke": probe_state["skipped_variants_from_smoke"],
         "variant_errors": probe_state["variant_errors"],
     }
     output_path = Path(args.output_json)

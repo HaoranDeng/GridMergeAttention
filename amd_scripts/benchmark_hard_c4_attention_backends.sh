@@ -42,6 +42,7 @@ NUM_PROMPTS="${NUM_PROMPTS:-1}"
 VARIANTS="${VARIANTS:-hard_c4_bestlogit_tokenmajor}"
 QUERY_OUTER_CHUNK="${QUERY_OUTER_CHUNK:-10}"
 SKIP_BASELINE="${SKIP_BASELINE:-0}"
+SKIP_VARIANT_ERRORS_JSON="${SKIP_VARIANT_ERRORS_JSON:-}"
 SEED="${SEED:-0}"
 DTYPE="${DTYPE:-bf16}"
 GPU_ID="${GPU_ID:-0}"
@@ -59,6 +60,7 @@ echo "  max calls: ${MAX_CALLS}"
 echo "  prompts:   ${NUM_PROMPTS}"
 echo "  variants:  ${VARIANTS}"
 echo "  skip baseline: ${SKIP_BASELINE}"
+echo "  skip variant errors json: ${SKIP_VARIANT_ERRORS_JSON:-<none>}"
 echo "  output:    ${OUTPUT_JSON}"
 echo "  triton cache: ${TRITON_CACHE_DIR}"
 
@@ -66,6 +68,10 @@ baseline_args=()
 case "${SKIP_BASELINE,,}" in
   1|true|yes|y) baseline_args+=(--skip_baseline) ;;
 esac
+smoke_error_args=()
+if [ -n "${SKIP_VARIANT_ERRORS_JSON}" ]; then
+  smoke_error_args+=(--skip_variant_errors_from_json "${SKIP_VARIANT_ERRORS_JSON}")
+fi
 
 HIP_VISIBLE_DEVICES="${GPU_ID}" ROCR_VISIBLE_DEVICES="${GPU_ID}" CUDA_VISIBLE_DEVICES="${GPU_ID}" \
 PYTHONUNBUFFERED=1 \
@@ -81,4 +87,5 @@ python analysis/hard_route_nonshared_backend_real_qkv.py \
   --variants "${VARIANTS}" \
   --seed "${SEED}" \
   "${baseline_args[@]}" \
+  "${smoke_error_args[@]}" \
   --output_json "${OUTPUT_JSON}"
