@@ -203,6 +203,24 @@ def _direct_route_merge(q, seed_rows, k, v, backend, scale):
         use_assigned_logit=use_assigned_logit,
     )
 
+
+def _uses_direct_route_merge_backend(backend):
+    backend = (backend or "").lower()
+    if backend.endswith("_inline_local_seed"):
+        backend = backend[: -len("_inline_local_seed")]
+    token_major_output = backend.endswith("_tokenmajor")
+    if token_major_output:
+        backend = backend[: -len("_tokenmajor")]
+    if backend.endswith("_f2"):
+        backend = backend[: -len("_f2")]
+    if backend.endswith("_bestlogit"):
+        backend = backend[: -len("_bestlogit")]
+    return (
+        token_major_output
+        and backend == "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
+    )
+
+
 def hard_route_compressed_attention(query, key, value, bias, backend, scale):
     backend = (backend or "sdpa").lower()
     if backend == "sdpa":
@@ -281,7 +299,8 @@ def hard_route_attention(
             seed_mode,
         )
 
-    direct_merge = _direct_route_merge(q, seed_rows, k, v, hard_route_backend, scale)
+    q_direct = q.contiguous() if _uses_direct_route_merge_backend(hard_route_backend) else q
+    direct_merge = _direct_route_merge(q_direct, seed_rows, k, v, hard_route_backend, scale)
     if direct_merge is None:
         if seed_rows is None:
             seed_rows = _build_seed_rows(
@@ -311,7 +330,7 @@ def hard_route_attention(
         key, value, bias, cluster_has_keys = direct_merge
         del cluster_has_keys
         direct_out = hard_route_direct_compressed_attention(
-            q,
+            q_direct,
             key,
             value,
             bias,
@@ -321,7 +340,7 @@ def hard_route_attention(
         )
         if direct_out is not None:
             return direct_out
-        query = rearrange(q, "b a i j h d -> (b h a j) i d")
+        query = rearrange(q_direct, "b a i j h d -> (b h a j) i d")
 
     out = hard_route_compressed_attention(
         query,
