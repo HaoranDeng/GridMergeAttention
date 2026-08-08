@@ -361,6 +361,7 @@ if triton is not None:
         SEED_KEY: tl.constexpr,
         TOP_KV: tl.constexpr,
         TOP_KEY: tl.constexpr,
+        TOP_KEY_SCALE: tl.constexpr,
         TOP_VALUE: tl.constexpr,
         SEED_VALUE: tl.constexpr,
         SEED_KEY_BIAS_MATCH: tl.constexpr,
@@ -584,7 +585,13 @@ if triton is not None:
                     other=0.0,
                 )
                 merged_value = tl.dot(weights.to(value_block.dtype), value_block)
-                routing_bias = row_max - log_denom
+                if TOP_KEY_SCALE:
+                    expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
+                    safe_row_max = tl.where(tl.abs(row_max) > 1.0e-20, row_max, 1.0)
+                    merged_key = merged_key * (expected_logit / safe_row_max)[:, None]
+                    routing_bias = expected_logit - log_denom
+                else:
+                    routing_bias = row_max - log_denom
             elif TOP_VALUE:
                 merged_value = tl.load(
                     value_base + top_key[:, None] * H * D_HEAD + dim_offsets[None, :],
@@ -720,6 +727,7 @@ if triton is not None:
         SEED_KEY: tl.constexpr,
         TOP_KV: tl.constexpr,
         TOP_KEY: tl.constexpr,
+        TOP_KEY_SCALE: tl.constexpr,
         TOP_VALUE: tl.constexpr,
         SEED_VALUE: tl.constexpr,
         SEED_KEY_BIAS_MATCH: tl.constexpr,
@@ -913,7 +921,13 @@ if triton is not None:
                     other=0.0,
                 )
                 merged_value = tl.dot(weights.to(value_block.dtype), value_block)
-                routing_bias = row_max - log_denom
+                if TOP_KEY_SCALE:
+                    expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
+                    safe_row_max = tl.where(tl.abs(row_max) > 1.0e-20, row_max, 1.0)
+                    merged_key = merged_key * (expected_logit / safe_row_max)[:, None]
+                    routing_bias = expected_logit - log_denom
+                else:
+                    routing_bias = row_max - log_denom
             elif TOP_VALUE:
                 merged_value = tl.load(
                     value_base + top_key[:, None] * H * D_HEAD + dim_offsets[None, :],
@@ -2431,6 +2445,7 @@ def triton_hard_route_merge_c4_direct_route(
     use_seed_key_affine_scale=False,
     use_top_kv=False,
     use_top_key=False,
+    use_top_key_scale=False,
     use_top_value=False,
     use_seed_value=False,
     key_scale_dtype=None,
@@ -2585,6 +2600,8 @@ def triton_hard_route_merge_c4_direct_route(
         raise ValueError("top-KV routing is not implemented for key-outer C4 merge.")
     if use_top_key and not force_seed_keys:
         raise ValueError("top-key routing requires force_seed_keys=True.")
+    if use_top_key_scale and not use_top_key:
+        raise ValueError("top-key scaling requires top-key routing.")
     if use_top_key and use_seed_key:
         raise ValueError("top-key routing writes compressed keys and cannot be combined with seed-key routing.")
     if use_top_key and (use_top_kv or use_top_value or use_seed_value):
@@ -2751,6 +2768,7 @@ def triton_hard_route_merge_c4_direct_route(
         SEED_KEY=bool(use_seed_key),
         TOP_KV=bool(use_top_kv),
         TOP_KEY=bool(use_top_key),
+        TOP_KEY_SCALE=bool(use_top_key_scale),
         TOP_VALUE=bool(use_top_value),
         SEED_VALUE=bool(use_seed_value),
         SEED_KEY_BIAS_MATCH=bool(use_seed_key_bias_match),

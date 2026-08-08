@@ -120,6 +120,8 @@ model still runs full compressed attention over every compressed token.
 
 - `topkey`: compressed K is the top-logit original key in the seed cluster;
   compressed V still uses the normal softmax merge.
+- `topkeyscale`: like `topkey`, but scales the top key so the seed query sees
+  the same expected logit as the normal softmax-merged K.
 - `topvalue`: compressed K still uses the normal softmax merge; compressed V is
   the top-logit original value in the seed cluster.
 - `topkv`: compressed K and V are both the top-logit original token in the seed

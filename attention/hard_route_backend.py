@@ -38,6 +38,7 @@ _DIRECT_ROUTE_FLAG_SUFFIXES = (
     ("_seedkeymatch", ("use_seed_key", "use_seed_key_bias_match")),
     ("_seedkey", "use_seed_key"),
     ("_topkv", "use_top_kv"),
+    ("_topkeyscale", ("use_top_key", "use_top_key_scale")),
     ("_topkey", "use_top_key"),
     ("_topvalue", "use_top_value"),
     ("_seedvalue", "use_seed_value"),
@@ -78,6 +79,7 @@ class DirectRouteMergeConfig:
     use_seed_key_affine_scale: bool = False
     use_top_kv: bool = False
     use_top_key: bool = False
+    use_top_key_scale: bool = False
     use_top_value: bool = False
     use_seed_value: bool = False
 
@@ -150,6 +152,7 @@ def parse_direct_route_backend(backend):
         "use_seed_key_affine_scale": False,
         "use_top_kv": False,
         "use_top_key": False,
+        "use_top_key_scale": False,
         "use_top_value": False,
         "use_seed_value": False,
     }
@@ -243,6 +246,7 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         use_seed_key_affine_scale=config.use_seed_key_affine_scale,
         use_top_kv=config.use_top_kv,
         use_top_key=config.use_top_key,
+        use_top_key_scale=config.use_top_key_scale,
         use_top_value=config.use_top_value,
         use_seed_value=config.use_seed_value,
         key_scale_dtype=torch.float32 if config.use_fp32_key_scale else None,
