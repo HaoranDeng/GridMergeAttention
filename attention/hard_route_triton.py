@@ -569,6 +569,7 @@ if triton is not None:
         BLOCK_L: tl.constexpr,
         BLOCK_D: tl.constexpr,
         SCORE_SCALE: tl.constexpr,
+        KEY_OUTER_BLOCK: tl.constexpr,
         USE_ASSIGNED_LOGIT: tl.constexpr,
     ):
         group_id = tl.program_id(0)
@@ -578,7 +579,7 @@ if triton is not None:
         tmp = group_id // H
         key_row = tmp % K_ROWS
         tmp = tmp // K_ROWS
-        key_outer_pair = tmp % F_GROUPS
+        key_outer_group = tmp % F_GROUPS
         tmp = tmp // F_GROUPS
         query_outer = tmp % A
         batch = tmp // A
@@ -636,8 +637,8 @@ if triton is not None:
             other=0.0,
         )
 
-        for key_outer_delta in tl.static_range(0, 2):
-            key_outer = key_outer_pair * 2 + key_outer_delta
+        for key_outer_delta in tl.static_range(0, KEY_OUTER_BLOCK):
+            key_outer = key_outer_group * KEY_OUTER_BLOCK + key_outer_delta
             valid_outer = key_outer < F
 
             key_base = (((batch * F + key_outer) * K_ROWS + key_row) * L * H + head) * D_HEAD
@@ -1316,11 +1317,11 @@ def triton_hard_route_merge_c4_direct_route(
     )
 
     key_outer_block = int(key_outer_block)
-    if key_outer_block not in (1, 2):
-        raise ValueError(f"key_outer_block must be 1 or 2, got {key_outer_block}.")
+    if key_outer_block not in (1, 2, 4):
+        raise ValueError(f"key_outer_block must be 1, 2, or 4, got {key_outer_block}.")
     if use_assigned_logit and not force_seed_keys:
         raise ValueError("use_assigned_logit currently requires force_seed_keys=True.")
-    if key_outer_block == 2 and (
+    if key_outer_block in (2, 4) and (
         (not inline_local_seed)
         or block_j != 32
         or int(num_warps) != 2
@@ -1332,12 +1333,12 @@ def triton_hard_route_merge_c4_direct_route(
         or logit_input_precision != "tf32"
     ):
         raise ValueError(
-            "key_outer_block=2 is specialized for the current token-major "
+            "key_outer_block > 1 is specialized for the current token-major "
             "inline-local-seed hard C4 fast path."
         )
 
-    if key_outer_block == 2:
-        key_outer_groups = triton.cdiv(key_outer, 2)
+    if key_outer_block in (2, 4):
+        key_outer_groups = triton.cdiv(key_outer, key_outer_block)
         grid = (
             batch * query_outer * key_outer_groups * key_rows * heads,
             triton.cdiv(query_columns, block_j),
@@ -1363,6 +1364,7 @@ def triton_hard_route_merge_c4_direct_route(
             BLOCK_L=block_l,
             BLOCK_D=block_d,
             SCORE_SCALE=float(scale),
+            KEY_OUTER_BLOCK=key_outer_block,
             USE_ASSIGNED_LOGIT=bool(use_assigned_logit),
             num_warps=2,
             num_stages=1,

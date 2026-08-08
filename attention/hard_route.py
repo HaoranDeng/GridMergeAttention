@@ -44,6 +44,10 @@ def _parse_direct_route_backend(backend):
             backend = backend[: -len("_f2")]
             key_outer_block = 2
             changed = True
+        if backend.endswith("_f4"):
+            backend = backend[: -len("_f4")]
+            key_outer_block = 4
+            changed = True
         if backend.endswith("_bestlogit"):
             backend = backend[: -len("_bestlogit")]
             use_assigned_logit = True
