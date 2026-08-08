@@ -19,14 +19,12 @@ LAYOUT_SELECT_ROUTE = "select_route"
 LAYOUT_HARD_ROUTE_TRANSPOSE = "hard_route_transpose"
 LAYOUT_SELECT_ROUTE_TRANSPOSE = "select_route_transpose"
 
-LOCAL_LAYOUTS = {
+SUPPORTED_LAYOUTS = {
     LAYOUT_HARD_ROUTE,
     LAYOUT_SELECT_ROUTE,
     LAYOUT_HARD_ROUTE_TRANSPOSE,
     LAYOUT_SELECT_ROUTE_TRANSPOSE,
 }
-SUPPORTED_LAYOUTS = LOCAL_LAYOUTS
-DEFAULT_GRID_LAYOUTS = {LAYOUT_HARD_ROUTE, LAYOUT_SELECT_ROUTE}
 HARD_ROUTE_LAYOUTS = {
     LAYOUT_HARD_ROUTE,
     LAYOUT_HARD_ROUTE_TRANSPOSE,
@@ -39,6 +37,18 @@ LAYOUT_ALIASES = {
     "query_row_key_column": LAYOUT_HARD_ROUTE_TRANSPOSE,
     "query_row_key_column_select": LAYOUT_SELECT_ROUTE_TRANSPOSE,
 }
+ONE_TOKEN_IMPLS = {
+    LAYOUT_HARD_ROUTE: gridmerge_one,
+    LAYOUT_SELECT_ROUTE: gridmerge_one,
+    LAYOUT_HARD_ROUTE_TRANSPOSE: gridmerge_one_transpose,
+    LAYOUT_SELECT_ROUTE_TRANSPOSE: gridmerge_one_transpose,
+}
+MULTI_TOKEN_IMPLS = {
+    LAYOUT_HARD_ROUTE: hard_route_attention,
+    LAYOUT_SELECT_ROUTE: select_route_attention,
+    LAYOUT_HARD_ROUTE_TRANSPOSE: hard_route_attention_transpose,
+    LAYOUT_SELECT_ROUTE_TRANSPOSE: select_route_attention_transpose,
+}
 
 
 def normalize_layout(layout):
@@ -47,23 +57,48 @@ def normalize_layout(layout):
 
 
 def _local_attention_impl(layout, num_merge_tokens):
-    if num_merge_tokens > 1:
-        return {
-            LAYOUT_HARD_ROUTE: hard_route_attention,
-            LAYOUT_SELECT_ROUTE: select_route_attention,
-            LAYOUT_HARD_ROUTE_TRANSPOSE: hard_route_attention_transpose,
-            LAYOUT_SELECT_ROUTE_TRANSPOSE: select_route_attention_transpose,
-        }[layout]
-
-    if layout in DEFAULT_GRID_LAYOUTS:
-        return gridmerge_one
-    return gridmerge_one_transpose
+    impls = MULTI_TOKEN_IMPLS if num_merge_tokens > 1 else ONE_TOKEN_IMPLS
+    return impls[layout]
 
 
 def _can_write_directly_to_output(layout, hard_route_routing_backend):
     return (
         layout == LAYOUT_HARD_ROUTE
         and str(hard_route_routing_backend).startswith("triton_direct_")
+    )
+
+
+def _run_hard_route_chunk(
+    attention_impl,
+    layout,
+    q_chunk,
+    k_blocks,
+    v_blocks,
+    scale,
+    num_merge_tokens,
+    seed_mode,
+    seed,
+    query_outer_offset,
+    hard_route_backend,
+    hard_route_routing_backend,
+    out_slice,
+):
+    kwargs = {}
+    if _can_write_directly_to_output(layout, hard_route_routing_backend):
+        kwargs["output"] = out_slice
+
+    return attention_impl(
+        q_chunk,
+        k_blocks,
+        v_blocks,
+        scale,
+        num_merge_tokens,
+        seed_mode,
+        seed,
+        query_outer_offset,
+        hard_route_backend,
+        hard_route_routing_backend,
+        **kwargs,
     )
 
 
@@ -82,25 +117,33 @@ def _run_multi_token_chunk(
     hard_route_routing_backend,
     out_slice,
 ):
-    common_args = (
-        q_chunk,
-        k_blocks,
-        v_blocks,
-        scale,
-        num_merge_tokens,
-        seed_mode,
-        seed,
-        query_outer_offset,
-    )
-
     if layout in HARD_ROUTE_LAYOUTS:
-        hard_route_args = (*common_args, hard_route_backend, hard_route_routing_backend)
-        if _can_write_directly_to_output(layout, hard_route_routing_backend):
-            chunk = attention_impl(*hard_route_args, output=out_slice)
-        else:
-            chunk = attention_impl(*hard_route_args)
+        chunk = _run_hard_route_chunk(
+            attention_impl,
+            layout,
+            q_chunk,
+            k_blocks,
+            v_blocks,
+            scale,
+            num_merge_tokens,
+            seed_mode,
+            seed,
+            query_outer_offset,
+            hard_route_backend,
+            hard_route_routing_backend,
+            out_slice,
+        )
     else:
-        chunk = attention_impl(*common_args)
+        chunk = attention_impl(
+            q_chunk,
+            k_blocks,
+            v_blocks,
+            scale,
+            num_merge_tokens,
+            seed_mode,
+            seed,
+            query_outer_offset,
+        )
 
     if chunk is not out_slice:
         out_slice.copy_(chunk)
@@ -171,10 +214,6 @@ def token_merging_attn(
     num_merge_tokens = int(num_merge_tokens)
     if num_merge_tokens < 1:
         raise ValueError(f"num_merge_tokens must be >= 1, got {num_merge_tokens!r}.")
-    if num_merge_tokens > 1 and layout not in LOCAL_LAYOUTS:
-        raise ValueError(
-            "multi-token merging is currently implemented only for grid layouts."
-        )
 
     original_h = int(h)
     original_w = int(w)

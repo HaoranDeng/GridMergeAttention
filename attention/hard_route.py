@@ -21,6 +21,12 @@ from .hard_route_triton import (
 
 
 _SEED_ROWS_CACHE = {}
+
+
+# ---------------------------------------------------------------------------
+# Triton backend name parsing.
+# The PyTorch algorithm starts below at assign_keys_to_seeds().
+# ---------------------------------------------------------------------------
 _DIRECT_ROUTE_C4_BASE = "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
 _DIRECT_ROUTE_ATTENTION_RE = re.compile(
     r"^triton_direct_m(?P<m>\d+)_n(?P<n>\d+)_w(?P<w>\d+)_s(?P<s>\d+)_exp2$"
@@ -38,10 +44,19 @@ _DIRECT_ROUTE_KEY_OUTER_BLOCKS = {
     "f6": 6,
     "f7": 7,
 }
+_DIRECT_ROUTE_FLAG_SUFFIXES = (
+    ("_bestlogit", "use_assigned_logit"),
+    ("_bf16kv", ("use_bf16_merged_key", "use_bf16_merged_value")),
+    ("_bf16k", "use_bf16_merged_key"),
+    ("_bf16v", "use_bf16_merged_value"),
+    ("_bf16bias", "use_bf16_routing_bias"),
+)
 
 
 @dataclass(frozen=True)
 class DirectRouteMergeConfig:
+    """Options encoded in one direct-route C4 backend string."""
+
     supported: bool
     inline_local_seed: bool = False
     key_outer_block: int = 1
@@ -56,6 +71,14 @@ def _remove_suffix(text, suffix):
     if text.endswith(suffix):
         return text[: -len(suffix)], True
     return text, False
+
+
+def _set_option(options, field):
+    if isinstance(field, tuple):
+        for item in field:
+            options[item] = True
+    else:
+        options[field] = True
 
 
 def uses_inline_local_seed_backend(backend):
@@ -89,56 +112,41 @@ def _parse_direct_route_backend(backend):
     backend, inline_local_seed = _remove_suffix(backend, "_inline_local_seed")
     backend, token_major_output = _remove_suffix(backend, "_tokenmajor")
 
-    key_outer_block = 1
-    use_key_outer_kernel = False
-    use_assigned_logit = False
-    use_bf16_merged_key = False
-    use_bf16_merged_value = False
-    use_bf16_routing_bias = False
-    changed = True
-    while changed:
-        changed = False
+    options = {
+        "key_outer_block": 1,
+        "use_key_outer_kernel": False,
+        "use_assigned_logit": False,
+        "use_bf16_merged_key": False,
+        "use_bf16_merged_value": False,
+        "use_bf16_routing_bias": False,
+    }
+    while True:
         for suffix, block in _DIRECT_ROUTE_KEY_OUTER_BLOCKS.items():
             token = f"_{suffix}"
             backend, matched = _remove_suffix(backend, token)
             if matched:
-                key_outer_block = block
-                use_key_outer_kernel = True
-                changed = True
-        backend, matched = _remove_suffix(backend, "_bestlogit")
-        if matched:
-            use_assigned_logit = True
-            changed = True
-        backend, matched = _remove_suffix(backend, "_bf16kv")
-        if matched:
-            use_bf16_merged_key = True
-            use_bf16_merged_value = True
-            changed = True
-        backend, matched = _remove_suffix(backend, "_bf16k")
-        if matched:
-            use_bf16_merged_key = True
-            changed = True
-        backend, matched = _remove_suffix(backend, "_bf16v")
-        if matched:
-            use_bf16_merged_value = True
-            changed = True
-        backend, matched = _remove_suffix(backend, "_bf16bias")
-        if matched:
-            use_bf16_routing_bias = True
-            changed = True
+                options["key_outer_block"] = block
+                options["use_key_outer_kernel"] = True
+                break
+        else:
+            for token, field in _DIRECT_ROUTE_FLAG_SUFFIXES:
+                backend, matched = _remove_suffix(backend, token)
+                if matched:
+                    _set_option(options, field)
+                    break
+            else:
+                break
 
     return DirectRouteMergeConfig(
         supported=token_major_output and backend == _DIRECT_ROUTE_C4_BASE,
         inline_local_seed=inline_local_seed,
-        key_outer_block=key_outer_block,
-        use_key_outer_kernel=use_key_outer_kernel,
-        use_assigned_logit=use_assigned_logit,
-        use_bf16_merged_key=use_bf16_merged_key,
-        use_bf16_merged_value=use_bf16_merged_value,
-        use_bf16_routing_bias=use_bf16_routing_bias,
+        **options,
     )
 
 
+# ---------------------------------------------------------------------------
+# Seed query selection.
+# ---------------------------------------------------------------------------
 def _cached_seed_rows(
     device,
     query_outer_offset,
@@ -209,8 +217,15 @@ def _build_seed_rows(
     )
 
 
+# ---------------------------------------------------------------------------
+# Readable PyTorch hard-route implementation.
+# ---------------------------------------------------------------------------
 def assign_keys_to_seeds(seed_logits):
-    """Return a boolean [B, H, A, F, K, J, C, L] key-to-seed assignment mask."""
+    """Assign every key column to its best seed query.
+
+    seed_logits: [B, H, A, F, K, J, C, L], where C is the seed index and L is
+    the key-column index inside one hard-route block.
+    """
     num_seeds = seed_logits.size(-2)
     num_keys = seed_logits.size(-1)
 
@@ -245,7 +260,15 @@ def hard_route_merge_weights(seed_logits, dtype):
     return merge_weights, merge_logprob, cluster_has_keys
 
 
-def _torch_hard_route_merge(seed_queries, k, v, scale):
+def _pytorch_merge_kv(seed_queries, k, v, scale):
+    """Reference implementation of the first hard-route stage.
+
+    For each fixed (query_outer, key_outer, query_column, key_row) block:
+    1. score C seed queries against all L keys,
+    2. assign each key to one seed,
+    3. softmax-merge K/V inside each assigned cluster,
+    4. return the entropy/log-normalizer correction as routing_bias.
+    """
     # seed_queries: [B, A, F, K, J, C, H, D]
     # k/v:          [B, F, K, L, H, D]
     # seed_logits:  [B, H, A, F, K, J, C, L]
@@ -261,10 +284,13 @@ def _torch_hard_route_merge(seed_queries, k, v, scale):
     return merged_keys, merged_values, routing_bias, cluster_has_keys
 
 
-def _merge_kv_with_backend(seed_queries, k, v, backend, scale):
+# ---------------------------------------------------------------------------
+# Backend dispatch and public attention entry point.
+# ---------------------------------------------------------------------------
+def _merge_kv(seed_queries, k, v, backend, scale):
     backend = (backend or "sdpa").lower()
     if backend == "sdpa":
-        return _torch_hard_route_merge(seed_queries, k, v, scale)
+        return _pytorch_merge_kv(seed_queries, k, v, scale)
     if backend == "triton":
         return triton_hard_route_merge(seed_queries, k, v, scale=scale)
     if backend == "triton_c4":
@@ -277,7 +303,7 @@ def _merge_kv_with_backend(seed_queries, k, v, backend, scale):
     )
 
 
-def _direct_route_merge(q, seed_rows, k, v, config, scale, assume_contiguous=False):
+def _merge_kv_direct_c4(q, seed_rows, k, v, config, scale, assume_contiguous=False):
     return triton_hard_route_merge_c4_direct_route(
         q,
         seed_rows,
@@ -302,6 +328,7 @@ def _direct_route_merge(q, seed_rows, k, v, config, scale, assume_contiguous=Fal
 
 
 def hard_route_compressed_attention(query, key, value, bias, backend, scale):
+    """Second hard-route stage: full attention over compressed KV tokens."""
     backend = (backend or "sdpa").lower()
     if backend == "sdpa":
         return biased_sdpa(query, key, value, bias, scale=scale)
@@ -361,10 +388,10 @@ def _restore_attention_blocks(out, q):
 
 
 def _run_reference_path(q, k, v, scale, seed_rows, hard_route_backend, hard_route_routing_backend):
-    """Readable PyTorch/reference path: gather seeds, merge KV, then attend."""
+    """Readable path: gather seed queries, merge KV, then run full attention."""
     query = rearrange(q, "b a i j h d -> (b h a j) i d")
     seed_queries = gather_seed_queries(q, seed_rows)
-    merged_keys, merged_values, routing_bias, _ = _merge_kv_with_backend(
+    merged_keys, merged_values, routing_bias, _ = _merge_kv(
         seed_queries,
         k,
         v,
@@ -388,7 +415,7 @@ def _run_reference_path(q, k, v, scale, seed_rows, hard_route_backend, hard_rout
 def _run_direct_path(q, k, v, scale, seed_rows, direct_config, hard_route_routing_backend, output):
     """Optimized C4 path: Triton merge writes routing-ready token-major KV."""
     q = q.contiguous()
-    key, value, bias, _ = _direct_route_merge(
+    key, value, bias, _ = _merge_kv_direct_c4(
         q,
         seed_rows,
         k,

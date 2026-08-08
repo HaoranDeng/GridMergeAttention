@@ -10,7 +10,12 @@ from .hard_route import hard_route_compressed_attention, hard_route_merge_weight
 from .hard_route_triton import triton_hard_route_merge, triton_hard_route_merge_c4
 
 
-def _torch_merge(seed_queries, k, v, scale):
+def _pytorch_merge_kv_transpose(seed_queries, k, v, scale):
+    """Reference transpose merge.
+
+    The normal hard-route block is 30 queries x 52 keys. The transpose block is
+    52 queries x 30 keys, so C seed query columns merge key rows instead.
+    """
     seed_logits = torch.einsum("bafilchd,bfklhd->bhafilck", seed_queries, k).float()
     seed_logits = seed_logits * float(scale)
     merge_weights, merge_logprob, _ = hard_route_merge_weights(seed_logits, k.dtype)
@@ -21,7 +26,7 @@ def _torch_merge(seed_queries, k, v, scale):
     return merged_keys, merged_values, routing_bias
 
 
-def _triton_merge(seed_queries, k, v, scale, use_c4_kernel=False, block_j_target=8):
+def _triton_merge_kv_transpose(seed_queries, k, v, scale, use_c4_kernel=False, block_j_target=8):
     # Reuse the row-routing Triton kernel by treating original key columns as
     # fixed key rows and original key rows as the merged key-token dimension.
     seed_queries_for_kernel = rearrange(
@@ -54,13 +59,20 @@ def _triton_merge(seed_queries, k, v, scale, use_c4_kernel=False, block_j_target
 def _merge(seed_queries, k, v, backend, scale):
     backend = (backend or "sdpa").lower()
     if backend == "sdpa":
-        return _torch_merge(seed_queries, k, v, scale)
+        return _pytorch_merge_kv_transpose(seed_queries, k, v, scale)
     if backend == "triton":
-        return _triton_merge(seed_queries, k, v, scale)
+        return _triton_merge_kv_transpose(seed_queries, k, v, scale)
     if backend == "triton_c4":
-        return _triton_merge(seed_queries, k, v, scale, use_c4_kernel=True)
+        return _triton_merge_kv_transpose(seed_queries, k, v, scale, use_c4_kernel=True)
     if backend == "triton_c4_j16":
-        return _triton_merge(seed_queries, k, v, scale, use_c4_kernel=True, block_j_target=16)
+        return _triton_merge_kv_transpose(
+            seed_queries,
+            k,
+            v,
+            scale,
+            use_c4_kernel=True,
+            block_j_target=16,
+        )
     raise ValueError(
         f"unsupported hard_route_backend={backend!r}; expected 'sdpa', 'triton', "
         "'triton_c4', or 'triton_c4_j16'."

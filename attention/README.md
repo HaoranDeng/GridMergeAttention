@@ -77,6 +77,10 @@ With `layout: hard_route` and `num_merge_tokens=C`, each block:
 3. Softmax-merges one key/value token per seed cluster.
 4. Runs full compressed attention from all queries to all compressed KV tokens.
 
+In `hard_route.py`, `hard_route_backend: sdpa` is the readable PyTorch
+reference merge. Triton backends implement the same two-stage algorithm but
+replace the merge and/or compressed-attention stages with kernels.
+
 The current recommended C4 config keeps the original index-matched query as one
 seed:
 
