@@ -20,7 +20,7 @@ token_merging_args:
   w_reduce: 1
   layout: hard_route
   q_init: ith
-  query_outer_chunk: 7
+  query_outer_chunk: 10
   num_merge_tokens: 4
   seed_mode: local_with_ith
   seed: 0

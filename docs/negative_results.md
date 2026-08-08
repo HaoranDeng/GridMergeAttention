@@ -103,6 +103,19 @@ check before launching another speed/quality sweep.
   reduced tiling overhead.
 - Rule: keep `j32_w2` for the current token-major hard C4 merge path.
 
+### Whole-Outer `query_outer_chunk=21`
+
+- Result: unsafe for the current no-headmajor token-major hard C4 path.
+- Change tested: process all 21 query outer groups in one chunk while keeping
+  the same C4 merge and full compressed attention.
+- Evidence: Slurm job `366526` hit a Triton illegal memory access while running
+  the `chunk=21` case in
+  `analysis/hard_c4_nohead_chunk_sweep_20260808`.
+- Why not repeat directly: the current direct-route Triton path is not stable
+  with the whole outer dimension in one chunk.
+- Rule: do not set `query_outer_chunk=21` for the current hard C4 fast path
+  unless the routing/merge kernel indexing is changed and revalidated.
+
 ## Current Best Direction
 
 The best accepted direction so far is still:
@@ -116,6 +129,8 @@ The best accepted direction so far is still:
   full-attention math but makes merge stores more contiguous,
 - no-headmajor K/V input for the current token-major `m32_n16` path, which was
   slightly faster than the head-major variant while producing identical error,
+- `query_outer_chunk=10`, which was the fastest confirmed safe chunk size in
+  `analysis/hard_c4_nohead_chunk_confirm_20260808`,
 - direct-route Triton kernels to avoid unnecessary reshape/copy overhead.
 
 This direction improves the old hard C4 implementation substantially, but it
