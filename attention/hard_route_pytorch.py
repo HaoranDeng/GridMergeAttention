@@ -87,7 +87,7 @@ def hard_route_merge_stats(seed_logits, dtype):
     weights = torch.exp(logits - log_denom).masked_fill(~assigned, 0.0).to(dtype)
 
     weights_for_bias = weights.float()
-    expected_logit = (weights_for_bias * logits.masked_fill(~assigned, 0.0)).sum(dim=-1)
+    expected_logit = (weights_for_bias * logits).sum(dim=-1)
     weight_sum = weights_for_bias.sum(dim=-1)
     routing_bias = expected_logit - log_denom.squeeze(-1) * weight_sum
     return weights, routing_bias, assigned.any(dim=-1)
