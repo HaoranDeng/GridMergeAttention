@@ -7,6 +7,7 @@ from pathlib import Path
 import torch
 from omegaconf import OmegaConf
 
+from attention.hard_route import _parse_direct_route_backend
 from generate import load_generator_checkpoint, load_prompts
 from pipeline import TokenMergingWanPipeline
 from utils.misc import set_seed
@@ -36,6 +37,50 @@ def exact_backend(hard_route_backend, seed_mode=None, routing_backend=None):
     if seed_mode is not None:
         config["seed_mode"] = seed_mode
     return config
+
+
+def _dtype_bytes(dtype):
+    if dtype in (torch.float16, torch.bfloat16):
+        return 2
+    if dtype == torch.float32:
+        return 4
+    raise ValueError(f"unsupported dtype for estimate: {dtype}")
+
+
+def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant):
+    """Estimate compressed K/V/bias traffic for one self-attention call."""
+    merge_config = _parse_direct_route_backend(variant["hard_route_backend"])
+    if not merge_config.supported:
+        return None
+
+    batch, _, heads, dim = q.shape
+    frames, height, width = grid_size
+    route_tokens = int(frames) * int(height) * 4
+    key_bytes = _dtype_bytes(torch.bfloat16 if merge_config.use_bf16_merged_key else torch.float16)
+    value_bytes = _dtype_bytes(torch.bfloat16 if merge_config.use_bf16_merged_value else torch.float16)
+    bias_bytes = _dtype_bytes(torch.bfloat16 if merge_config.use_bf16_routing_bias else torch.float16)
+
+    chunk_count = 0
+    total_bytes = 0
+    max_chunk_bytes = 0
+    for start in range(0, int(frames), int(query_outer_chunk)):
+        chunk_outer = min(int(query_outer_chunk), int(frames) - start)
+        route_groups = int(batch) * int(heads) * chunk_outer * int(width)
+        chunk_bytes = route_tokens * route_groups * (dim * key_bytes + dim * value_bytes + bias_bytes)
+        total_bytes += chunk_bytes
+        max_chunk_bytes = max(max_chunk_bytes, chunk_bytes)
+        chunk_count += 1
+
+    return {
+        "route_tokens": route_tokens,
+        "query_chunks": chunk_count,
+        "max_chunk_intermediate_bytes": max_chunk_bytes,
+        "intermediate_write_bytes_per_attention_call": total_bytes,
+        "intermediate_read_bytes_per_attention_call": total_bytes,
+        "key_dtype": "bf16" if merge_config.use_bf16_merged_key else "fp16",
+        "value_dtype": "bf16" if merge_config.use_bf16_merged_value else "fp16",
+        "bias_dtype": "bf16" if merge_config.use_bf16_routing_bias else "fp16",
+    }
 
 
 class Stats:
@@ -326,7 +371,12 @@ def install_probe(stats, args):
     if not args.skip_baseline and "hard_c4_baseline" not in variants:
         variants = {"hard_c4_baseline": all_variants["hard_c4_baseline"], **variants}
 
-    state = {"calls_total": 0, "calls_current_prompt": 0, "warmed": False}
+    state = {
+        "calls_total": 0,
+        "calls_current_prompt": 0,
+        "warmed": False,
+        "intermediate_estimates": {},
+    }
 
     def run_dense(q, k, v, self):
         return wan_model.flash_attention(q=q, k=k, v=v, window_size=self.window_size)
@@ -362,6 +412,14 @@ def install_probe(stats, args):
         )
         v = self.v(x).view(batch, seq_len, heads, dim)
         q, k = wan_model.apply_rope_video_tokens(q, k, rope_cache)
+        if not state["intermediate_estimates"]:
+            for name, kwargs in variants.items():
+                state["intermediate_estimates"][name] = estimate_direct_intermediate_bytes(
+                    q,
+                    grid_size,
+                    args.query_outer_chunk,
+                    kwargs,
+                )
 
         should_record = args.max_calls <= 0 or state["calls_current_prompt"] < args.max_calls
         state["calls_current_prompt"] += 1
@@ -490,6 +548,17 @@ def main():
     dense_seconds = stats["dense"].seconds
     baseline_stat = stats.get("hard_c4_baseline")
     baseline_seconds = baseline_stat.seconds if baseline_stat is not None and baseline_stat.calls else None
+    variant_summaries = {}
+    for name, value in sorted(stats.items()):
+        summary = value.summary(
+            dense_seconds=dense_seconds if name != "dense" else None,
+            baseline_seconds=baseline_seconds if baseline_seconds and name != "dense" else None,
+        )
+        estimate = probe_state["intermediate_estimates"].get(name)
+        if estimate is not None:
+            summary["direct_intermediate_estimate"] = estimate
+        variant_summaries[name] = summary
+
     payload = {
         "device": torch.cuda.get_device_name(0),
         "config": args.config,
@@ -501,13 +570,7 @@ def main():
         "total_self_attention_calls": probe_state["calls_total"],
         "query_outer_chunk": args.query_outer_chunk,
         "wall_seconds": wall_seconds,
-        "variants": {
-            name: value.summary(
-                dense_seconds=dense_seconds if name != "dense" else None,
-                baseline_seconds=baseline_seconds if baseline_seconds and name != "dense" else None,
-            )
-            for name, value in sorted(stats.items())
-        },
+        "variants": variant_summaries,
     }
     output_path = Path(args.output_json)
     output_path.parent.mkdir(parents=True, exist_ok=True)
