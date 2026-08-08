@@ -6,6 +6,7 @@ import torch
 
 from .hard_route_triton import (
     triton_direct_route_biased_attention,
+    triton_direct_route_biased_attention_g2,
     triton_direct_route_seed_key_attention,
     triton_hard_route_merge_c4_direct_route,
 )
@@ -15,7 +16,7 @@ _DIRECT_ROUTE_C4_RE = re.compile(
     r"^triton_c4_direct_route_j(?P<j>\d+)_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot$"
 )
 _DIRECT_ROUTE_ATTENTION_RE = re.compile(
-    r"^triton_direct_m(?P<m>\d+)_n(?P<n>\d+)_w(?P<w>\d+)_s(?P<s>\d+)_exp2$"
+    r"^triton_direct(?:_g(?P<g>\d+))?_m(?P<m>\d+)_n(?P<n>\d+)_w(?P<w>\d+)_s(?P<s>\d+)_exp2$"
 )
 _DIRECT_ROUTE_KEY_TILE_RE = re.compile(r"^(?P<base>.+)_l(?P<l>\d+)$")
 
@@ -89,6 +90,9 @@ def parse_direct_route_attention_backend(backend):
     block_n = int(match.group("n"))
     num_warps = int(match.group("w"))
     num_stages = int(match.group("s"))
+    group_block = int(match.group("g") or 1)
+    if group_block not in {1, 2}:
+        return None
     if block_m not in {16, 32}:
         return None
     if block_n not in {16, 32, 64}:
@@ -97,7 +101,7 @@ def parse_direct_route_attention_backend(backend):
         return None
     if num_stages not in {1, 2, 3}:
         return None
-    return block_m, block_n, num_warps, num_stages
+    return block_m, block_n, num_warps, num_stages, group_block
 
 
 def parse_direct_route_backend(backend):
@@ -216,7 +220,9 @@ def direct_seed_key_attention(
     if config is None:
         return None
 
-    block_m, block_n, num_warps, num_stages = config
+    block_m, block_n, num_warps, num_stages, group_block = config
+    if group_block != 1:
+        return None
     return triton_direct_route_seed_key_attention(
         q,
         value,
@@ -246,7 +252,22 @@ def direct_compressed_attention(
     if config is None:
         return None
 
-    block_m, block_n, num_warps, num_stages = config
+    block_m, block_n, num_warps, num_stages, group_block = config
+    if group_block == 2:
+        return triton_direct_route_biased_attention_g2(
+            q,
+            key,
+            value,
+            bias,
+            block_m=block_m,
+            block_n=block_n,
+            scale=scale,
+            num_warps=num_warps,
+            num_stages=num_stages,
+            use_exp2=True,
+            out=output,
+            assume_contiguous=assume_contiguous,
+        )
     return triton_direct_route_biased_attention(
         q,
         key,

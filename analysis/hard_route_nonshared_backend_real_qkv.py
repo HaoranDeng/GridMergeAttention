@@ -26,6 +26,13 @@ def direct_routing_backend(block_m=32, block_n=16, num_warps=1, num_stages=1):
     )
 
 
+def direct_routing_g2_backend(block_m=32, block_n=16, num_warps=1, num_stages=1):
+    return (
+        f"triton_direct_g2_m{int(block_m)}_n{int(block_n)}_w{int(num_warps)}"
+        f"_s{int(num_stages)}_exp2_tokenmajor"
+    )
+
+
 def direct_merge_backend(*suffixes, block_j=32, block_l=None):
     tile_suffixes = [*suffixes]
     if block_l is not None:
@@ -261,6 +268,16 @@ def exact_variants():
             direct_merge_backend("bestlogit"),
             seed_mode="local_with_ith",
             routing_backend=direct_routing_backend(block_n=32),
+        ),
+        "hard_c4_bestlogit_tokenmajor_g2": exact_backend(
+            direct_merge_backend("bestlogit"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_g2_backend(),
+        ),
+        "hard_c4_bestlogit_tokenmajor_g2_m16": exact_backend(
+            direct_merge_backend("bestlogit"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_g2_backend(block_m=16),
         ),
         "hard_c4_maskassign_tokenmajor": exact_backend(
             direct_merge_backend("maskassign"), seed_mode="local_with_ith"

@@ -1320,6 +1320,168 @@ if triton is not None:
         )
 
     @triton.jit
+    def _direct_route_biased_attention_g2_kernel(
+        query_ptr,
+        key_ptr,
+        value_ptr,
+        bias_ptr,
+        out_ptr,
+        A_OUTER: tl.constexpr,
+        Q_ROWS: tl.constexpr,
+        J_COLS: tl.constexpr,
+        H_HEADS: tl.constexpr,
+        K_LEN: tl.constexpr,
+        D_HEAD: tl.constexpr,
+        BLOCK_M: tl.constexpr,
+        BLOCK_N: tl.constexpr,
+        BLOCK_D: tl.constexpr,
+        SCORE_SCALE: tl.constexpr,
+        USE_EXP2: tl.constexpr,
+        CAST_Q_TO_FP16: tl.constexpr,
+        GROUPS: tl.constexpr,
+    ):
+        group_pair = tl.program_id(0)
+        query_block_id = tl.program_id(1)
+        group0 = group_pair * 2
+        group1 = group0 + 1
+        valid_group1 = group1 < GROUPS
+
+        query_col0 = group0 % J_COLS
+        tmp0 = group0 // J_COLS
+        query_outer0 = tmp0 % A_OUTER
+        tmp0 = tmp0 // A_OUTER
+        head0 = tmp0 % H_HEADS
+        batch0 = tmp0 // H_HEADS
+
+        query_col1 = group1 % J_COLS
+        tmp1 = group1 // J_COLS
+        query_outer1 = tmp1 % A_OUTER
+        tmp1 = tmp1 // A_OUTER
+        head1 = tmp1 % H_HEADS
+        batch1 = tmp1 // H_HEADS
+
+        query_offsets = query_block_id * BLOCK_M + tl.arange(0, BLOCK_M)
+        key_offsets = tl.arange(0, BLOCK_N)
+        dim_offsets = tl.arange(0, BLOCK_D)
+
+        query_base0 = query_ptr + batch0 * A_OUTER * Q_ROWS * J_COLS * H_HEADS * D_HEAD
+        query_base1 = query_ptr + batch1 * A_OUTER * Q_ROWS * J_COLS * H_HEADS * D_HEAD
+        out_base0 = out_ptr + batch0 * A_OUTER * Q_ROWS * J_COLS * H_HEADS * D_HEAD
+        out_base1 = out_ptr + batch1 * A_OUTER * Q_ROWS * J_COLS * H_HEADS * D_HEAD
+
+        query_mask = (query_offsets[:, None] < Q_ROWS) & (dim_offsets[None, :] < D_HEAD)
+        q0 = tl.load(
+            query_base0
+            + (((query_outer0 * Q_ROWS + query_offsets[:, None]) * J_COLS + query_col0)
+               * H_HEADS + head0) * D_HEAD
+            + dim_offsets[None, :],
+            mask=query_mask,
+            other=0.0,
+        )
+        q1 = tl.load(
+            query_base1
+            + (((query_outer1 * Q_ROWS + query_offsets[:, None]) * J_COLS + query_col1)
+               * H_HEADS + head1) * D_HEAD
+            + dim_offsets[None, :],
+            mask=valid_group1 & query_mask,
+            other=0.0,
+        )
+        q0_dot = q0
+        q1_dot = q1
+        if CAST_Q_TO_FP16:
+            q0_dot = q0.to(tl.float16)
+            q1_dot = q1.to(tl.float16)
+
+        max0 = tl.full((BLOCK_M,), -float("inf"), tl.float32)
+        max1 = tl.full((BLOCK_M,), -float("inf"), tl.float32)
+        norm0 = tl.zeros((BLOCK_M,), tl.float32)
+        norm1 = tl.zeros((BLOCK_M,), tl.float32)
+        acc0 = tl.zeros((BLOCK_M, BLOCK_D), tl.float32)
+        acc1 = tl.zeros((BLOCK_M, BLOCK_D), tl.float32)
+
+        for key_start in range(0, K_LEN, BLOCK_N):
+            keys = key_start + key_offsets
+            valid_keys = keys < K_LEN
+            k0 = tl.load(
+                key_ptr + (keys[:, None] * GROUPS + group0) * D_HEAD + dim_offsets[None, :],
+                mask=valid_keys[:, None] & (dim_offsets[None, :] < D_HEAD),
+                other=0.0,
+            )
+            k1 = tl.load(
+                key_ptr + (keys[:, None] * GROUPS + group1) * D_HEAD + dim_offsets[None, :],
+                mask=valid_group1 & valid_keys[:, None] & (dim_offsets[None, :] < D_HEAD),
+                other=0.0,
+            )
+            bias0 = tl.load(
+                bias_ptr + keys * GROUPS + group0,
+                mask=valid_keys,
+                other=float("inf"),
+            )
+            bias1 = tl.load(
+                bias_ptr + keys * GROUPS + group1,
+                mask=valid_group1 & valid_keys,
+                other=float("inf"),
+            )
+
+            valid_logits0 = (query_offsets[:, None] < Q_ROWS) & valid_keys[None, :]
+            valid_logits1 = valid_group1 & valid_logits0
+            logits0 = tl.dot(q0_dot, tl.trans(k0)) * SCORE_SCALE - bias0[None, :]
+            logits1 = tl.dot(q1_dot, tl.trans(k1)) * SCORE_SCALE - bias1[None, :]
+            logits0 = tl.where(valid_logits0, logits0, -float("inf"))
+            logits1 = tl.where(valid_logits1, logits1, -float("inf"))
+
+            block_max0 = tl.max(logits0, axis=1)
+            block_max1 = tl.max(logits1, axis=1)
+            next_max0 = tl.maximum(max0, block_max0)
+            next_max1 = tl.maximum(max1, block_max1)
+            if USE_EXP2:
+                p0 = tl.exp2((logits0 - next_max0[:, None]) * 1.4426950408889634)
+                p1 = tl.exp2((logits1 - next_max1[:, None]) * 1.4426950408889634)
+                alpha0 = tl.exp2((max0 - next_max0) * 1.4426950408889634)
+                alpha1 = tl.exp2((max1 - next_max1) * 1.4426950408889634)
+            else:
+                p0 = tl.exp(logits0 - next_max0[:, None])
+                p1 = tl.exp(logits1 - next_max1[:, None])
+                alpha0 = tl.exp(max0 - next_max0)
+                alpha1 = tl.exp(max1 - next_max1)
+
+            v0 = tl.load(
+                value_ptr + (keys[:, None] * GROUPS + group0) * D_HEAD + dim_offsets[None, :],
+                mask=valid_keys[:, None] & (dim_offsets[None, :] < D_HEAD),
+                other=0.0,
+            )
+            v1 = tl.load(
+                value_ptr + (keys[:, None] * GROUPS + group1) * D_HEAD + dim_offsets[None, :],
+                mask=valid_group1 & valid_keys[:, None] & (dim_offsets[None, :] < D_HEAD),
+                other=0.0,
+            )
+            acc0 = acc0 * alpha0[:, None] + tl.dot(p0.to(v0.dtype), v0)
+            acc1 = acc1 * alpha1[:, None] + tl.dot(p1.to(v1.dtype), v1)
+            norm0 = norm0 * alpha0 + tl.sum(p0, axis=1)
+            norm1 = norm1 * alpha1 + tl.sum(p1, axis=1)
+            max0 = next_max0
+            max1 = next_max1
+
+        out0 = acc0 / norm0[:, None]
+        out1 = acc1 / norm1[:, None]
+        tl.store(
+            out_base0
+            + (((query_outer0 * Q_ROWS + query_offsets[:, None]) * J_COLS + query_col0)
+               * H_HEADS + head0) * D_HEAD
+            + dim_offsets[None, :],
+            out0,
+            mask=query_mask,
+        )
+        tl.store(
+            out_base1
+            + (((query_outer1 * Q_ROWS + query_offsets[:, None]) * J_COLS + query_col1)
+               * H_HEADS + head1) * D_HEAD
+            + dim_offsets[None, :],
+            out1,
+            mask=valid_group1 & query_mask,
+        )
+
+    @triton.jit
     def _direct_route_seed_key_attention_kernel(
         query_ptr,
         value_ptr,
@@ -1679,6 +1841,90 @@ def triton_direct_route_biased_attention(
     if num_stages is not None:
         meta["num_stages"] = int(num_stages)
     _direct_route_biased_attention_kernel[grid](
+        query,
+        key,
+        value,
+        bias,
+        out,
+        A_OUTER=query_outer,
+        Q_ROWS=query_rows,
+        J_COLS=query_columns,
+        H_HEADS=heads,
+        K_LEN=key_len,
+        D_HEAD=dim,
+        BLOCK_M=block_m,
+        BLOCK_N=block_n,
+        BLOCK_D=block_d,
+        SCORE_SCALE=float(scale),
+        USE_EXP2=bool(use_exp2),
+        CAST_Q_TO_FP16=bool(key.dtype == torch.float16 and query.dtype != torch.float16),
+        GROUPS=groups,
+        **meta,
+    )
+    return out
+
+
+def triton_direct_route_biased_attention_g2(
+    query,
+    key,
+    value,
+    bias,
+    block_m=32,
+    block_n=16,
+    scale=1.0,
+    num_warps=1,
+    num_stages=1,
+    use_exp2=True,
+    out=None,
+    assume_contiguous=False,
+):
+    """Direct-route full attention processing two adjacent groups per program.
+
+    This preserves the same full compressed attention math as
+    triton_direct_route_biased_attention. It only changes the routing kernel
+    schedule so adjacent token-major groups are read together.
+    """
+    if triton is None:
+        raise RuntimeError("hard_route_routing_backend='triton_direct_g2_*' requires Triton.")
+    if not query.is_cuda:
+        raise RuntimeError("hard_route_routing_backend='triton_direct_g2_*' requires CUDA/ROCm tensors.")
+    if query.dtype not in (torch.float16, torch.bfloat16):
+        raise RuntimeError("hard_route_routing_backend='triton_direct_g2_*' requires fp16 or bf16 tensors.")
+
+    if not assume_contiguous:
+        query = query.contiguous()
+        key = key.contiguous()
+        value = value.contiguous()
+        bias = bias.contiguous()
+
+    batch, query_outer, query_rows, query_columns, heads, dim = query.shape
+    key_len, groups, key_dim = key.shape
+    expected_groups = batch * heads * query_outer * query_columns
+    if groups != expected_groups:
+        raise ValueError(
+            "g2 direct-route attention expects route-layout KV with "
+            f"{expected_groups} groups, got {groups}."
+        )
+    if key_dim != dim or value.shape != key.shape or bias.shape != (key_len, groups):
+        raise ValueError("query/key/value/bias shapes are inconsistent for g2 direct-route attention.")
+
+    block_d = triton.next_power_of_2(dim)
+    if block_d > 128:
+        raise ValueError(f"Triton hard-route attention supports head dim <= 128, got {dim}.")
+
+    if out is None:
+        out = _cached_empty("direct_route_attention_g2_out", query.shape, query.device, query.dtype)
+    else:
+        if out.shape != query.shape or out.device != query.device or out.dtype != query.dtype:
+            raise ValueError("g2 direct-route attention output tensor has inconsistent shape/device/dtype.")
+        if not out.is_contiguous():
+            raise ValueError("g2 direct-route attention output tensor must be contiguous.")
+
+    grid = (triton.cdiv(groups, 2), triton.cdiv(query_rows, block_m))
+    meta = {"num_warps": int(num_warps)}
+    if num_stages is not None:
+        meta["num_stages"] = int(num_stages)
+    _direct_route_biased_attention_g2_kernel[grid](
         query,
         key,
         value,
@@ -2244,6 +2490,7 @@ def triton_hard_route_merge_c4_direct_route(
 __all__ = [
     "triton_biased_attention",
     "triton_direct_route_biased_attention",
+    "triton_direct_route_biased_attention_g2",
     "triton_direct_route_seed_key_attention",
     "triton_hard_route_merge",
     "triton_hard_route_merge_c4",
