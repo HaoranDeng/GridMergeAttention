@@ -1,0 +1,102 @@
+import argparse
+import json
+from pathlib import Path
+
+import torch
+
+from attention.hard_route import hard_route_attention
+from analysis.hard_route_nonshared_backend_real_qkv import exact_variants
+
+
+def rel_l2(out, ref):
+    diff = (out.float() - ref.float()).reshape(-1)
+    denom = ref.float().reshape(-1).norm().clamp_min(1e-20)
+    return float(diff.norm().item() / denom.item())
+
+
+def run_variant(q, k, v, variant):
+    return hard_route_attention(
+        q,
+        k,
+        v,
+        scale=q.size(-1) ** -0.5,
+        num_merge_tokens=4,
+        seed_mode=variant.get("seed_mode", "local_with_ith"),
+        seed=0,
+        query_outer_offset=0,
+        hard_route_backend=variant["hard_route_backend"],
+        hard_route_routing_backend=variant["hard_route_routing_backend"],
+    )
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Smoke-test hard C4 Triton variants on random tensors.")
+    parser.add_argument("--output_json", required=True)
+    parser.add_argument("--dtype", choices=["bf16", "fp16"], default="bf16")
+    parser.add_argument("--batch", type=int, default=1)
+    parser.add_argument("--query_outer", type=int, default=2)
+    parser.add_argument("--key_outer", type=int, default=2)
+    parser.add_argument("--rows", type=int, default=30)
+    parser.add_argument("--columns", type=int, default=52)
+    parser.add_argument("--heads", type=int, default=2)
+    parser.add_argument("--dim", type=int, default=128)
+    parser.add_argument("--seed", type=int, default=0)
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA/ROCm GPU is required.")
+
+    torch.manual_seed(args.seed)
+    device = torch.device("cuda")
+    dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float16
+    shape_q = (args.batch, args.query_outer, args.rows, args.columns, args.heads, args.dim)
+    shape_kv = (args.batch, args.key_outer, args.rows, args.columns, args.heads, args.dim)
+    q = torch.randn(shape_q, device=device, dtype=dtype)
+    k = torch.randn(shape_kv, device=device, dtype=dtype)
+    v = torch.randn(shape_kv, device=device, dtype=dtype)
+
+    variants = exact_variants()
+    names = [
+        "hard_c4_bestlogit_tokenmajor",
+        "hard_c4_bestlogit_packkv_tokenmajor",
+        "hard_c4_bestlogit_packkvbias_tokenmajor",
+        "hard_c4_bestlogit_recompute_tokenmajor",
+        "hard_c4_bestlogit_recompute_packkv_tokenmajor",
+        "hard_c4_bestlogit_recompute_packkvbias_tokenmajor",
+    ]
+
+    outputs = {}
+    results = {}
+    for name in names:
+        torch.cuda.synchronize()
+        out = run_variant(q, k, v, variants[name])
+        torch.cuda.synchronize()
+        outputs[name] = out
+
+    ref = outputs["hard_c4_bestlogit_tokenmajor"]
+    for name, out in outputs.items():
+        diff = (out.float() - ref.float()).abs()
+        results[name] = {
+            "shape": list(out.shape),
+            "max_abs_vs_bestlogit": float(diff.max().item()),
+            "rel_l2_vs_bestlogit": rel_l2(out, ref),
+        }
+
+    payload = {
+        "device": torch.cuda.get_device_name(0),
+        "dtype": args.dtype,
+        "shape_q": list(shape_q),
+        "shape_kv": list(shape_kv),
+        "results": results,
+    }
+    output_path = Path(args.output_json)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(payload, indent=2) + "\n")
+    print(json.dumps(payload, indent=2))
+
+
+if __name__ == "__main__":
+    main()
