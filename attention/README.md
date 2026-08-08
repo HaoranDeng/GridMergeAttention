@@ -125,6 +125,12 @@ The `bestlogit` suffix reuses the already computed winning seed/key logit when
 forming each assigned cluster. It keeps the same assignment and full compressed
 attention semantics as the full-core path.
 
+The `maxbias` suffix is a small routing-bias approximation candidate for the
+exact materialized K/V path. It keeps the log-normalizer term but uses
+`max(logit) - logsumexp(logit)` instead of
+`sum_l alpha_l logit_l - logsumexp(logit)`. This is not the rejected no-bias
+path; it still runs full compressed attention with a per-token bias.
+
 The following suffixes are experimental memory-traffic/merge-compute
 approximations. They do not change the second stage: after compression, the
 model still runs full compressed attention over every compressed token.

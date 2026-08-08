@@ -57,6 +57,7 @@ _DIRECT_ROUTE_FLAG_SUFFIXES = (
     ("_seedvalue", "use_seed_value"),
     ("_stripe", "use_stripe_assign"),
     ("_recompute", "use_recompute_merge"),
+    ("_maxbias", "use_max_bias"),
     ("_bestlogit", "use_assigned_logit"),
     ("_maskassign", "use_mask_assign"),
     ("_bf16kv", ("use_bf16_merged_key", "use_bf16_merged_value")),
@@ -84,6 +85,7 @@ class DirectRouteMergeConfig:
     use_mask_assign: bool = False
     use_recompute_merge: bool = False
     use_stripe_assign: bool = False
+    use_max_bias: bool = False
     use_seed_key: bool = False
     use_seed_key_bias_match: bool = False
     use_seed_key_scale: bool = False
@@ -248,6 +250,7 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         use_mask_assign=config.use_mask_assign,
         use_recompute_merge=config.use_recompute_merge,
         use_stripe_assign=config.use_stripe_assign,
+        use_max_bias=config.use_max_bias,
         use_seed_key=config.use_seed_key,
         use_seed_key_bias_match=config.use_seed_key_bias_match,
         use_seed_key_scale=config.use_seed_key_scale,

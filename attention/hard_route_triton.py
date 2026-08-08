@@ -358,6 +358,7 @@ if triton is not None:
         INLINE_LOCAL_SEED: tl.constexpr,
         USE_ASSIGNED_LOGIT: tl.constexpr,
         USE_MASK_ASSIGN: tl.constexpr,
+        USE_MAX_BIAS: tl.constexpr,
         SEED_KEY: tl.constexpr,
         TOP_KV: tl.constexpr,
         INDIRECT_TOP_KV: tl.constexpr,
@@ -796,8 +797,12 @@ if triton is not None:
                 routing_bias = expected_logit - log_denom
             else:
                 merged_value = tl.dot(weights.to(value_block.dtype), value_block)
-                expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
-                routing_bias = expected_logit - log_denom
+                if USE_MAX_BIAS:
+                    expected_logit = row_max
+                    routing_bias = row_max - log_denom
+                else:
+                    expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
+                    routing_bias = expected_logit - log_denom
             if SEED_KEY_BIAS_MATCH and not TOP_KV:
                 seed_for_bias = seed0
                 if seed_idx == 1:
@@ -944,6 +949,7 @@ if triton is not None:
         INLINE_LOCAL_SEED: tl.constexpr,
         USE_ASSIGNED_LOGIT: tl.constexpr,
         USE_MASK_ASSIGN: tl.constexpr,
+        USE_MAX_BIAS: tl.constexpr,
         SEED_KEY: tl.constexpr,
         TOP_KV: tl.constexpr,
         INDIRECT_TOP_KV: tl.constexpr,
@@ -3332,6 +3338,7 @@ def triton_hard_route_merge_c4_direct_route(
     use_mask_assign=False,
     use_recompute_merge=False,
     use_stripe_assign=False,
+    use_max_bias=False,
     use_seed_key=False,
     use_seed_key_bias_match=False,
     use_seed_key_scale=False,
@@ -3564,6 +3571,20 @@ def triton_hard_route_merge_c4_direct_route(
         raise ValueError("stripe C4 merge replaces hard assignment; do not combine it with bestlogit or maskassign.")
     if use_stripe_assign and key_columns < 4:
         raise ValueError("stripe C4 merge requires at least four key columns.")
+    if use_max_bias and (
+        use_seed_key
+        or use_top_kv
+        or use_top_key
+        or use_top3_value
+        or use_top2_seed_value
+        or use_top2_value
+        or use_top_value
+        or use_seed_value
+        or use_recompute_merge
+        or use_stripe_assign
+        or use_key_outer_kernel
+    ):
+        raise ValueError("max-bias routing is currently only implemented for exact materialized K/V C4 merge.")
     if use_top_value and not force_seed_keys:
         raise ValueError("top-value routing requires force_seed_keys=True.")
     if use_top_value and use_seed_value:
@@ -3847,6 +3868,7 @@ def triton_hard_route_merge_c4_direct_route(
         INLINE_LOCAL_SEED=bool(inline_local_seed),
         USE_ASSIGNED_LOGIT=bool(use_assigned_logit),
         USE_MASK_ASSIGN=bool(use_mask_assign),
+        USE_MAX_BIAS=bool(use_max_bias),
         SEED_KEY=bool(use_seed_key),
         TOP_KV=bool(use_top_kv),
         INDIRECT_TOP_KV=bool(use_indirect_top_kv),
