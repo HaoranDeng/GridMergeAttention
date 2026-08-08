@@ -362,6 +362,7 @@ if triton is not None:
         TOP_KV: tl.constexpr,
         TOP_KEY: tl.constexpr,
         TOP_KEY_SCALE: tl.constexpr,
+        TOP_KEY_AFFINE_SCALE: tl.constexpr,
         TOP_VALUE: tl.constexpr,
         SEED_VALUE: tl.constexpr,
         SEED_KEY_BIAS_MATCH: tl.constexpr,
@@ -585,7 +586,51 @@ if triton is not None:
                     other=0.0,
                 )
                 merged_value = tl.dot(weights.to(value_block.dtype), value_block)
-                if TOP_KEY_SCALE:
+                if TOP_KEY_AFFINE_SCALE:
+                    expected0 = tl.sum(tl.where(active, weights * logits0, 0.0), axis=1)
+                    expected1 = tl.sum(tl.where(active, weights * logits1, 0.0), axis=1)
+                    expected2 = tl.sum(tl.where(active, weights * logits2, 0.0), axis=1)
+                    expected3 = tl.sum(tl.where(active, weights * logits3, 0.0), axis=1)
+                    expected_logit = expected0
+                    if seed_idx == 1:
+                        expected_logit = expected1
+                    if seed_idx == 2:
+                        expected_logit = expected2
+                    if seed_idx == 3:
+                        expected_logit = expected3
+
+                    top_logit0 = tl.sum(seed0.to(tl.float32) * merged_key.to(tl.float32), axis=1) * SCORE_SCALE
+                    top_logit1 = tl.sum(seed1.to(tl.float32) * merged_key.to(tl.float32), axis=1) * SCORE_SCALE
+                    top_logit2 = tl.sum(seed2.to(tl.float32) * merged_key.to(tl.float32), axis=1) * SCORE_SCALE
+                    top_logit3 = tl.sum(seed3.to(tl.float32) * merged_key.to(tl.float32), axis=1) * SCORE_SCALE
+                    sum_x = top_logit0 + top_logit1 + top_logit2 + top_logit3
+                    sum_y = expected0 + expected1 + expected2 + expected3
+                    numerator = (
+                        4.0
+                        * (
+                            top_logit0 * expected0
+                            + top_logit1 * expected1
+                            + top_logit2 * expected2
+                            + top_logit3 * expected3
+                        )
+                        - sum_x * sum_y
+                    )
+                    denominator = (
+                        4.0
+                        * (
+                            top_logit0 * top_logit0
+                            + top_logit1 * top_logit1
+                            + top_logit2 * top_logit2
+                            + top_logit3 * top_logit3
+                        )
+                        - sum_x * sum_x
+                    )
+                    safe_denominator = tl.where(tl.abs(denominator) > 1.0e-20, denominator, 1.0)
+                    top_scale = numerator / safe_denominator
+                    top_shift = (sum_y - top_scale * sum_x) * 0.25
+                    merged_key = merged_key * top_scale[:, None]
+                    routing_bias = expected_logit - log_denom - top_shift
+                elif TOP_KEY_SCALE:
                     expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
                     safe_row_max = tl.where(tl.abs(row_max) > 1.0e-20, row_max, 1.0)
                     merged_key = merged_key * (expected_logit / safe_row_max)[:, None]
@@ -728,6 +773,7 @@ if triton is not None:
         TOP_KV: tl.constexpr,
         TOP_KEY: tl.constexpr,
         TOP_KEY_SCALE: tl.constexpr,
+        TOP_KEY_AFFINE_SCALE: tl.constexpr,
         TOP_VALUE: tl.constexpr,
         SEED_VALUE: tl.constexpr,
         SEED_KEY_BIAS_MATCH: tl.constexpr,
@@ -2446,6 +2492,7 @@ def triton_hard_route_merge_c4_direct_route(
     use_top_kv=False,
     use_top_key=False,
     use_top_key_scale=False,
+    use_top_key_affine_scale=False,
     use_top_value=False,
     use_seed_value=False,
     key_scale_dtype=None,
@@ -2602,6 +2649,12 @@ def triton_hard_route_merge_c4_direct_route(
         raise ValueError("top-key routing requires force_seed_keys=True.")
     if use_top_key_scale and not use_top_key:
         raise ValueError("top-key scaling requires top-key routing.")
+    if use_top_key_affine_scale and not use_top_key:
+        raise ValueError("top-key affine scaling requires top-key routing.")
+    if use_top_key_scale and use_top_key_affine_scale:
+        raise ValueError("top-key scale and top-key affine scale are alternative approximations.")
+    if use_top_key_affine_scale and use_recompute_merge:
+        raise ValueError("top-key affine scaling is not implemented for recompute merge.")
     if use_top_key and use_seed_key:
         raise ValueError("top-key routing writes compressed keys and cannot be combined with seed-key routing.")
     if use_top_key and (use_top_kv or use_top_value or use_seed_value):
@@ -2769,6 +2822,7 @@ def triton_hard_route_merge_c4_direct_route(
         TOP_KV=bool(use_top_kv),
         TOP_KEY=bool(use_top_key),
         TOP_KEY_SCALE=bool(use_top_key_scale),
+        TOP_KEY_AFFINE_SCALE=bool(use_top_key_affine_scale),
         TOP_VALUE=bool(use_top_value),
         SEED_VALUE=bool(use_seed_value),
         SEED_KEY_BIAS_MATCH=bool(use_seed_key_bias_match),
