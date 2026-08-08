@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -15,6 +16,7 @@ from utils.misc import set_seed
 
 DIRECT_MERGE_BASE = "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
 DIRECT_ROUTING_BACKEND = "triton_direct_m32_n16_w1_s1_exp2_tokenmajor"
+CHUNK_VARIANT_RE = re.compile(r"^(?P<base>.+)_chunk(?P<chunk>\d+)$")
 
 
 def direct_routing_backend(block_m=32, block_n=16, num_warps=1, num_stages=1):
@@ -331,6 +333,28 @@ def exact_variants():
     }
 
 
+def resolve_variant(name, available):
+    """Resolve a named benchmark variant.
+
+    Any existing variant can be suffixed with `_chunkN` to benchmark the same
+    attention backend with a different query_outer_chunk in the same run.
+    """
+    if name in available:
+        return dict(available[name])
+
+    match = CHUNK_VARIANT_RE.fullmatch(name)
+    if match is None:
+        return None
+
+    base_name = match.group("base")
+    if base_name not in available:
+        return None
+
+    variant = dict(available[base_name])
+    variant["query_outer_chunk"] = int(match.group("chunk"))
+    return variant
+
+
 def sync():
     if torch.cuda.is_available():
         torch.cuda.synchronize()
@@ -362,10 +386,16 @@ def install_probe(stats, args):
     all_variants = exact_variants()
     selected = [name.strip() for name in args.variants.split(",") if name.strip()]
     if selected:
-        missing = [name for name in selected if name not in all_variants]
+        variants = {}
+        missing = []
+        for name in selected:
+            variant = resolve_variant(name, all_variants)
+            if variant is None:
+                missing.append(name)
+            else:
+                variants[name] = variant
         if missing:
             raise ValueError(f"unknown variants: {', '.join(missing)}")
-        variants = {name: all_variants[name] for name in selected}
     else:
         variants = all_variants
     if not args.skip_baseline and "hard_c4_baseline" not in variants:
@@ -393,7 +423,7 @@ def install_probe(stats, args):
             height,
             width,
             q_init="ith",
-            query_outer_chunk=args.query_outer_chunk,
+            query_outer_chunk=kwargs.get("query_outer_chunk", args.query_outer_chunk),
             layout="hard_route",
             num_merge_tokens=4,
             seed_mode=kwargs.get("seed_mode", "random_with_ith"),
@@ -417,7 +447,7 @@ def install_probe(stats, args):
                 state["intermediate_estimates"][name] = estimate_direct_intermediate_bytes(
                     q,
                     grid_size,
-                    args.query_outer_chunk,
+                    kwargs.get("query_outer_chunk", args.query_outer_chunk),
                     kwargs,
                 )
 
