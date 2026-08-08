@@ -30,6 +30,7 @@ _DIRECT_ROUTE_KEY_OUTER_BLOCKS = {
     "f7": 7,
 }
 _DIRECT_ROUTE_FLAG_SUFFIXES = (
+    ("_fp32scale", "use_fp32_key_scale"),
     ("_seedkeyproj", ("use_seed_key", "use_seed_key_scale")),
     ("_seedkeymatch", ("use_seed_key", "use_seed_key_bias_match")),
     ("_seedkey", "use_seed_key"),
@@ -64,6 +65,7 @@ class DirectRouteMergeConfig:
     use_seed_key: bool = False
     use_seed_key_bias_match: bool = False
     use_seed_key_scale: bool = False
+    use_fp32_key_scale: bool = False
 
 
 def _remove_suffix(text, suffix):
@@ -128,6 +130,7 @@ def parse_direct_route_backend(backend):
         "use_seed_key": False,
         "use_seed_key_bias_match": False,
         "use_seed_key_scale": False,
+        "use_fp32_key_scale": False,
     }
 
     while True:
@@ -211,6 +214,7 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         use_seed_key=config.use_seed_key,
         use_seed_key_bias_match=config.use_seed_key_bias_match,
         use_seed_key_scale=config.use_seed_key_scale,
+        key_scale_dtype=torch.float32 if config.use_fp32_key_scale else None,
         assume_contiguous=assume_contiguous and config.inline_local_seed,
     )
 

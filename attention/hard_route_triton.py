@@ -2287,6 +2287,7 @@ def triton_hard_route_merge_c4_direct_route(
     use_seed_key=False,
     use_seed_key_bias_match=False,
     use_seed_key_scale=False,
+    key_scale_dtype=None,
     assume_contiguous=False,
 ):
     """Exact non-shared C=4 merge that writes routing-ready K/V/bias.
@@ -2387,11 +2388,13 @@ def triton_hard_route_merge_c4_direct_route(
     )
     key_scale = None
     if use_seed_key_scale:
+        if key_scale_dtype is None:
+            key_scale_dtype = bias_dtype
         key_scale = _cached_empty(
             "hard_route_c4_direct_route_key_scale_token_major",
             (route_tokens, route_groups),
             key.device,
-            bias_dtype,
+            key_scale_dtype,
         )
 
     key_outer_block = int(key_outer_block)
