@@ -380,6 +380,7 @@ if triton is not None:
         INDIRECT_SEED_VALUE: tl.constexpr,
         RECOMPUTE_VALUE: tl.constexpr,
         COMPACT_WEIGHT_KV: tl.constexpr,
+        COMPACT_WEIGHT_VALUE: tl.constexpr,
         MERGE_WEIGHT_KV: tl.constexpr,
         MERGE_WEIGHT_VALUE: tl.constexpr,
         SEED_KEY_BIAS_MATCH: tl.constexpr,
@@ -520,6 +521,7 @@ if triton is not None:
         if not (
             RECOMPUTE_VALUE
             or COMPACT_WEIGHT_KV
+            or COMPACT_WEIGHT_VALUE
             or MERGE_WEIGHT_KV
             or MERGE_WEIGHT_VALUE
             or TOP_KV
@@ -535,7 +537,7 @@ if triton is not None:
                 mask=valid_key[:, None] & valid_dim[None, :],
                 other=0.0,
             )
-        if COMPACT_WEIGHT_KV:
+        if COMPACT_WEIGHT_KV or COMPACT_WEIGHT_VALUE:
             compact_block = key_outer * K_ROWS + key_row
             compact_offset = (
                 ((compact_block * ROUTE_GROUPS + route_group[:, None]) * L)
@@ -861,7 +863,13 @@ if triton is not None:
                 merged_value = representative_value[None, :] + tl.zeros((BLOCK_J, BLOCK_D), tl.float32)
                 expected_logit = tl.sum(tl.where(active, weights * logits, 0.0), axis=1)
                 routing_bias = expected_logit - log_denom
-            elif not RECOMPUTE_VALUE and not COMPACT_WEIGHT_KV and not MERGE_WEIGHT_KV and not MERGE_WEIGHT_VALUE:
+            elif (
+                not RECOMPUTE_VALUE
+                and not COMPACT_WEIGHT_KV
+                and not COMPACT_WEIGHT_VALUE
+                and not MERGE_WEIGHT_KV
+                and not MERGE_WEIGHT_VALUE
+            ):
                 merged_value = tl.dot(weights.to(value_block.dtype), value_block)
                 if USE_MAX_BIAS:
                     expected_logit = row_max
@@ -943,7 +951,7 @@ if triton is not None:
                 tl.store(key_scale_ptr + bias_offset, top1_mix, mask=valid_query)
             if TOP_VALUE and INDIRECT_TOP_VALUE and not (TOP_KEY and INDIRECT_TOP_KEY):
                 tl.store(merged_value_ptr + bias_offset, top_key, mask=valid_query)
-            if COMPACT_WEIGHT_KV:
+            if COMPACT_WEIGHT_KV or COMPACT_WEIGHT_VALUE:
                 compact_block = key_outer * K_ROWS + key_row
                 compact_offset = (
                     ((compact_block * ROUTE_GROUPS + route_group[:, None]) * L)
@@ -974,6 +982,7 @@ if triton is not None:
                 or (SEED_VALUE and INDIRECT_SEED_VALUE)
                 or RECOMPUTE_VALUE
                 or COMPACT_WEIGHT_KV
+                or COMPACT_WEIGHT_VALUE
                 or MERGE_WEIGHT_KV
                 or MERGE_WEIGHT_VALUE
             ):
@@ -1074,6 +1083,7 @@ if triton is not None:
         INDIRECT_SEED_VALUE: tl.constexpr,
         RECOMPUTE_VALUE: tl.constexpr,
         COMPACT_WEIGHT_KV: tl.constexpr,
+        COMPACT_WEIGHT_VALUE: tl.constexpr,
         MERGE_WEIGHT_KV: tl.constexpr,
         MERGE_WEIGHT_VALUE: tl.constexpr,
         SEED_KEY_BIAS_MATCH: tl.constexpr,
@@ -3253,6 +3263,167 @@ if triton is not None:
         )
 
     @triton.jit
+    def _direct_route_compact_weight_value_attention_kernel(
+        query_ptr,
+        key_ptr,
+        source_value_ptr,
+        assignment_ptr,
+        merge_weight_ptr,
+        bias_ptr,
+        out_ptr,
+        A_OUTER: tl.constexpr,
+        Q_ROWS: tl.constexpr,
+        J_COLS: tl.constexpr,
+        H_HEADS: tl.constexpr,
+        KEY_OUTERS: tl.constexpr,
+        K_ROWS: tl.constexpr,
+        L_COLS: tl.constexpr,
+        K_LEN: tl.constexpr,
+        D_HEAD: tl.constexpr,
+        BLOCK_M: tl.constexpr,
+        BLOCK_N: tl.constexpr,
+        BLOCK_D: tl.constexpr,
+        BLOCK_L: tl.constexpr,
+        SCORE_SCALE: tl.constexpr,
+        USE_EXP2: tl.constexpr,
+        CAST_Q_TO_FP16: tl.constexpr,
+        GROUPS: tl.constexpr,
+    ):
+        group_id = tl.program_id(0)
+        query_block_id = tl.program_id(1)
+
+        query_col = group_id % J_COLS
+        tmp = group_id // J_COLS
+        query_outer = tmp % A_OUTER
+        tmp = tmp // A_OUTER
+        head = tmp % H_HEADS
+        batch = tmp // H_HEADS
+
+        query_offsets = query_block_id * BLOCK_M + tl.arange(0, BLOCK_M)
+        route_offsets = tl.arange(0, BLOCK_N)
+        seed_offsets = tl.arange(0, 4)
+        key_offsets = tl.arange(0, BLOCK_L)
+        dim_offsets = tl.arange(0, BLOCK_D)
+        valid_dim = dim_offsets < D_HEAD
+        valid_source_key = key_offsets < L_COLS
+
+        query_base = query_ptr + batch * A_OUTER * Q_ROWS * J_COLS * H_HEADS * D_HEAD
+        out_base = out_ptr + batch * A_OUTER * Q_ROWS * J_COLS * H_HEADS * D_HEAD
+
+        q = tl.load(
+            query_base
+            + (((query_outer * Q_ROWS + query_offsets[:, None]) * J_COLS + query_col)
+               * H_HEADS + head) * D_HEAD
+            + dim_offsets[None, :],
+            mask=(query_offsets[:, None] < Q_ROWS) & valid_dim[None, :],
+            other=0.0,
+        )
+        q_dot = q
+        if CAST_Q_TO_FP16:
+            q_dot = q.to(tl.float16)
+
+        max_score = tl.full((BLOCK_M,), -float("inf"), tl.float32)
+        normalizer = tl.zeros((BLOCK_M,), tl.float32)
+        acc = tl.zeros((BLOCK_M, BLOCK_D), tl.float32)
+        route_tokens_per_key_outer = K_ROWS * 4
+
+        for key_start in range(0, K_LEN, BLOCK_N):
+            route_keys = key_start + route_offsets
+            valid_route_keys = route_keys < K_LEN
+
+            k = tl.load(
+                key_ptr + (route_keys[:, None] * GROUPS + group_id) * D_HEAD + dim_offsets[None, :],
+                mask=valid_route_keys[:, None] & valid_dim[None, :],
+                other=0.0,
+            )
+            k_dot = k
+            if CAST_Q_TO_FP16:
+                k_dot = k.to(tl.float16)
+
+            bias = tl.load(
+                bias_ptr + route_keys * GROUPS + group_id,
+                mask=valid_route_keys,
+                other=float("inf"),
+            )
+            logits = tl.dot(q_dot, tl.trans(k_dot)) * SCORE_SCALE - bias[None, :]
+            logits = tl.where(
+                (query_offsets[:, None] < Q_ROWS) & valid_route_keys[None, :],
+                logits,
+                -float("inf"),
+            )
+
+            block_max = tl.max(logits, axis=1)
+            next_max = tl.maximum(max_score, block_max)
+            if USE_EXP2:
+                p = tl.exp2((logits - next_max[:, None]) * 1.4426950408889634)
+                alpha = tl.exp2((max_score - next_max) * 1.4426950408889634)
+            else:
+                p = tl.exp(logits - next_max[:, None])
+                alpha = tl.exp(max_score - next_max)
+
+            merged_value = tl.zeros((BLOCK_N, BLOCK_D), tl.float32)
+            for block_idx in tl.static_range(0, BLOCK_N // 4):
+                block_start = key_start + block_idx * 4
+                valid_block = block_start < K_LEN
+                key_outer = block_start // route_tokens_per_key_outer
+                base_token = block_start - key_outer * route_tokens_per_key_outer
+                key_row = base_token // 4
+                compact_block = block_start // 4
+
+                source_value = tl.load(
+                    source_value_ptr
+                    + (((((batch * KEY_OUTERS + key_outer) * K_ROWS + key_row)
+                         * L_COLS + key_offsets[:, None]) * H_HEADS + head) * D_HEAD
+                       + dim_offsets[None, :]),
+                    mask=valid_block & valid_source_key[:, None] & valid_dim[None, :],
+                    other=0.0,
+                )
+                compact_offset = (compact_block * GROUPS + group_id) * L_COLS + key_offsets
+                assignment = tl.load(
+                    assignment_ptr + compact_offset,
+                    mask=valid_block & valid_source_key,
+                    other=-1,
+                )
+                compact_weight = tl.load(
+                    merge_weight_ptr + compact_offset,
+                    mask=valid_block & valid_source_key,
+                    other=0.0,
+                )
+                weight_rows = tl.where(
+                    assignment[None, :] == seed_offsets[:, None],
+                    compact_weight[None, :],
+                    0.0,
+                )
+                value_block = tl.dot(weight_rows.to(source_value.dtype), source_value)
+
+                for seed_idx in tl.static_range(0, 4):
+                    route_row = block_idx * 4 + seed_idx
+                    value_row = tl.sum(
+                        tl.where(seed_offsets[:, None] == seed_idx, value_block, 0.0),
+                        axis=0,
+                    )
+                    merged_value = tl.where(
+                        route_offsets[:, None] == route_row,
+                        value_row[None, :],
+                        merged_value,
+                    )
+
+            merged_value = merged_value.to(tl.float16)
+            acc = acc * alpha[:, None] + tl.dot(p.to(merged_value.dtype), merged_value)
+            normalizer = normalizer * alpha + tl.sum(p, axis=1)
+            max_score = next_max
+
+        out = acc / normalizer[:, None]
+        tl.store(
+            out_base
+            + (((query_outer * Q_ROWS + query_offsets[:, None]) * J_COLS + query_col)
+               * H_HEADS + head) * D_HEAD
+            + dim_offsets[None, :],
+            out,
+            mask=(query_offsets[:, None] < Q_ROWS) & valid_dim[None, :],
+        )
+
+    @triton.jit
     def _direct_route_compact_weight_kv_attention_kernel(
         query_ptr,
         source_key_ptr,
@@ -4326,6 +4497,118 @@ def triton_direct_route_weight_kv_attention(
     return out
 
 
+def triton_direct_route_compact_weight_value_attention(
+    query,
+    key,
+    source_value,
+    assignment,
+    merge_weight,
+    bias,
+    block_m=32,
+    block_n=16,
+    scale=1.0,
+    num_warps=1,
+    num_stages=1,
+    use_exp2=True,
+    out=None,
+    assume_contiguous=False,
+):
+    """Full compressed attention with V reconstructed from compact weights."""
+    if triton is None:
+        raise RuntimeError("hard_route_routing_backend='triton_direct_*' requires Triton.")
+    if not query.is_cuda:
+        raise RuntimeError("hard_route_routing_backend='triton_direct_*' requires CUDA/ROCm tensors.")
+    if query.dtype not in (torch.float16, torch.bfloat16):
+        raise RuntimeError("hard_route_routing_backend='triton_direct_*' requires fp16 or bf16 tensors.")
+    block_n = int(block_n)
+    if block_n not in {16, 32}:
+        raise ValueError("compact merge-weight value routing currently supports block_n=16 or 32.")
+
+    if not assume_contiguous:
+        query = query.contiguous()
+        key = key.contiguous()
+        source_value = source_value.contiguous()
+        assignment = assignment.contiguous()
+        merge_weight = merge_weight.contiguous()
+        bias = bias.contiguous()
+
+    batch, query_outer, query_rows, query_columns, heads, dim = query.shape
+    value_batch, key_outer, key_rows, key_columns, value_heads, value_dim = source_value.shape
+    key_len, groups, merged_dim = key.shape
+    key_blocks = key_outer * key_rows
+    expected_groups = batch * heads * query_outer * query_columns
+    if value_batch != batch or value_heads != heads or value_dim != dim:
+        raise ValueError("query/source_value dimensions are inconsistent.")
+    if groups != expected_groups:
+        raise ValueError(
+            "compact merge-weight value attention expects route-layout K with "
+            f"{expected_groups} groups, got {groups}."
+        )
+    if merged_dim != dim or bias.shape != (key_len, groups):
+        raise ValueError("query/key/bias shapes are inconsistent for compact merge-weight value attention.")
+    if key_len != key_blocks * 4:
+        raise ValueError("compact merge-weight value attention expects K_LEN = key_outer * key_rows * 4.")
+    compact_shape = (key_blocks, groups, key_columns)
+    if assignment is None or assignment.shape != compact_shape:
+        raise ValueError(
+            "compact merge-weight value attention requires assignment with "
+            "shape [key_outer * key_rows, groups, key_columns]."
+        )
+    if merge_weight is None or merge_weight.shape != compact_shape:
+        raise ValueError(
+            "compact merge-weight value attention requires merge_weight with "
+            "shape [key_outer * key_rows, groups, key_columns]."
+        )
+
+    block_d = triton.next_power_of_2(dim)
+    block_l = triton.next_power_of_2(key_columns)
+    if block_d > 128:
+        raise ValueError(f"Triton hard-route attention supports head dim <= 128, got {dim}.")
+    if block_l > 128:
+        raise ValueError(f"Triton compact merge-weight value attention supports <=128 key columns, got {key_columns}.")
+
+    if out is None:
+        out = _cached_empty("direct_route_compact_weight_value_attention_out", query.shape, query.device, query.dtype)
+    else:
+        if out.shape != query.shape or out.device != query.device or out.dtype != query.dtype:
+            raise ValueError("compact merge-weight value output tensor has inconsistent shape/device/dtype.")
+        if not out.is_contiguous():
+            raise ValueError("compact merge-weight value output tensor must be contiguous.")
+
+    grid = (groups, triton.cdiv(query_rows, block_m))
+    meta = {"num_warps": int(num_warps)}
+    if num_stages is not None:
+        meta["num_stages"] = int(num_stages)
+    _direct_route_compact_weight_value_attention_kernel[grid](
+        query,
+        key,
+        source_value,
+        assignment,
+        merge_weight,
+        bias,
+        out,
+        A_OUTER=query_outer,
+        Q_ROWS=query_rows,
+        J_COLS=query_columns,
+        H_HEADS=heads,
+        KEY_OUTERS=key_outer,
+        K_ROWS=key_rows,
+        L_COLS=key_columns,
+        K_LEN=key_len,
+        D_HEAD=dim,
+        BLOCK_M=block_m,
+        BLOCK_N=block_n,
+        BLOCK_D=block_d,
+        BLOCK_L=block_l,
+        SCORE_SCALE=float(scale),
+        USE_EXP2=bool(use_exp2),
+        CAST_Q_TO_FP16=bool(key.dtype == torch.float16 and query.dtype != torch.float16),
+        GROUPS=groups,
+        **meta,
+    )
+    return out
+
+
 def triton_direct_route_compact_weight_kv_attention(
     query,
     source_key,
@@ -4630,6 +4913,7 @@ def triton_hard_route_merge_c4_direct_route(
     use_recompute_merge=False,
     use_recompute_value=False,
     use_compact_weight_kv=False,
+    use_compact_weight_value=False,
     use_merge_weight_kv=False,
     use_merge_weight_value=False,
     use_stripe_assign=False,
@@ -4784,7 +5068,14 @@ def triton_hard_route_merge_c4_direct_route(
             key.device,
             merged_key_dtype,
         )
-        if use_recompute_value or use_merge_weight_value:
+        if use_compact_weight_value:
+            merged_value = _cached_empty(
+                "hard_route_c4_direct_route_compact_assignment",
+                (key_blocks, route_groups, key_columns),
+                key.device,
+                torch.int16,
+            )
+        elif use_recompute_value or use_merge_weight_value:
             # Routing reconstructs merged V from original V, so this tensor is
             # ignored. Reuse merged_key as a harmless placeholder.
             merged_value = merged_key
@@ -4847,13 +5138,19 @@ def triton_hard_route_merge_c4_direct_route(
         or writes_top2_seed_value_weights
         or writes_top2_value_mix
         or use_compact_weight_kv
+        or use_compact_weight_value
         or use_merge_weight_kv
         or use_merge_weight_value
     ):
         if key_scale_dtype is None:
             key_scale_dtype = (
                 value.dtype
-                if (use_compact_weight_kv or use_merge_weight_kv or use_merge_weight_value)
+                if (
+                    use_compact_weight_kv
+                    or use_compact_weight_value
+                    or use_merge_weight_kv
+                    or use_merge_weight_value
+                )
                 else bias_dtype
             )
         scale_name = "hard_route_c4_direct_route_key_scale_token_major"
@@ -4869,7 +5166,7 @@ def triton_hard_route_merge_c4_direct_route(
         if writes_top2_seed_value_weights:
             scale_name = "hard_route_c4_direct_route_value_pair_weight_token_major"
             scale_shape = (route_tokens, route_groups, 2)
-        if use_compact_weight_kv:
+        if use_compact_weight_kv or use_compact_weight_value:
             scale_name = "hard_route_c4_direct_route_compact_merge_weight"
             scale_shape = (key_blocks, route_groups, key_columns)
         if use_merge_weight_kv or use_merge_weight_value:
@@ -4962,6 +5259,7 @@ def triton_hard_route_merge_c4_direct_route(
         or use_recompute_merge
         or use_recompute_value
         or use_compact_weight_kv
+        or use_compact_weight_value
         or use_indirect_top_kv
         or use_indirect_top_key
         or use_indirect_top3_seed_value
@@ -4980,6 +5278,39 @@ def triton_hard_route_merge_c4_direct_route(
         raise ValueError("merge-weight value routing is only implemented for exact bestlogit C4 merge.")
     if use_merge_weight_value and (not force_seed_keys or not use_assigned_logit):
         raise ValueError("merge-weight value routing requires force-seed keys and bestlogit.")
+    if use_compact_weight_value and (
+        use_seed_key
+        or use_top_kv
+        or use_top_key
+        or use_top3_seed_value
+        or use_top3_value
+        or use_top2_seed_value
+        or use_top2_value
+        or use_top_value
+        or use_seed_value
+        or use_recompute_merge
+        or use_recompute_value
+        or use_compact_weight_kv
+        or use_merge_weight_kv
+        or use_merge_weight_value
+        or use_indirect_top_kv
+        or use_indirect_top_key
+        or use_indirect_top3_seed_value
+        or use_indirect_top3_value
+        or use_indirect_top2_seed_value
+        or use_indirect_top2_value
+        or use_indirect_top_value
+        or use_indirect_seed_value
+        or use_seed_key_scale
+        or use_seed_key_bias_match
+        or use_mask_assign
+        or use_max_bias
+        or use_stripe_assign
+        or use_key_outer_kernel
+    ):
+        raise ValueError("compact merge-weight value routing is only implemented for exact bestlogit C4 merge.")
+    if use_compact_weight_value and (not force_seed_keys or not use_assigned_logit):
+        raise ValueError("compact merge-weight value routing requires force-seed keys and bestlogit.")
     if use_compact_weight_kv and (
         use_seed_key
         or use_top_kv
@@ -4992,6 +5323,7 @@ def triton_hard_route_merge_c4_direct_route(
         or use_seed_value
         or use_recompute_merge
         or use_recompute_value
+        or use_compact_weight_value
         or use_merge_weight_kv
         or use_merge_weight_value
         or use_indirect_top_kv
@@ -5025,6 +5357,7 @@ def triton_hard_route_merge_c4_direct_route(
         or use_recompute_merge
         or use_recompute_value
         or use_compact_weight_kv
+        or use_compact_weight_value
         or use_merge_weight_value
         or use_indirect_top_kv
         or use_indirect_top_key
@@ -5374,6 +5707,7 @@ def triton_hard_route_merge_c4_direct_route(
         INDIRECT_SEED_VALUE=bool(use_indirect_seed_value),
         RECOMPUTE_VALUE=bool(use_recompute_value),
         COMPACT_WEIGHT_KV=bool(use_compact_weight_kv),
+        COMPACT_WEIGHT_VALUE=bool(use_compact_weight_value),
         MERGE_WEIGHT_KV=bool(use_merge_weight_kv),
         MERGE_WEIGHT_VALUE=bool(use_merge_weight_value),
         SEED_KEY_BIAS_MATCH=bool(use_seed_key_bias_match),
@@ -5391,6 +5725,7 @@ __all__ = [
     "triton_direct_route_biased_attention",
     "triton_direct_route_biased_attention_g2",
     "triton_direct_route_compact_weight_kv_attention",
+    "triton_direct_route_compact_weight_value_attention",
     "triton_direct_route_indirect_value_attention",
     "triton_direct_route_recompute_value_attention",
     "triton_direct_route_seed_key_attention",

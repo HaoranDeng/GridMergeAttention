@@ -51,6 +51,10 @@ def main():
             backend("bestlogit", "compactweightskv"),
             {"use_assigned_logit": True, "use_compact_weight_kv": True},
         ),
+        "bestlogit_compactweights": (
+            backend("bestlogit", "compactweights"),
+            {"use_assigned_logit": True, "use_compact_weight_value": True},
+        ),
         "topkey": (
             backend("bestlogit", "topkey"),
             {"use_assigned_logit": True, "use_top_key": True},

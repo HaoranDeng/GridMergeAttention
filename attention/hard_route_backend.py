@@ -7,6 +7,7 @@ import torch
 from .hard_route_triton import (
     triton_direct_route_biased_attention,
     triton_direct_route_biased_attention_g2,
+    triton_direct_route_compact_weight_value_attention,
     triton_direct_route_compact_weight_kv_attention,
     triton_direct_route_indirect_value_attention,
     triton_direct_route_recompute_value_attention,
@@ -65,6 +66,7 @@ _DIRECT_ROUTE_FLAG_SUFFIXES = (
     ("_recomputevalue", "use_recompute_value"),
     ("_recompute", "use_recompute_merge"),
     ("_compactweightskv", "use_compact_weight_kv"),
+    ("_compactweights", "use_compact_weight_value"),
     ("_mergeweightskv", "use_merge_weight_kv"),
     ("_mergeweights", "use_merge_weight_value"),
     ("_maxbias", "use_max_bias"),
@@ -120,6 +122,7 @@ class DirectRouteMergeConfig:
     use_recompute_merge: bool = False
     use_recompute_value: bool = False
     use_compact_weight_kv: bool = False
+    use_compact_weight_value: bool = False
     use_merge_weight_kv: bool = False
     use_merge_weight_value: bool = False
     use_stripe_assign: bool = False
@@ -321,6 +324,7 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         use_recompute_merge=config.use_recompute_merge,
         use_recompute_value=config.use_recompute_value,
         use_compact_weight_kv=config.use_compact_weight_kv,
+        use_compact_weight_value=config.use_compact_weight_value,
         use_merge_weight_kv=config.use_merge_weight_kv,
         use_merge_weight_value=config.use_merge_weight_value,
         use_stripe_assign=config.use_stripe_assign,
@@ -602,6 +606,41 @@ def direct_compact_weight_kv_attention(
     )
 
 
+def direct_compact_weight_value_attention(
+    q,
+    key,
+    source_value,
+    assignment,
+    merge_weight,
+    bias,
+    backend,
+    scale,
+    output=None,
+    assume_contiguous=False,
+):
+    config = _direct_attention_config(backend)
+    if config is None:
+        return None
+
+    block_m, block_n, num_warps, num_stages, group_block = config
+    return triton_direct_route_compact_weight_value_attention(
+        q,
+        key,
+        source_value,
+        assignment,
+        merge_weight,
+        bias,
+        block_m=block_m,
+        block_n=block_n,
+        scale=scale,
+        num_warps=num_warps,
+        num_stages=num_stages,
+        use_exp2=True,
+        out=output,
+        assume_contiguous=assume_contiguous,
+    )
+
+
 def direct_compressed_attention(
     q,
     key,
@@ -651,6 +690,7 @@ def direct_compressed_attention(
 __all__ = [
     "DirectRouteMergeConfig",
     "direct_compact_weight_kv_attention",
+    "direct_compact_weight_value_attention",
     "direct_compressed_attention",
     "direct_indirect_value_attention",
     "direct_recompute_value_attention",

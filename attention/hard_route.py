@@ -9,6 +9,7 @@ from .common import (
 )
 from .hard_route_backend import (
     direct_compact_weight_kv_attention,
+    direct_compact_weight_value_attention,
     direct_compressed_attention,
     direct_indirect_value_attention,
     direct_recompute_value_attention,
@@ -39,6 +40,7 @@ _DIRECT_ROUTE_ONLY_FLAGS = (
     ("use_indirect_top_value", "indirect top-value"),
     ("use_indirect_seed_value", "indirect seed-value"),
     ("use_compact_weight_kv", "compact merge-weight K/V"),
+    ("use_compact_weight_value", "compact merge-weight value"),
     ("use_merge_weight_kv", "merge-weight K/V"),
     ("use_merge_weight_value", "merge-weight value"),
 )
@@ -269,6 +271,20 @@ def _route_direct_outputs(
         return direct_compact_weight_kv_attention(
             q,
             source_key,
+            source_value,
+            value,
+            key_scale,
+            bias,
+            routing_backend,
+            scale,
+            output=output,
+            assume_contiguous=True,
+        )
+
+    if direct_config.use_compact_weight_value:
+        return direct_compact_weight_value_attention(
+            q,
+            key,
             source_value,
             value,
             key_scale,

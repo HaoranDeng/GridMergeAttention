@@ -89,6 +89,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
             or merge_config.use_indirect_seed_value
             or merge_config.use_recompute_value
             or merge_config.use_compact_weight_kv
+            or merge_config.use_compact_weight_value
             or merge_config.use_merge_weight_kv
             or merge_config.use_merge_weight_value
         )
@@ -107,7 +108,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         value_index_bytes = 4
     elif writes_separate_value_index:
         value_index_bytes = 2
-    elif merge_config.use_compact_weight_kv:
+    elif merge_config.use_compact_weight_kv or merge_config.use_compact_weight_value:
         # One int16 assignment per original key column, shared by the four
         # compressed seed tokens in the key block.
         value_index_bytes = int(width) * 2 // 4
@@ -122,6 +123,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
     writes_key_scale = bool(
         merge_config.use_seed_key_scale
         or merge_config.use_compact_weight_kv
+        or merge_config.use_compact_weight_value
         or merge_config.use_merge_weight_kv
         or merge_config.use_merge_weight_value
         or merge_config.use_indirect_top3_seed_value
@@ -136,7 +138,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
     if merge_config.use_indirect_top3_seed_value:
         # Three fp16 top-value weights; the remaining mass goes to the seed V.
         key_scale_bytes = 6
-    elif merge_config.use_compact_weight_kv:
+    elif merge_config.use_compact_weight_kv or merge_config.use_compact_weight_value:
         # One source-dtype merge weight per original key column, shared by
         # the four compressed seed tokens in the key block.
         key_scale_bytes = (
@@ -202,6 +204,8 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
             if merge_config.use_merge_weight_kv
             else "reconstructed_kv_by_compact_merge_weights"
             if merge_config.use_compact_weight_kv
+            else "original_value_by_compact_merge_weights"
+            if merge_config.use_compact_weight_value
             else "original_value_by_merge_weights"
             if merge_config.use_merge_weight_value
             else (
@@ -239,7 +243,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
                 else "fp16_top2_value_mix"
                 if merge_config.use_indirect_top2_value
                 else f"{merge_weight_dtype_name}_compact_merge_weights"
-                if merge_config.use_compact_weight_kv
+                if (merge_config.use_compact_weight_kv or merge_config.use_compact_weight_value)
                 else f"{merge_weight_dtype_name}_merge_weights"
                 if (merge_config.use_merge_weight_kv or merge_config.use_merge_weight_value)
                 else ("fp16" if writes_key_scale else None)
@@ -267,6 +271,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         "uses_max_bias": bool(merge_config.use_max_bias),
         "uses_recompute_value": bool(merge_config.use_recompute_value),
         "uses_compact_weight_kv": bool(merge_config.use_compact_weight_kv),
+        "uses_compact_weight_value": bool(merge_config.use_compact_weight_value),
         "uses_merge_weight_kv": bool(merge_config.use_merge_weight_kv),
         "uses_merge_weight_value": bool(merge_config.use_merge_weight_value),
     }
@@ -424,6 +429,16 @@ def exact_variants():
         ),
         "hard_c4_bestlogit_mergeweights_n32_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "mergeweights"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=32),
+        ),
+        "hard_c4_bestlogit_compactweights_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "compactweights"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=16),
+        ),
+        "hard_c4_bestlogit_compactweights_n32_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "compactweights"),
             seed_mode="local_with_ith",
             routing_backend=direct_routing_backend(block_n=32),
         ),

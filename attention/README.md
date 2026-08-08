@@ -140,6 +140,9 @@ The current readable backend surface is intentionally small:
   from original V inside the full compressed-attention routing kernel. This is
   a memory-traffic experiment; it keeps grid-local compression and full
   compressed attention.
+- `compactweights`: like `mergeweights`, but stores one assigned seed id and
+  one merge weight per original key instead of a full `C x key_count` weight
+  row. Compressed K is still materialized; only V is reconstructed in routing.
 - `mergeweightskv`: store only the per-key merge weights and routing bias,
   then reconstruct both compressed K and compressed V inside the full
   compressed-attention routing kernel. This is the most aggressive exact
