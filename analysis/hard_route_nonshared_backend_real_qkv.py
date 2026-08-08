@@ -468,6 +468,14 @@ def exact_variants():
         "hard_c4_bestlogit_simplemerge_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "simplemerge"), seed_mode="local_with_ith"
         ),
+        "hard_c4_bestlogit_simplemerge_j16_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "simplemerge", block_j=16),
+            seed_mode="local_with_ith",
+        ),
+        "hard_c4_bestlogit_simplemerge_j64_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "simplemerge", block_j=64),
+            seed_mode="local_with_ith",
+        ),
         "hard_c4_bestlogit_bf16kv_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "bf16kv"), seed_mode="local_with_ith"
         ),
