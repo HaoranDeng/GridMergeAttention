@@ -394,3 +394,48 @@ def biased_sdpa(query, key, value, bias, valid=None, scale=1.0):
         scale=scale,
     )
     return out.squeeze(1).to(query.dtype)
+
+
+def augmented_bias_sdpa(query, key, value, bias, valid=None, scale=1.0):
+    """Bias-preserving SDPA without an attention mask.
+
+    The hard-route second stage needs logits
+
+        scale * query @ key.T - bias.
+
+    Since ``bias`` is constant for each compressed key, it can be represented
+    as one extra key/query channel:
+
+        q_aug = [q, 1], k_aug = [k, -bias / scale].
+
+    Then ``scale * q_aug @ k_aug.T`` is exactly the same biased logit. This
+    lets PyTorch try its no-mask SDPA/Flash path while preserving full
+    compressed attention semantics. ``valid`` is intentionally unsupported
+    because it would reintroduce a mask and defeat this backend's purpose.
+    """
+    if valid is not None:
+        raise ValueError("augmented_bias_sdpa does not support masked compressed tokens.")
+    if scale == 0:
+        raise ValueError("augmented_bias_sdpa requires nonzero attention scale.")
+
+    attn_dtype = key.dtype
+    query_for_attn = query.to(attn_dtype) if query.dtype != attn_dtype else query
+    value_for_attn = value.to(attn_dtype) if value.dtype != attn_dtype else value
+
+    query_aug = query_for_attn.new_empty(*query_for_attn.shape[:-1], query_for_attn.size(-1) + 1)
+    query_aug[..., :-1] = query_for_attn
+    query_aug[..., -1] = 1
+
+    key_aug = key.new_empty(*key.shape[:-1], key.size(-1) + 1)
+    key_aug[..., :-1] = key
+    key_aug[..., -1] = (-bias.float() / float(scale)).to(key.dtype)
+
+    out = F.scaled_dot_product_attention(
+        query_aug.unsqueeze(1),
+        key_aug.unsqueeze(1),
+        value_for_attn.unsqueeze(1),
+        dropout_p=0.0,
+        is_causal=False,
+        scale=scale,
+    )
+    return out.squeeze(1).to(query.dtype)

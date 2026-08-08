@@ -2,6 +2,7 @@ import torch
 from einops import rearrange
 
 from .common import (
+    augmented_bias_sdpa,
     biased_sdpa,
     gather_seed_queries,
     seed_rows_by_mode,
@@ -143,11 +144,13 @@ def hard_route_compressed_attention(query, key, value, bias, backend, scale):
     backend = (backend or "sdpa").lower()
     if backend == "sdpa":
         return biased_sdpa(query, key, value, bias, scale=scale)
+    if backend == "sdpa_augmented_bias":
+        return augmented_bias_sdpa(query, key, value, bias, scale=scale)
     if backend == "triton":
         return triton_biased_attention(query, key, value, bias, scale=scale)
     raise ValueError(
         f"unsupported hard_route_routing_backend={backend!r}; expected 'sdpa', "
-        "'triton', or a direct-route backend."
+        "'sdpa_augmented_bias', 'triton', or a direct-route backend."
     )
 
 
