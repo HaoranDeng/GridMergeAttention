@@ -73,7 +73,12 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
     )
     key_bytes = 0 if merge_config.use_seed_key else materialized_key_bytes
     value_bytes = _dtype_bytes(torch.bfloat16 if merge_config.use_bf16_merged_value else torch.float16)
-    bias_bytes = _dtype_bytes(torch.bfloat16 if merge_config.use_bf16_routing_bias else torch.float16)
+    bias_dtype = (
+        torch.float32
+        if merge_config.use_fp32_routing_bias
+        else (torch.bfloat16 if merge_config.use_bf16_routing_bias else torch.float16)
+    )
+    bias_bytes = _dtype_bytes(bias_dtype)
     key_scale_bytes = (
         _dtype_bytes(torch.float32 if merge_config.use_fp32_key_scale else torch.float16)
         if merge_config.use_seed_key_scale
@@ -105,7 +110,11 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         "seed_key_query_read_bytes_per_attention_call": seed_key_query_read_bytes,
         "key_dtype": "bf16" if merge_config.use_bf16_merged_key else "fp16",
         "value_dtype": "bf16" if merge_config.use_bf16_merged_value else "fp16",
-        "bias_dtype": "bf16" if merge_config.use_bf16_routing_bias else "fp16",
+        "bias_dtype": (
+            "fp32"
+            if merge_config.use_fp32_routing_bias
+            else ("bf16" if merge_config.use_bf16_routing_bias else "fp16")
+        ),
         "writes_key_scale": bool(merge_config.use_seed_key_scale),
         "key_scale_dtype": (
             "fp32"
@@ -265,6 +274,9 @@ def exact_variants():
         "hard_c4_bestlogit_bf16bias_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "bf16bias"), seed_mode="local_with_ith"
         ),
+        "hard_c4_bestlogit_fp32bias_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "fp32bias"), seed_mode="local_with_ith"
+        ),
         "hard_c4_bestlogit_bf16kv_bf16bias_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "bf16kv", "bf16bias"),
             seed_mode="local_with_ith",
@@ -317,6 +329,10 @@ def exact_variants():
         ),
         "hard_c4_seedkeyproj_fp32scale_tokenmajor": exact_backend(
             direct_merge_backend("seedkeyproj", "fp32scale", "bestlogit"),
+            seed_mode="local_with_ith",
+        ),
+        "hard_c4_seedkeyproj_fp32scale_fp32bias_tokenmajor": exact_backend(
+            direct_merge_backend("seedkeyproj", "fp32scale", "fp32bias", "bestlogit"),
             seed_mode="local_with_ith",
         ),
         "hard_c4_seedkey_tokenmajor_n32_s1": exact_backend(

@@ -31,6 +31,7 @@ _DIRECT_ROUTE_KEY_OUTER_BLOCKS = {
 }
 _DIRECT_ROUTE_FLAG_SUFFIXES = (
     ("_fp32scale", "use_fp32_key_scale"),
+    ("_fp32bias", "use_fp32_routing_bias"),
     ("_seedkeyproj", ("use_seed_key", "use_seed_key_scale")),
     ("_seedkeymatch", ("use_seed_key", "use_seed_key_bias_match")),
     ("_seedkey", "use_seed_key"),
@@ -59,6 +60,7 @@ class DirectRouteMergeConfig:
     use_bf16_merged_key: bool = False
     use_bf16_merged_value: bool = False
     use_bf16_routing_bias: bool = False
+    use_fp32_routing_bias: bool = False
     use_mask_assign: bool = False
     use_recompute_merge: bool = False
     use_stripe_assign: bool = False
@@ -124,6 +126,7 @@ def parse_direct_route_backend(backend):
         "use_bf16_merged_key": False,
         "use_bf16_merged_value": False,
         "use_bf16_routing_bias": False,
+        "use_fp32_routing_bias": False,
         "use_mask_assign": False,
         "use_recompute_merge": False,
         "use_stripe_assign": False,
@@ -197,7 +200,11 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         block_j_target=config.block_j_target,
         block_l_target=config.block_l_target,
         num_warps=2,
-        bias_dtype=torch.bfloat16 if config.use_bf16_routing_bias else torch.float16,
+        bias_dtype=(
+            torch.float32
+            if config.use_fp32_routing_bias
+            else (torch.bfloat16 if config.use_bf16_routing_bias else torch.float16)
+        ),
         merged_key_dtype=torch.bfloat16 if config.use_bf16_merged_key else torch.float16,
         merged_value_dtype=torch.bfloat16 if config.use_bf16_merged_value else torch.float16,
         use_exp2=True,
