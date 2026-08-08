@@ -16,10 +16,10 @@ DIRECT_MERGE_BASE = "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbia
 DIRECT_ROUTING_BACKEND = "triton_direct_m32_n16_w1_s1_exp2_tokenmajor"
 
 
-def direct_routing_backend(block_m=32, block_n=16, num_warps=1):
+def direct_routing_backend(block_m=32, block_n=16, num_warps=1, num_stages=1):
     return (
         f"triton_direct_m{int(block_m)}_n{int(block_n)}_w{int(num_warps)}"
-        "_s1_exp2_tokenmajor"
+        f"_s{int(num_stages)}_exp2_tokenmajor"
     )
 
 
@@ -114,6 +114,26 @@ def exact_variants():
         "hard_c4_full_core_tokenmajor": exact_backend(
             direct_merge_backend(), seed_mode="local_with_ith"
         ),
+        "hard_c4_full_core_tokenmajor_n16_s2": exact_backend(
+            direct_merge_backend(),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=16, num_stages=2),
+        ),
+        "hard_c4_full_core_tokenmajor_n16_s3": exact_backend(
+            direct_merge_backend(),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=16, num_stages=3),
+        ),
+        "hard_c4_full_core_tokenmajor_n32_s2": exact_backend(
+            direct_merge_backend(),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=32, num_stages=2),
+        ),
+        "hard_c4_full_core_tokenmajor_n32_s3": exact_backend(
+            direct_merge_backend(),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=32, num_stages=3),
+        ),
         "hard_c4_full_core_tokenmajor_m16_n16_w1": exact_backend(
             direct_merge_backend(),
             seed_mode="local_with_ith",
@@ -179,6 +199,26 @@ def exact_variants():
         ),
         "hard_c4_keyouter_f6_tokenmajor": exact_backend(
             direct_merge_backend("f6"), seed_mode="local_with_ith"
+        ),
+        "hard_c4_keyouter_f6_tokenmajor_n16_s2": exact_backend(
+            direct_merge_backend("f6"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=16, num_stages=2),
+        ),
+        "hard_c4_keyouter_f6_tokenmajor_n16_s3": exact_backend(
+            direct_merge_backend("f6"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=16, num_stages=3),
+        ),
+        "hard_c4_keyouter_f6_tokenmajor_n32_s2": exact_backend(
+            direct_merge_backend("f6"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=32, num_stages=2),
+        ),
+        "hard_c4_keyouter_f6_tokenmajor_n32_s3": exact_backend(
+            direct_merge_backend("f6"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=32, num_stages=3),
         ),
         "hard_c4_keyouter_f6_tokenmajor_m16_n16_w1": exact_backend(
             direct_merge_backend("f6"),

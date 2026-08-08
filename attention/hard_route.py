@@ -21,14 +21,19 @@ from .hard_route_triton import (
 _SEED_ROWS_CACHE = {}
 _DIRECT_ROUTE_C4_BASE = "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
 _DIRECT_ROUTE_ATTENTION_CONFIGS = {
-    "triton_direct_m16_n16_w1_s1_exp2": (16, 16, 1),
-    "triton_direct_m16_n32_w1_s1_exp2": (16, 32, 1),
-    "triton_direct_m16_n64_w1_s1_exp2": (16, 64, 1),
-    "triton_direct_m16_n64_w2_s1_exp2": (16, 64, 2),
-    "triton_direct_m32_n16_w1_s1_exp2": (32, 16, 1),
-    "triton_direct_m32_n32_w1_s1_exp2": (32, 32, 1),
-    "triton_direct_m32_n64_w1_s1_exp2": (32, 64, 1),
-    "triton_direct_m32_n64_w2_s1_exp2": (32, 64, 2),
+    # backend name -> (BLOCK_M, BLOCK_N, num_warps, num_stages)
+    "triton_direct_m16_n16_w1_s1_exp2": (16, 16, 1, 1),
+    "triton_direct_m16_n32_w1_s1_exp2": (16, 32, 1, 1),
+    "triton_direct_m16_n64_w1_s1_exp2": (16, 64, 1, 1),
+    "triton_direct_m16_n64_w2_s1_exp2": (16, 64, 2, 1),
+    "triton_direct_m32_n16_w1_s1_exp2": (32, 16, 1, 1),
+    "triton_direct_m32_n16_w1_s2_exp2": (32, 16, 1, 2),
+    "triton_direct_m32_n16_w1_s3_exp2": (32, 16, 1, 3),
+    "triton_direct_m32_n32_w1_s1_exp2": (32, 32, 1, 1),
+    "triton_direct_m32_n32_w1_s2_exp2": (32, 32, 1, 2),
+    "triton_direct_m32_n32_w1_s3_exp2": (32, 32, 1, 3),
+    "triton_direct_m32_n64_w1_s1_exp2": (32, 64, 1, 1),
+    "triton_direct_m32_n64_w2_s1_exp2": (32, 64, 2, 1),
 }
 _DIRECT_ROUTE_KEY_OUTER_BLOCKS = {
     "f2": 2,
@@ -287,7 +292,7 @@ def hard_route_direct_compressed_attention(
     if direct_config is None:
         return None
 
-    block_m, block_n, num_warps = direct_config
+    block_m, block_n, num_warps, num_stages = direct_config
     return triton_direct_route_biased_attention(
         q,
         key,
@@ -297,7 +302,7 @@ def hard_route_direct_compressed_attention(
         block_n=block_n,
         scale=scale,
         num_warps=num_warps,
-        num_stages=1,
+        num_stages=num_stages,
         use_exp2=True,
         out=output,
         assume_contiguous=assume_contiguous,
