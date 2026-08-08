@@ -148,9 +148,15 @@ def _flatten_queries(q):
     return rearrange(q, "b a i j h d -> (b h a j) i d")
 
 
+def _flatten_compressed_kv(merged_keys, merged_values, routing_bias):
+    key = rearrange(merged_keys, "b a f j k c h d -> (b h a j) (f k c) d")
+    value = rearrange(merged_values, "b a f j k c h d -> (b h a j) (f k c) d")
+    bias = rearrange(routing_bias, "b h a f k j c -> (b h a j) (f k c)")
+    return key, value, bias
+
+
 def _run_reference_path(q, k, v, scale, seed_rows, hard_route_backend, hard_route_routing_backend):
     """Readable path: gather seed queries, merge KV, then run full attention."""
-    query = _flatten_queries(q)
     seed_queries = gather_seed_queries(q, seed_rows)
     merged_keys, merged_values, routing_bias, _ = _merge_kv(
         seed_queries,
@@ -159,11 +165,9 @@ def _run_reference_path(q, k, v, scale, seed_rows, hard_route_backend, hard_rout
         hard_route_backend,
         scale,
     )
-    key = rearrange(merged_keys, "b a f j k c h d -> (b h a j) (f k c) d")
-    value = rearrange(merged_values, "b a f j k c h d -> (b h a j) (f k c) d")
-    bias = rearrange(routing_bias, "b h a f k j c -> (b h a j) (f k c)")
+    key, value, bias = _flatten_compressed_kv(merged_keys, merged_values, routing_bias)
     out = hard_route_compressed_attention(
-        query,
+        _flatten_queries(q),
         key,
         value,
         bias,
@@ -171,10 +175,6 @@ def _run_reference_path(q, k, v, scale, seed_rows, hard_route_backend, hard_rout
         scale,
     )
     return _restore_attention_blocks(out, q)
-
-
-def _can_skip_seed_rows(direct_config):
-    return direct_config.supported and direct_config.inline_local_seed
 
 
 def _route_direct_outputs(q, key, value, bias, key_scale, direct_config, routing_backend, scale, output):
@@ -267,22 +267,24 @@ def hard_route_attention(
     # the L keys into several hard-assigned merged tokens instead of one.
     validate_block_seed_mode(seed_mode, "multi-token merging")
     direct_backend = parse_direct_route_backend(hard_route_backend)
-    if _can_skip_seed_rows(direct_backend) and seed_mode != "local_with_ith":
+    direct_path_uses_inline_seed = direct_backend.supported and direct_backend.inline_local_seed
+    if direct_path_uses_inline_seed and seed_mode != "local_with_ith":
         raise ValueError("inline-local-seed hard-route backend requires seed_mode='local_with_ith'.")
     if num_merge_tokens > k.size(3):
         raise ValueError("num_merge_tokens cannot exceed key columns per block.")
 
+    seed_rows = None
+    if not direct_path_uses_inline_seed:
+        seed_rows = _build_seed_rows(
+            q,
+            k,
+            query_outer_offset,
+            num_merge_tokens,
+            seed,
+            seed_mode,
+        )
+
     if direct_backend.supported:
-        seed_rows = None
-        if not direct_backend.inline_local_seed:
-            seed_rows = _build_seed_rows(
-                q,
-                k,
-                query_outer_offset,
-                num_merge_tokens,
-                seed,
-                seed_mode,
-            )
         return _run_direct_path(
             q,
             k,
@@ -294,14 +296,6 @@ def hard_route_attention(
             output,
         )
 
-    seed_rows = _build_seed_rows(
-        q,
-        k,
-        query_outer_offset,
-        num_merge_tokens,
-        seed,
-        seed_mode,
-    )
     return _run_reference_path(
         q,
         k,
