@@ -4423,7 +4423,12 @@ def triton_hard_route_merge_c4_direct_route(
         merged_key_dtype = merged_dtype
     if merged_value_dtype is None:
         merged_value_dtype = merged_dtype
-    if use_seed_key or use_merge_weight_kv:
+    if use_merge_weight_kv:
+        # Routing reconstructs both K and V from original K/V plus merge
+        # weights, so the materialized K/V buffers are intentionally unused.
+        merged_key = query
+        merged_value = query
+    elif use_seed_key:
         merged_key = query
         merged_value = _cached_empty(
             "hard_route_c4_direct_route_value_token_major",
