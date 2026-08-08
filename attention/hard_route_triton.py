@@ -3144,7 +3144,11 @@ def triton_hard_route_merge_c4_direct_route(
             key.device,
             merged_key_dtype,
         )
-        if use_indirect_top_value or use_indirect_seed_value:
+        if use_indirect_seed_value:
+            # Seed-value routing gathers V by route-token seed id, so no value
+            # index buffer is needed. The routing kernel ignores this tensor.
+            merged_value = merged_key
+        elif use_indirect_top_value:
             merged_value = _cached_empty(
                 "hard_route_c4_direct_route_value_index_token_major",
                 (route_tokens, route_groups),
