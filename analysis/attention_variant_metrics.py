@@ -10,7 +10,7 @@ from omegaconf import OmegaConf
 
 import wan.modules.model as wan_model
 from attention.common import seed_columns_by_mode, seed_rows_by_mode
-from attention.hard_route import assign_keys_to_seeds
+from attention.hard_route_pytorch import assign_keys_to_seeds
 from utils.misc import set_seed
 from utils.wan_wrapper import WanDiffusionWrapper, WanTextEncoder
 

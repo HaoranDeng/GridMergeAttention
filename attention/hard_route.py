@@ -13,12 +13,8 @@ from .hard_route_backend import (
     direct_top_key_attention,
     merge_kv_direct_c4,
     parse_direct_route_backend,
-    uses_inline_local_seed_backend,
 )
-from .hard_route_pytorch import (
-    assign_keys_to_seeds,
-    hard_route_merge_kv_pytorch,
-)
+from .hard_route_pytorch import hard_route_merge_kv_pytorch
 from .hard_route_triton import (
     triton_biased_attention,
     triton_hard_route_merge,
@@ -325,8 +321,6 @@ def hard_route_attention(
 
 
 __all__ = [
-    "assign_keys_to_seeds",
     "hard_route_attention",
     "hard_route_compressed_attention",
-    "uses_inline_local_seed_backend",
 ]

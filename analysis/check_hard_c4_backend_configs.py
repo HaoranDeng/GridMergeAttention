@@ -39,6 +39,23 @@ def main():
             backend("bestlogit", "topkeyscale"),
             {"use_assigned_logit": True, "use_top_key": True, "use_top_key_scale": True},
         ),
+        "topkey_indirectkey": (
+            backend("bestlogit", "topkey", "indirectkey"),
+            {
+                "use_assigned_logit": True,
+                "use_top_key": True,
+                "use_indirect_top_key": True,
+            },
+        ),
+        "topkeyscale_indirectkey": (
+            backend("bestlogit", "topkeyscale", "indirectkey"),
+            {
+                "use_assigned_logit": True,
+                "use_top_key": True,
+                "use_top_key_scale": True,
+                "use_indirect_top_key": True,
+            },
+        ),
         "topkeyaffine": (
             backend("bestlogit", "topkeyaffine"),
             {"use_assigned_logit": True, "use_top_key": True, "use_top_key_affine_scale": True},

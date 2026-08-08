@@ -356,6 +356,14 @@ def exact_variants():
         "hard_c4_bestlogit_topkeyscale_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "topkeyscale"), seed_mode="local_with_ith"
         ),
+        "hard_c4_bestlogit_topkey_indirectkey_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "topkey", "indirectkey"),
+            seed_mode="local_with_ith",
+        ),
+        "hard_c4_bestlogit_topkeyscale_indirectkey_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "topkeyscale", "indirectkey"),
+            seed_mode="local_with_ith",
+        ),
         "hard_c4_bestlogit_topkeyaffine_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "topkeyaffine"), seed_mode="local_with_ith"
         ),

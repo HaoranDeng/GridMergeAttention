@@ -86,7 +86,16 @@ reference merge. Triton backends implement the same two-stage algorithm but
 replace the merge and/or compressed-attention stages with kernels.
 
 For understanding or changing the algorithm, start from
-`hard_route_pytorch.py`. Its core path is intentionally written as:
+`hard_route_pytorch.py`. The main helpers are:
+
+- `assign_keys_to_seeds`: hard-assign every key to one seed query.
+- `hard_route_merge_weights`: masked softmax inside each assigned cluster and
+  entropy routing-bias construction.
+- `hard_route_merge_kv_pytorch`: regular `30q x 52k` PyTorch reference merge.
+- `hard_route_merge_kv_transpose_pytorch`: transposed `52q x 30k` reference
+  merge.
+
+Its core path is intentionally written as:
 
 ```text
 seed/key logits -> hard assignment -> masked softmax -> merge K/V -> routing bias
