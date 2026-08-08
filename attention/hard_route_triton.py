@@ -2878,6 +2878,7 @@ if triton is not None:
                         merged_value,
                     )
 
+            merged_value = merged_value.to(tl.float16)
             acc = acc * alpha[:, None] + tl.dot(p.to(merged_value.dtype), merged_value)
             normalizer = normalizer * alpha + tl.sum(p, axis=1)
             max_score = next_max
