@@ -4,6 +4,10 @@ This file records experiments that should not be repeated unless there is a
 new reason to revisit them. The goal is to keep hard-route / GridMerge C4 work
 focused on variants that preserve quality against dense attention.
 
+When an experiment fails, add it here with: result, change tested, evidence,
+why not repeat, and the rule it implies. Treat this file as the first place to
+check before launching another speed/quality sweep.
+
 ## Hard Constraints
 
 - Keep grid-local compression. Do not replace it with global compression or
@@ -16,8 +20,12 @@ focused on variants that preserve quality against dense attention.
 
 ### No-Bias Routing
 
-- Result: bad video quality.
+- Result: bad video quality; rejected by visual inspection.
 - Change tested: remove the routing-bias term after KV compression.
+- Evidence: no-bias C4 configs such as
+  `configs/token_merging_wan_hard_route_c4_fastseed_nobias_fewstep.yaml` and
+  `configs/token_merging_wan_hard_route_c4_fastseed_outer_local_r4_nobias_fewstep.yaml`
+  generated worse videos than the bias-preserving hard C4 path.
 - Why not repeat: the routing bias carries the entropy/log-normalizer
   correction from the first-stage key assignment and merge. Dropping it changes
   the approximation too much, even if it can reduce memory traffic.

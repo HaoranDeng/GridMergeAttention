@@ -1,3 +1,5 @@
+# Negative result: no-bias hard-route quality was bad in visual inspection.
+# Keep this config only for explicit ablations; do not use it for the main path.
 image_or_video_shape:
   - 1
   - 21
