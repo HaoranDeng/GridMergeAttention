@@ -70,8 +70,9 @@ def hard_route_merge_weights_and_bias(seed_logits, dtype):
     assigned = assign_keys_to_seeds(seed_logits)
     merge_weights, log_denom = masked_seed_softmax(seed_logits, assigned, dtype)
     weights_for_bias = merge_weights.float()
-    log_probs = seed_logits.float() - log_denom
-    routing_bias = (weights_for_bias * log_probs).sum(dim=-1)
+    expected_logit = (weights_for_bias * seed_logits.float()).sum(dim=-1)
+    normalizer_term = log_denom.squeeze(-1) * weights_for_bias.sum(dim=-1)
+    routing_bias = expected_logit - normalizer_term
     return merge_weights, routing_bias, assigned.any(dim=-1)
 
 
