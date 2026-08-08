@@ -41,6 +41,7 @@ MAX_CALLS="${MAX_CALLS:-30}"
 NUM_PROMPTS="${NUM_PROMPTS:-1}"
 VARIANTS="${VARIANTS:-hard_c4_full_core_tokenmajor}"
 QUERY_OUTER_CHUNK="${QUERY_OUTER_CHUNK:-7}"
+SKIP_BASELINE="${SKIP_BASELINE:-0}"
 SEED="${SEED:-0}"
 DTYPE="${DTYPE:-bf16}"
 GPU_ID="${GPU_ID:-0}"
@@ -57,8 +58,14 @@ echo "Benchmarking non-shared hard C4 attention backends"
 echo "  max calls: ${MAX_CALLS}"
 echo "  prompts:   ${NUM_PROMPTS}"
 echo "  variants:  ${VARIANTS}"
+echo "  skip baseline: ${SKIP_BASELINE}"
 echo "  output:    ${OUTPUT_JSON}"
 echo "  triton cache: ${TRITON_CACHE_DIR}"
+
+baseline_args=()
+case "${SKIP_BASELINE,,}" in
+  1|true|yes|y) baseline_args+=(--skip_baseline) ;;
+esac
 
 HIP_VISIBLE_DEVICES="${GPU_ID}" ROCR_VISIBLE_DEVICES="${GPU_ID}" CUDA_VISIBLE_DEVICES="${GPU_ID}" \
 PYTHONUNBUFFERED=1 \
@@ -73,4 +80,5 @@ python analysis/hard_route_nonshared_backend_real_qkv.py \
   --query_outer_chunk "${QUERY_OUTER_CHUNK}" \
   --variants "${VARIANTS}" \
   --seed "${SEED}" \
+  "${baseline_args[@]}" \
   --output_json "${OUTPUT_JSON}"
