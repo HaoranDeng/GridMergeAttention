@@ -78,18 +78,18 @@ check before launching another speed/quality sweep.
 
 ### Token-Major Routing `n8` Tile
 
-- Result: slower than the token-major `n16` routing tile.
+- Result: slower than the token-major `n16` routing tile, and not competitive
+  with the later `n32` default.
 - Change tested: use `triton_direct_m32_n8_w1_s1_exp2_tokenmajor` after the
   token-major C4 merge.
 - Evidence: `analysis/hard_c4_tokenmajor_n8_n16_20260807/metrics.json` on
   AMDHPC measured about 26.29 ms/call for `n8` versus about 23.57 ms/call for
   `n16`, with the same output error.
-- Rule: keep `m32_n16` as the token-major routing tile unless a different
-  routing kernel structure is introduced.
+- Rule: do not use `n8` for the main token-major routing path.
 
 ### Token-Major Routing Larger-M Tiles
 
-- Result: slower than the current token-major `m32_n16` routing tile.
+- Result: slower than the token-major `m32` routing family.
 - Change tested: keep the same C4 merge output and full compressed attention,
   but use token-major direct routing tiles `m64_n16`, `m64_n32`, `m128_n16`,
   `m128_n32`, and `m128_n32_w4`.
@@ -100,8 +100,39 @@ check before launching another speed/quality sweep.
   unchanged.
 - Why not repeat directly: Q_ROWS is only 30, so larger `BLOCK_M` shapes waste
   lanes/registers in this direct-route layout.
-- Rule: keep token-major direct routing at `m32_n16_w1_s1_exp2` unless the
-  routing layout changes substantially.
+- Rule: keep `BLOCK_M=32` for token-major direct routing unless the routing
+  layout changes substantially.
+
+### Grouped `g2` Token-Major Routing
+
+- Result: slower than the ungrouped token-major routing path with identical
+  output error.
+- Change tested: process two adjacent route groups per Triton routing program
+  using `triton_direct_g2_*_tokenmajor`, while keeping the same C4 merge output
+  and full compressed attention.
+- Evidence: Slurm job `366953` measured dense at about 23.41 ms/call,
+  the old `hard_c4_bestlogit_tokenmajor` routing tile `m32_n16` at about
+  24.17 ms/call, `m32_n32` at about 23.36 ms/call, `g2_m32_n16` at about
+  25.06 ms/call, and `g2_m16_n16` at about 28.28 ms/call. All hard-route
+  variants had the same dense-vs-output rel-L2, about 0.099699.
+- Why not repeat directly: grouping two route groups reduces program count,
+  but doubles the live K/V/Q/accumulator state and loses more to register
+  pressure than it gains from launch reduction.
+- Rule: do not use `triton_direct_g2_*_tokenmajor` for the main hard C4 route.
+  The current routing default is `triton_direct_m32_n32_w1_s1_exp2_tokenmajor`.
+
+### Token-Major Routing `n16` Versus `n32`
+
+- Result: `n32` is the current default because it was slightly faster than
+  `n16` in the latest multiprompt real-QKV benchmark with unchanged error.
+- Change tested: compare `triton_direct_m32_n16_w1_s1_exp2_tokenmajor` against
+  `triton_direct_m32_n32_w1_s1_exp2_tokenmajor` after the same bestlogit C4
+  merge.
+- Evidence: Slurm job `366953` measured `m32_n16` at about 24.17 ms/call and
+  `m32_n32` at about 23.36 ms/call over 180 attention calls, both with
+  rel-L2 about 0.099699 versus dense.
+- Rule: use `m32_n32_w1_s1_exp2` as the default token-major routing tile until
+  a more substantial routing or merge-layout change is validated.
 
 ### Generic SDPA Routing Fallback
 
@@ -189,7 +220,7 @@ check before launching another speed/quality sweep.
   `hard_c4_m16_routing_sweep_20260808`, and
   `hard_c4_stage_sweep_20260808` measured the best variants around
   22.98-23.42 ms/call, roughly tied with or slower than dense and not better
-  than the current `m32_n16_w1_s1` path.
+  than the later `m32_n32_w1_s1` default.
 - Why not repeat directly: these settings only retile the second-stage full
   compressed attention and do not reduce the dominant intermediate K/V traffic.
 - Rule: do not retry these routing tile/stage settings unless the compressed
@@ -423,7 +454,7 @@ The best accepted direction so far is still:
   small amount of merge overhead,
 - token-major intermediate compressed-KV layout, which preserves the same
   full-attention math but makes merge stores more contiguous,
-- standard K/V block layout for the current token-major `m32_n16` path, avoiding
+- standard K/V block layout for the current token-major `m32_n32` path, avoiding
   the older head-major experiment branch,
 - `query_outer_chunk=10`, which was the fastest confirmed safe chunk size in
   `analysis/hard_c4_nohead_chunk_confirm_20260808`,

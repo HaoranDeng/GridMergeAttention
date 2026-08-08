@@ -576,7 +576,7 @@ def parse_args():
     )
     parser.add_argument(
         "--hard_route_routing_backend",
-        default="triton_direct_m32_n16_w1_s1_exp2_tokenmajor",
+        default="triton_direct_m32_n32_w1_s1_exp2_tokenmajor",
     )
     parser.add_argument("--output_json", required=True)
     return parser.parse_args()

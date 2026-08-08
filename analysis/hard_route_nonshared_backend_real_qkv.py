@@ -15,7 +15,7 @@ from utils.misc import set_seed
 
 
 DIRECT_MERGE_TEMPLATE = "triton_c4_direct_route_j{block_j}_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
-DIRECT_ROUTING_BACKEND = "triton_direct_m32_n16_w1_s1_exp2_tokenmajor"
+DIRECT_ROUTING_BACKEND = "triton_direct_m32_n32_w1_s1_exp2_tokenmajor"
 CHUNK_VARIANT_RE = re.compile(r"^(?P<base>.+)_chunk(?P<chunk>\d+)$")
 
 
@@ -491,6 +491,11 @@ def exact_variants():
             direct_merge_backend("bestlogit"),
             seed_mode="local_with_ith",
             routing_backend="sdpa",
+        ),
+        "hard_c4_bestlogit_tokenmajor_n16_s1": exact_backend(
+            direct_merge_backend("bestlogit"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=16),
         ),
         "hard_c4_bestlogit_tokenmajor_n32_s1": exact_backend(
             direct_merge_backend("bestlogit"),
