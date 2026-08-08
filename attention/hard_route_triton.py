@@ -800,9 +800,7 @@ if triton is not None:
 
             assigned_to_seed = assignments == seed_idx
             if FORCE_SEED_KEYS:
-                forced_key = key_offsets[None, :] == seed_idx
-                not_forced_key = key_offsets[None, :] >= 4
-                active = valid_logits & (forced_key | (not_forced_key & assigned_to_seed))
+                active = valid_logits & assigned_to_seed
             else:
                 has_seed = tl.sum(tl.where(assigned_to_seed & valid_logits, 1, 0), axis=1) > 0
                 forced_first_key = (~has_seed[:, None]) & (key_offsets[None, :] == 0)
@@ -1138,6 +1136,7 @@ if triton is not None:
             best_logits = tl.where(update, logits2, best_logits)
             assignments = tl.where(update, 2, assignments)
             update = logits3 > best_logits
+            best_logits = tl.where(update, logits3, best_logits)
             assignments = tl.where(update, 3, assignments)
             assignments = tl.where(
                 valid_logits & (key_offsets[None, :] < 4),
@@ -1145,7 +1144,7 @@ if triton is not None:
                 assignments,
             )
             if USE_ASSIGNED_LOGIT:
-                assigned_logits = tl.where(update, logits3, best_logits)
+                assigned_logits = best_logits
                 assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 0), logits0, assigned_logits)
                 assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 1), logits1, assigned_logits)
                 assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 2), logits2, assigned_logits)
