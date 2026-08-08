@@ -1,7 +1,7 @@
 import torch
 
 
-NEG_INF = torch.finfo(torch.float32).min
+FLOAT32_NEG_INF = torch.finfo(torch.float32).min
 
 
 def assign_keys_to_seeds(seed_logits):
@@ -25,6 +25,20 @@ def assign_keys_to_seeds(seed_logits):
     return assigned
 
 
+def _row_layout_seed_logits(seed_queries, key, scale):
+    # seed_queries: [B, A, F, K, J, C, H, D]
+    # key:          [B, F, K, L, H, D]
+    # logits:       [B, H, A, F, K, J, C, L]
+    return torch.einsum("bafkjchd,bfklhd->bhafkjcl", seed_queries, key).float() * float(scale)
+
+
+def _transpose_layout_seed_logits(seed_queries, key, scale):
+    # seed_queries: [B, A, F, I, L, C, H, D]
+    # key:          [B, F, K, L, H, D]
+    # logits:       [B, H, A, F, I, L, C, K]
+    return torch.einsum("bafilchd,bfklhd->bhafilck", seed_queries, key).float() * float(scale)
+
+
 def hard_route_merge_weights(seed_logits, dtype):
     """Build hard-cluster softmax weights and entropy routing bias.
 
@@ -34,18 +48,28 @@ def hard_route_merge_weights(seed_logits, dtype):
       3. compute routing_bias = sum_l alpha_l log(alpha_l).
 
     seed_logits: [..., C, L]
-    weights:     [..., C, L]
-    bias:        [..., C]
+      weights:     [..., C, L]
+      bias:        [..., C]
     """
     assigned = assign_keys_to_seeds(seed_logits)
-    active_logits = seed_logits.float().masked_fill(~assigned, NEG_INF)
-    log_denom = torch.logsumexp(active_logits, dim=-1, keepdim=True)
+    active_logits = seed_logits.float().masked_fill(~assigned, FLOAT32_NEG_INF)
+    log_weights = active_logits - torch.logsumexp(active_logits, dim=-1, keepdim=True)
 
-    weights = (active_logits - log_denom).exp().masked_fill(~assigned, 0.0)
-    weights_fp32 = weights.float()
-    expected_logit = (weights_fp32 * seed_logits.float()).sum(dim=-1)
-    routing_bias = expected_logit - log_denom.squeeze(-1) * weights_fp32.sum(dim=-1)
+    weights = log_weights.exp().masked_fill(~assigned, 0.0)
+    routing_bias = (weights.float() * log_weights.masked_fill(~assigned, 0.0)).sum(dim=-1)
     return weights.to(dtype), routing_bias
+
+
+def _merge_row_layout(weights, key, value):
+    merged_key = torch.einsum("bhafkjcl,bfklhd->bafjkchd", weights, key)
+    merged_value = torch.einsum("bhafkjcl,bfklhe->bafjkche", weights, value)
+    return merged_key, merged_value
+
+
+def _merge_transpose_layout(weights, key, value):
+    merged_key = torch.einsum("bhafilck,bfklhd->bafilchd", weights, key)
+    merged_value = torch.einsum("bhafilck,bfklhe->bafilche", weights, value)
+    return merged_key, merged_value
 
 
 def hard_route_merge_kv_pytorch(seed_queries, key, value, scale):
@@ -60,13 +84,9 @@ def hard_route_merge_kv_pytorch(seed_queries, key, value, scale):
     merged K/V:   [B, A, F, J, K, C, H, D]
     bias:         [B, H, A, F, K, J, C]
     """
-    seed_logits = (
-        torch.einsum("bafkjchd,bfklhd->bhafkjcl", seed_queries, key).float()
-        * float(scale)
-    )
+    seed_logits = _row_layout_seed_logits(seed_queries, key, scale)
     weights, routing_bias = hard_route_merge_weights(seed_logits, key.dtype)
-    merged_keys = torch.einsum("bhafkjcl,bfklhd->bafjkchd", weights, key)
-    merged_values = torch.einsum("bhafkjcl,bfklhe->bafjkche", weights, value)
+    merged_keys, merged_values = _merge_row_layout(weights, key, value)
     return merged_keys, merged_values, routing_bias
 
 
@@ -76,13 +96,9 @@ def hard_route_merge_kv_transpose_pytorch(seed_queries, key, value, scale):
     The regular block is I queries x L keys. The transposed block is
     J queries x K keys, so seed query columns compress key rows.
     """
-    seed_logits = (
-        torch.einsum("bafilchd,bfklhd->bhafilck", seed_queries, key).float()
-        * float(scale)
-    )
+    seed_logits = _transpose_layout_seed_logits(seed_queries, key, scale)
     weights, routing_bias = hard_route_merge_weights(seed_logits, key.dtype)
-    merged_keys = torch.einsum("bhafilck,bfklhd->bafilchd", weights, key)
-    merged_values = torch.einsum("bhafilck,bfklhe->bafilche", weights, value)
+    merged_keys, merged_values = _merge_transpose_layout(weights, key, value)
     return merged_keys, merged_values, routing_bias
 
 

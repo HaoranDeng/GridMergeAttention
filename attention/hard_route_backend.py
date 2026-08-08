@@ -1,5 +1,5 @@
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from functools import lru_cache
 
 import torch
@@ -114,6 +114,14 @@ def uses_inline_local_seed_backend(backend):
     return str(backend or "").lower().endswith("_inline_local_seed")
 
 
+def _default_direct_route_options():
+    return {
+        field.name: field.default
+        for field in fields(DirectRouteMergeConfig)
+        if field.name not in {"supported", "inline_local_seed", "block_j_target"}
+    }
+
+
 @lru_cache(maxsize=64)
 def parse_direct_route_attention_backend(backend):
     match = _DIRECT_ROUTE_ATTENTION_RE.fullmatch(backend or "")
@@ -144,35 +152,7 @@ def parse_direct_route_backend(backend):
     backend, inline_local_seed = _remove_suffix(backend, "_inline_local_seed")
     backend, token_major_output = _remove_suffix(backend, "_tokenmajor")
 
-    options = {
-        "block_l_target": 0,
-        "key_outer_block": 1,
-        "use_key_outer_kernel": False,
-        "use_assigned_logit": False,
-        "use_bf16_merged_key": False,
-        "use_bf16_merged_value": False,
-        "use_bf16_routing_bias": False,
-        "use_fp32_routing_bias": False,
-        "use_mask_assign": False,
-        "use_recompute_merge": False,
-        "use_stripe_assign": False,
-        "use_seed_key": False,
-        "use_seed_key_bias_match": False,
-        "use_seed_key_scale": False,
-        "use_fp32_key_scale": False,
-        "use_seed_key_lsq_scale": False,
-        "use_seed_key_affine_scale": False,
-        "use_indirect_seed_value": False,
-        "use_indirect_top_value": False,
-        "use_indirect_top_kv": False,
-        "use_indirect_top_key": False,
-        "use_top_kv": False,
-        "use_top_key": False,
-        "use_top_key_scale": False,
-        "use_top_key_affine_scale": False,
-        "use_top_value": False,
-        "use_seed_value": False,
-    }
+    options = _default_direct_route_options()
 
     while True:
         matched_any_suffix = False

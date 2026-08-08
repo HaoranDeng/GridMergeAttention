@@ -24,6 +24,13 @@ from .hard_route_triton import (
 
 
 _SEED_ROWS_CACHE = {}
+_DIRECT_ROUTE_ONLY_FLAGS = (
+    ("use_seed_key", "seed-key"),
+    ("use_indirect_top_key", "indirect top-key"),
+    ("use_indirect_top_kv", "indirect top-KV"),
+    ("use_indirect_top_value", "indirect top-value"),
+    ("use_indirect_seed_value", "indirect seed-value"),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +195,13 @@ def _route_direct_outputs(
     scale,
     output,
 ):
+    uses_indirect_key = direct_config.use_indirect_top_key or direct_config.use_indirect_top_kv
+    uses_original_value = (
+        direct_config.use_indirect_top_kv
+        or direct_config.use_indirect_top_value
+        or direct_config.use_indirect_seed_value
+    )
+
     if direct_config.use_seed_key:
         return direct_seed_key_attention(
             q,
@@ -199,17 +213,12 @@ def _route_direct_outputs(
             output=output,
             assume_contiguous=True,
         )
-    if direct_config.use_indirect_top_key or direct_config.use_indirect_top_kv:
+
+    if uses_indirect_key:
         return direct_top_key_attention(
             q,
             source_key,
-            source_value
-            if (
-                direct_config.use_indirect_top_kv
-                or direct_config.use_indirect_top_value
-                or direct_config.use_indirect_seed_value
-            )
-            else None,
+            source_value if uses_original_value else None,
             key,
             value,
             bias,
@@ -219,6 +228,7 @@ def _route_direct_outputs(
             output=output,
             assume_contiguous=True,
         )
+
     if direct_config.use_indirect_top_value or direct_config.use_indirect_seed_value:
         return direct_indirect_value_attention(
             q,
@@ -242,6 +252,14 @@ def _route_direct_outputs(
         output=output,
         assume_contiguous=True,
     )
+
+
+def _raise_for_unsupported_direct_attention(direct_config):
+    for flag, name in _DIRECT_ROUTE_ONLY_FLAGS:
+        if getattr(direct_config, flag):
+            raise ValueError(
+                f"{name} hard-route backend requires a triton_direct_*_tokenmajor routing backend."
+            )
 
 
 def _run_direct_fallback_attention(q, key, value, bias, routing_backend, scale):
@@ -287,16 +305,7 @@ def _run_direct_path(q, k, v, scale, seed_rows, direct_config, hard_route_routin
     if direct_out is not None:
         return direct_out
 
-    if direct_config.use_seed_key:
-        raise ValueError("seed-key hard-route backend requires a triton_direct_*_tokenmajor routing backend.")
-    if direct_config.use_indirect_top_key:
-        raise ValueError("indirect top-key hard-route backend requires a triton_direct_*_tokenmajor routing backend.")
-    if direct_config.use_indirect_top_kv:
-        raise ValueError("indirect top-KV hard-route backend requires a triton_direct_*_tokenmajor routing backend.")
-    if direct_config.use_indirect_top_value:
-        raise ValueError("indirect top-value hard-route backend requires a triton_direct_*_tokenmajor routing backend.")
-    if direct_config.use_indirect_seed_value:
-        raise ValueError("indirect seed-value hard-route backend requires a triton_direct_*_tokenmajor routing backend.")
+    _raise_for_unsupported_direct_attention(direct_config)
 
     return _run_direct_fallback_attention(q, key, value, bias, hard_route_routing_backend, scale)
 
