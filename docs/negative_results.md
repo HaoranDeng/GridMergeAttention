@@ -150,6 +150,25 @@ check before launching another speed/quality sweep.
   redesigned to reduce register pressure and revalidated against the current
   token-major path.
 
+### Fully Fused Streaming Merge + Full Attention
+
+- Result: much slower than the current two-kernel token-major path.
+- Change tested: avoid writing compressed K/V/bias to global memory by
+  recomputing each C4 merged token inside a single full-attention kernel and
+  applying FlashAttention-style online softmax over all compressed tokens.
+- Evidence: Slurm job `366569` measured about 526.72 ms/call for
+  `hard_c4_fused_full_m32` and about 1008.94 ms/call for
+  `hard_c4_fused_full_m16`, versus about 22.73 ms/call for
+  `hard_c4_full_core_tokenmajor` in the same smoke benchmark. The error was
+  similar, but the runtime was far worse.
+- Why not repeat directly: the fused kernel saves global writes/reads of
+  compressed K/V/bias, but loses the current merge kernel's reuse across query
+  columns and the routing kernel's tensor-core tile over compressed tokens.
+- Rule: do not fuse merge and full compressed attention by streaming one
+  merged token at a time. Only revisit this direction if the design preserves
+  both query-column reuse during merge and route-token tiling during full
+  attention.
+
 ### Whole-Outer `query_outer_chunk=21`
 
 - Result: unsafe for the current no-headmajor token-major hard C4 path.
