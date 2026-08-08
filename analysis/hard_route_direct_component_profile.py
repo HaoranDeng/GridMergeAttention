@@ -15,6 +15,7 @@ from attention.hard_route import (
     hard_route_direct_compressed_attention,
     uses_inline_local_seed_backend,
 )
+from analysis.hard_route_nonshared_backend_real_qkv import exact_variants
 from generate import load_generator_checkpoint, load_prompts
 from pipeline import TokenMergingWanPipeline
 from utils.misc import set_seed
@@ -97,8 +98,26 @@ def load_pipeline(config_path, checkpoint, dtype, device, use_ema):
     return config, pipeline
 
 
-def make_seed_rows(q_chunk, k_blocks, query_outer_offset, args):
-    if uses_inline_local_seed_backend(args.hard_route_backend):
+def selected_variants(args):
+    if not args.variants:
+        return {
+            "profiled_backend": {
+                "hard_route_backend": args.hard_route_backend,
+                "hard_route_routing_backend": args.hard_route_routing_backend,
+                "seed_mode": args.seed_mode,
+            }
+        }
+
+    available = exact_variants()
+    names = [name.strip() for name in args.variants.split(",") if name.strip()]
+    missing = [name for name in names if name not in available]
+    if missing:
+        raise ValueError(f"unknown variants: {', '.join(missing)}")
+    return {name: available[name] for name in names}
+
+
+def make_seed_rows(q_chunk, k_blocks, query_outer_offset, args, variant):
+    if uses_inline_local_seed_backend(variant["hard_route_backend"]):
         return None
     return _build_seed_rows(
         q_chunk,
@@ -106,28 +125,39 @@ def make_seed_rows(q_chunk, k_blocks, query_outer_offset, args):
         query_outer_offset,
         args.num_merge_tokens,
         args.seed,
-        args.seed_mode,
+        variant.get("seed_mode", args.seed_mode),
     )
 
 
 def install_probe(stats, args):
     import wan.modules.model as wan_model
 
-    state = {"calls_current_prompt": 0, "warmed": False}
-    direct_merge_config = _parse_direct_route_backend(args.hard_route_backend)
+    variants = selected_variants(args)
+    direct_merge_configs = {
+        name: _parse_direct_route_backend(variant["hard_route_backend"])
+        for name, variant in variants.items()
+    }
+    state = {
+        "calls_current_prompt": 0,
+        "warmed": False,
+        "dense_calls": 0,
+        "dense_seconds": 0.0,
+    }
 
     def run_dense(q, k, v, self):
         return wan_model.flash_attention(q=q, k=k, v=v, window_size=self.window_size)
 
-    def run_split(q, k, v, grid_size, scale, record):
+    def run_split(q, k, v, grid_size, scale, variant_name, variant, record):
+        variant_stats = stats[variant_name]
+        direct_merge_config = direct_merge_configs[variant_name]
         _, height, width = grid_size
         if record:
             q_blocks, seconds = timed(lambda: video_to_blocks(q, 1, 1, 1, height, width))
-            stats.add_time("video_to_q_blocks", seconds)
+            variant_stats.add_time("video_to_q_blocks", seconds)
             k_blocks, seconds = timed(lambda: video_to_blocks(k, 1, 1, 1, height, width))
-            stats.add_time("video_to_k_blocks", seconds)
+            variant_stats.add_time("video_to_k_blocks", seconds)
             v_blocks, seconds = timed(lambda: video_to_blocks(v, 1, 1, 1, height, width))
-            stats.add_time("video_to_v_blocks", seconds)
+            variant_stats.add_time("video_to_v_blocks", seconds)
         else:
             q_blocks = video_to_blocks(q, 1, 1, 1, height, width)
             k_blocks = video_to_blocks(k, 1, 1, 1, height, width)
@@ -143,8 +173,8 @@ def install_probe(stats, args):
             out_slice = out_blocks[:, start:end]
 
             if record:
-                seed_rows, seconds = timed(lambda: make_seed_rows(q_chunk, k_blocks, start, args))
-                stats.add_time("seed_rows", seconds)
+                seed_rows, seconds = timed(lambda: make_seed_rows(q_chunk, k_blocks, start, args, variant))
+                variant_stats.add_time("seed_rows", seconds)
                 merge_out, seconds = timed(
                     lambda: _direct_route_merge(
                         q_chunk,
@@ -155,9 +185,9 @@ def install_probe(stats, args):
                         scale,
                     )
                 )
-                stats.add_time("direct_merge", seconds)
+                variant_stats.add_time("direct_merge", seconds)
             else:
-                seed_rows = make_seed_rows(q_chunk, k_blocks, start, args)
+                seed_rows = make_seed_rows(q_chunk, k_blocks, start, args, variant)
                 merge_out = _direct_route_merge(
                     q_chunk,
                     seed_rows,
@@ -179,22 +209,22 @@ def install_probe(stats, args):
                         merged_key,
                         merged_value,
                         routing_bias,
-                        args.hard_route_routing_backend,
+                        variant["hard_route_routing_backend"],
                         scale,
                         output=output,
                     )
                 )
-                stats.add_time("direct_routing", seconds)
+                variant_stats.add_time("direct_routing", seconds)
                 if routed is not out_slice:
                     _, seconds = timed(lambda: out_slice.copy_(routed))
-                    stats.add_time("output_copy", seconds)
+                    variant_stats.add_time("output_copy", seconds)
             else:
                 routed = hard_route_direct_compressed_attention(
                     q_chunk,
                     merged_key,
                     merged_value,
                     routing_bias,
-                    args.hard_route_routing_backend,
+                    variant["hard_route_routing_backend"],
                     scale,
                     output=output,
                 )
@@ -203,7 +233,7 @@ def install_probe(stats, args):
 
         if record:
             out, seconds = timed(lambda: blocks_to_video(out_blocks, 1, 1, 1))
-            stats.add_time("blocks_to_video", seconds)
+            variant_stats.add_time("blocks_to_video", seconds)
             return out
         return blocks_to_video(out_blocks, 1, 1, 1)
 
@@ -223,23 +253,26 @@ def install_probe(stats, args):
 
         if should_record and not state["warmed"]:
             _ = run_dense(q, k, v, self)
-            _ = run_split(q, k, v, grid_size, dim**-0.5, record=False)
+            for name, variant in variants.items():
+                _ = run_split(q, k, v, grid_size, dim**-0.5, name, variant, record=False)
             sync()
             state["warmed"] = True
 
         if should_record:
-            stats.attention_calls += 1
             dense, seconds = timed(lambda: run_dense(q, k, v, self))
-            stats.add_time("dense", seconds)
-            out = run_split(q, k, v, grid_size, dim**-0.5, record=True)
-            stats.add_error(out, dense)
+            state["dense_calls"] += 1
+            state["dense_seconds"] += float(seconds)
+            for name, variant in variants.items():
+                stats[name].attention_calls += 1
+                out = run_split(q, k, v, grid_size, dim**-0.5, name, variant, record=True)
+                stats[name].add_error(out, dense)
             x = dense
         else:
             x = run_dense(q, k, v, self)
         return self.o(x.flatten(2))
 
     wan_model.WanSelfAttention.forward = probed_self_attention
-    return state
+    return state, variants
 
 
 @torch.inference_mode()
@@ -282,8 +315,19 @@ def parse_args():
     parser.add_argument("--query_outer_chunk", type=int, default=5)
     parser.add_argument("--num_merge_tokens", type=int, default=4)
     parser.add_argument("--seed_mode", default="fast_random_with_ith")
-    parser.add_argument("--hard_route_backend", required=True)
-    parser.add_argument("--hard_route_routing_backend", required=True)
+    parser.add_argument(
+        "--variants",
+        default="",
+        help="Comma-separated exact variant names from hard_route_nonshared_backend_real_qkv.py.",
+    )
+    parser.add_argument(
+        "--hard_route_backend",
+        default="triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_tokenmajor_inline_local_seed",
+    )
+    parser.add_argument(
+        "--hard_route_routing_backend",
+        default="triton_direct_m32_n16_w1_s1_exp2_tokenmajor",
+    )
     parser.add_argument("--output_json", required=True)
     return parser.parse_args()
 
@@ -304,8 +348,8 @@ def main():
     if len(prompts) != args.num_prompts:
         raise ValueError(f"Requested {args.num_prompts} prompts, found {len(prompts)}.")
 
-    stats = ComponentStats()
-    probe_state = install_probe(stats, args)
+    stats = defaultdict(ComponentStats)
+    probe_state, variants = install_probe(stats, args)
 
     sync()
     start = time.perf_counter()
@@ -323,10 +367,28 @@ def main():
         "num_prompts": args.num_prompts,
         "max_calls_per_prompt": args.max_calls,
         "query_outer_chunk": args.query_outer_chunk,
-        "hard_route_backend": args.hard_route_backend,
-        "hard_route_routing_backend": args.hard_route_routing_backend,
+        "variants_requested": args.variants,
+        "dense": {
+            "calls": probe_state["dense_calls"],
+            "seconds": probe_state["dense_seconds"],
+            "mean_ms": (
+                1000.0 * probe_state["dense_seconds"] / probe_state["dense_calls"]
+                if probe_state["dense_calls"]
+                else 0.0
+            ),
+        },
         "wall_seconds": time.perf_counter() - start,
-        "summary": stats.summary(),
+        "variants": {
+            name: {
+                "config": {
+                    key: value
+                    for key, value in variants[name].items()
+                    if key in {"hard_route_backend", "hard_route_routing_backend", "seed_mode"}
+                },
+                "summary": stats[name].summary(),
+            }
+            for name in sorted(variants)
+        },
     }
     output_path = Path(args.output_json)
     output_path.parent.mkdir(parents=True, exist_ok=True)
