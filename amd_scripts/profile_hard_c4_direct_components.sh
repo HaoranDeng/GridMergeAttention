@@ -39,9 +39,10 @@ PROMPT_PATH="${PROMPT_PATH:-${REPO_DIR}/prompts/MovieGenVideoBench_extended.txt}
 OUTPUT_JSON="${OUTPUT_JSON:-${RESULT_DIR}/hard_c4_direct_components.json}"
 MAX_CALLS="${MAX_CALLS:-20}"
 NUM_PROMPTS="${NUM_PROMPTS:-2}"
-QUERY_OUTER_CHUNK="${QUERY_OUTER_CHUNK:-5}"
-HARD_ROUTE_BACKEND="${HARD_ROUTE_BACKEND:-triton_c4_direct_route_j32_w2_exp2merge}"
-HARD_ROUTE_ROUTING_BACKEND="${HARD_ROUTE_ROUTING_BACKEND:-triton_direct_m32_n64_w1_s1_exp2}"
+QUERY_OUTER_CHUNK="${QUERY_OUTER_CHUNK:-10}"
+SEED_MODE="${SEED_MODE:-local_with_ith}"
+HARD_ROUTE_BACKEND="${HARD_ROUTE_BACKEND:-triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_tokenmajor_inline_local_seed}"
+HARD_ROUTE_ROUTING_BACKEND="${HARD_ROUTE_ROUTING_BACKEND:-triton_direct_m32_n16_w1_s1_exp2_tokenmajor}"
 SEED="${SEED:-0}"
 DTYPE="${DTYPE:-bf16}"
 GPU_ID="${GPU_ID:-0}"
@@ -72,6 +73,7 @@ python analysis/hard_route_direct_component_profile.py \
   --max_calls "${MAX_CALLS}" \
   --num_prompts "${NUM_PROMPTS}" \
   --query_outer_chunk "${QUERY_OUTER_CHUNK}" \
+  --seed_mode "${SEED_MODE}" \
   --hard_route_backend "${HARD_ROUTE_BACKEND}" \
   --hard_route_routing_backend "${HARD_ROUTE_ROUTING_BACKEND}" \
   --seed "${SEED}" \

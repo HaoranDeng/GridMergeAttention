@@ -9,10 +9,11 @@ from omegaconf import OmegaConf
 
 from attention.common import blocks_to_video, video_to_blocks
 from attention.hard_route import (
+    _build_seed_rows,
     _direct_route_merge,
-    _cached_seed_rows,
     hard_route_direct_compressed_attention,
     uses_head_major_kv_backend,
+    uses_inline_local_seed_backend,
 )
 from generate import load_generator_checkpoint, load_prompts
 from pipeline import TokenMergingWanPipeline
@@ -97,14 +98,12 @@ def load_pipeline(config_path, checkpoint, dtype, device, use_ema):
 
 
 def make_seed_rows(q_chunk, k_blocks, query_outer_offset, args):
-    return _cached_seed_rows(
-        q_chunk.device,
+    if uses_inline_local_seed_backend(args.hard_route_backend):
+        return None
+    return _build_seed_rows(
+        q_chunk,
+        k_blocks,
         query_outer_offset,
-        q_chunk.size(1),
-        k_blocks.size(1),
-        k_blocks.size(2),
-        q_chunk.size(3),
-        q_chunk.size(2),
         args.num_merge_tokens,
         args.seed,
         True,
