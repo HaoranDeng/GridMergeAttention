@@ -11,6 +11,7 @@ from .hard_route_triton import (
     triton_direct_route_recompute_value_attention,
     triton_direct_route_seed_key_attention,
     triton_direct_route_top_key_attention,
+    triton_direct_route_weight_kv_attention,
     triton_direct_route_weight_value_attention,
     triton_hard_route_merge_c4_direct_route,
 )
@@ -62,6 +63,7 @@ _DIRECT_ROUTE_FLAG_SUFFIXES = (
     ("_stripe", "use_stripe_assign"),
     ("_recomputevalue", "use_recompute_value"),
     ("_recompute", "use_recompute_merge"),
+    ("_mergeweightskv", "use_merge_weight_kv"),
     ("_mergeweights", "use_merge_weight_value"),
     ("_maxbias", "use_max_bias"),
     ("_bestlogit", "use_assigned_logit"),
@@ -115,6 +117,7 @@ class DirectRouteMergeConfig:
     use_mask_assign: bool = False
     use_recompute_merge: bool = False
     use_recompute_value: bool = False
+    use_merge_weight_kv: bool = False
     use_merge_weight_value: bool = False
     use_stripe_assign: bool = False
     use_max_bias: bool = False
@@ -275,6 +278,17 @@ def _parse_tokenmajor_attention_backend(backend):
     return parse_direct_route_attention_backend(backend)
 
 
+def _direct_attention_config(backend, allowed_group_blocks=(1,)):
+    config = _parse_tokenmajor_attention_backend(backend)
+    if config is None:
+        return None
+
+    block_m, block_n, num_warps, num_stages, group_block = config
+    if group_block not in allowed_group_blocks:
+        return None
+    return block_m, block_n, num_warps, num_stages, group_block
+
+
 def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguous=False):
     return triton_hard_route_merge_c4_direct_route(
         q,
@@ -303,6 +317,7 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         use_mask_assign=config.use_mask_assign,
         use_recompute_merge=config.use_recompute_merge,
         use_recompute_value=config.use_recompute_value,
+        use_merge_weight_kv=config.use_merge_weight_kv,
         use_merge_weight_value=config.use_merge_weight_value,
         use_stripe_assign=config.use_stripe_assign,
         use_max_bias=config.use_max_bias,
@@ -344,13 +359,11 @@ def direct_seed_key_attention(
     output=None,
     assume_contiguous=False,
 ):
-    config = _parse_tokenmajor_attention_backend(backend)
+    config = _direct_attention_config(backend)
     if config is None:
         return None
 
     block_m, block_n, num_warps, num_stages, group_block = config
-    if group_block != 1:
-        return None
     return triton_direct_route_seed_key_attention(
         q,
         value,
@@ -381,13 +394,11 @@ def direct_top_key_attention(
     output=None,
     assume_contiguous=False,
 ):
-    config = _parse_tokenmajor_attention_backend(backend)
+    config = _direct_attention_config(backend)
     if config is None:
         return None
 
     block_m, block_n, num_warps, num_stages, group_block = config
-    if group_block != 1:
-        return None
     return triton_direct_route_top_key_attention(
         q,
         source_key,
@@ -425,13 +436,11 @@ def direct_indirect_value_attention(
     output=None,
     assume_contiguous=False,
 ):
-    config = _parse_tokenmajor_attention_backend(backend)
+    config = _direct_attention_config(backend)
     if config is None:
         return None
 
     block_m, block_n, num_warps, num_stages, group_block = config
-    if group_block != 1:
-        return None
     return triton_direct_route_indirect_value_attention(
         q,
         key,
@@ -466,13 +475,11 @@ def direct_recompute_value_attention(
     output=None,
     assume_contiguous=False,
 ):
-    config = _parse_tokenmajor_attention_backend(backend)
+    config = _direct_attention_config(backend)
     if config is None:
         return None
 
     block_m, block_n, num_warps, num_stages, group_block = config
-    if group_block != 1:
-        return None
     return triton_direct_route_recompute_value_attention(
         q,
         key,
@@ -501,18 +508,49 @@ def direct_weight_value_attention(
     output=None,
     assume_contiguous=False,
 ):
-    config = _parse_tokenmajor_attention_backend(backend)
+    config = _direct_attention_config(backend)
     if config is None:
         return None
 
     block_m, block_n, num_warps, num_stages, group_block = config
-    if group_block != 1:
-        return None
     return triton_direct_route_weight_value_attention(
         q,
         key,
         source_value,
         value_weight,
+        bias,
+        block_m=block_m,
+        block_n=block_n,
+        scale=scale,
+        num_warps=num_warps,
+        num_stages=num_stages,
+        use_exp2=True,
+        out=output,
+        assume_contiguous=assume_contiguous,
+    )
+
+
+def direct_weight_kv_attention(
+    q,
+    source_key,
+    source_value,
+    merge_weight,
+    bias,
+    backend,
+    scale,
+    output=None,
+    assume_contiguous=False,
+):
+    config = _direct_attention_config(backend)
+    if config is None:
+        return None
+
+    block_m, block_n, num_warps, num_stages, group_block = config
+    return triton_direct_route_weight_kv_attention(
+        q,
+        source_key,
+        source_value,
+        merge_weight,
         bias,
         block_m=block_m,
         block_n=block_n,
@@ -535,7 +573,7 @@ def direct_compressed_attention(
     output=None,
     assume_contiguous=False,
 ):
-    config = _parse_tokenmajor_attention_backend(backend)
+    config = _direct_attention_config(backend, allowed_group_blocks=(1, 2))
     if config is None:
         return None
 
@@ -578,6 +616,7 @@ __all__ = [
     "direct_recompute_value_attention",
     "direct_seed_key_attention",
     "direct_top_key_attention",
+    "direct_weight_kv_attention",
     "direct_weight_value_attention",
     "merge_kv_direct_c4",
     "parse_direct_route_attention_backend",

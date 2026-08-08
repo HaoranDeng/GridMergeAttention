@@ -43,6 +43,10 @@ def main():
             backend("bestlogit", "mergeweights"),
             {"use_assigned_logit": True, "use_merge_weight_value": True},
         ),
+        "bestlogit_mergeweightskv": (
+            backend("bestlogit", "mergeweightskv"),
+            {"use_assigned_logit": True, "use_merge_weight_kv": True},
+        ),
         "topkey": (
             backend("bestlogit", "topkey"),
             {"use_assigned_logit": True, "use_top_key": True},

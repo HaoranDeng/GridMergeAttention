@@ -71,7 +71,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
     materialized_key_bytes = _dtype_bytes(
         torch.bfloat16 if merge_config.use_bf16_merged_key else torch.float16
     )
-    if merge_config.use_seed_key:
+    if merge_config.use_seed_key or merge_config.use_merge_weight_kv:
         key_bytes_per_route_token = 0
     elif merge_config.use_indirect_top_key or merge_config.use_indirect_top_kv:
         key_bytes_per_route_token = 2
@@ -88,6 +88,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
             or merge_config.use_indirect_top_value
             or merge_config.use_indirect_seed_value
             or merge_config.use_recompute_value
+            or merge_config.use_merge_weight_kv
             or merge_config.use_merge_weight_value
         )
         else _dtype_bytes(torch.bfloat16 if merge_config.use_bf16_merged_value else torch.float16)
@@ -115,6 +116,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
     bias_bytes = _dtype_bytes(bias_dtype)
     writes_key_scale = bool(
         merge_config.use_seed_key_scale
+        or merge_config.use_merge_weight_kv
         or merge_config.use_merge_weight_value
         or merge_config.use_indirect_top3_seed_value
         or merge_config.use_indirect_top3_value
@@ -128,7 +130,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
     if merge_config.use_indirect_top3_seed_value:
         # Three fp16 top-value weights; the remaining mass goes to the seed V.
         key_scale_bytes = 6
-    elif merge_config.use_merge_weight_value:
+    elif merge_config.use_merge_weight_kv or merge_config.use_merge_weight_value:
         # One source-dtype merge weight per original key column.
         key_scale_bytes = int(width) * _dtype_bytes(torch.float32 if merge_config.use_fp32_key_scale else q.dtype)
     elif merge_config.use_indirect_top3_value or merge_config.use_indirect_top2_seed_value:
@@ -175,10 +177,16 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         "key_dtype": (
             "int16_index"
             if (merge_config.use_indirect_top_key or merge_config.use_indirect_top_kv)
-            else ("bf16" if merge_config.use_bf16_merged_key else "fp16")
+            else (
+                "reconstructed_by_merge_weights"
+                if merge_config.use_merge_weight_kv
+                else ("bf16" if merge_config.use_bf16_merged_key else "fp16")
+            )
         ),
         "value_dtype": (
-            "original_value_by_merge_weights"
+            "reconstructed_kv_by_merge_weights"
+            if merge_config.use_merge_weight_kv
+            else "original_value_by_merge_weights"
             if merge_config.use_merge_weight_value
             else (
                 "original_value_by_int16_index"
@@ -215,13 +223,17 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
                 else "fp16_top2_value_mix"
                 if merge_config.use_indirect_top2_value
                 else f"{merge_weight_dtype_name}_merge_weights"
-                if merge_config.use_merge_weight_value
+                if (merge_config.use_merge_weight_kv or merge_config.use_merge_weight_value)
                 else ("fp16" if writes_key_scale else None)
             )
         ),
         "block_j_target": merge_config.block_j_target,
         "block_l_target": merge_config.block_l_target or None,
-        "writes_merged_key": not (merge_config.use_seed_key or merge_config.use_indirect_top_key),
+        "writes_merged_key": not (
+            merge_config.use_seed_key
+            or merge_config.use_merge_weight_kv
+            or merge_config.use_indirect_top_key
+        ),
         "uses_indirect_top_key": bool(merge_config.use_indirect_top_key),
         "uses_top_kv": bool(merge_config.use_top_kv),
         "uses_top3_seed_value": bool(merge_config.use_top3_seed_value),
@@ -235,6 +247,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         "uses_representative_seed_value": bool(merge_config.use_seed_value),
         "uses_max_bias": bool(merge_config.use_max_bias),
         "uses_recompute_value": bool(merge_config.use_recompute_value),
+        "uses_merge_weight_kv": bool(merge_config.use_merge_weight_kv),
         "uses_merge_weight_value": bool(merge_config.use_merge_weight_value),
     }
 
@@ -391,6 +404,16 @@ def exact_variants():
         ),
         "hard_c4_bestlogit_mergeweights_n32_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "mergeweights"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=32),
+        ),
+        "hard_c4_bestlogit_mergeweightskv_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "mergeweightskv"),
+            seed_mode="local_with_ith",
+            routing_backend=direct_routing_backend(block_n=16),
+        ),
+        "hard_c4_bestlogit_mergeweightskv_n32_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "mergeweightskv"),
             seed_mode="local_with_ith",
             routing_backend=direct_routing_backend(block_n=32),
         ),

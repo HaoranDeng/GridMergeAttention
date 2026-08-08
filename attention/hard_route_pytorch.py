@@ -1,105 +1,134 @@
 """Readable PyTorch reference for hard-route token merging.
 
-This file is intentionally simple rather than fast. The Triton kernels should
-match the tensor math here:
-  1. seed queries score every key inside one grid block;
-  2. every key is assigned to the seed with the largest score;
-  3. each seed runs a softmax over only its assigned keys and merges K/V.
+This file is the algorithmic source of truth. It is intentionally written like
+the math, not like the fastest implementation:
+
+  seed/key logits -> hard assignment -> masked softmax -> merge K/V + bias
+
+The Triton kernels in ``hard_route_triton.py`` should match this tensor math.
 """
 
 import torch
 
 
-NEG_INF = torch.finfo(torch.float32).min
+FLOAT_NEG_INF = torch.finfo(torch.float32).min
 
 
 def assign_keys_to_seeds(seed_key_logits):
-    """Return a mask assigning every key to its best seed query.
+    """Assign each key to exactly one seed.
 
     seed_key_logits: [..., C, L]
-      C = number of seed queries in this block
-      L = number of keys in this block
+      C: number of seed queries in one block
+      L: number of keys in one block
 
-    Empty seed clusters are kept alive by assigning key 0 to them. This keeps
-    the compressed token count fixed and matches the Triton path.
+    The output has the same shape. A True entry means this key belongs to that
+    seed's cluster. Empty clusters are given key 0 so the number of compressed
+    tokens stays fixed.
     """
     best_seed = seed_key_logits.argmax(dim=-2, keepdim=True)
-    assignment = torch.zeros_like(seed_key_logits, dtype=torch.bool)
-    assignment.scatter_(dim=-2, index=best_seed, value=True)
+    assigned = torch.zeros_like(seed_key_logits, dtype=torch.bool)
+    assigned.scatter_(dim=-2, index=best_seed, value=True)
 
-    empty_seed = ~assignment.any(dim=-1, keepdim=True)
-    assignment[..., :1] |= empty_seed
-    return assignment
-
-
-def masked_log_softmax(logits, mask):
-    """Softmax over assigned keys only; masked-out keys get log-probability 0."""
-    logits = logits.float().masked_fill(~mask, NEG_INF)
-    log_probs = logits - torch.logsumexp(logits, dim=-1, keepdim=True)
-    return log_probs.masked_fill(~mask, 0.0)
+    empty_seed = ~assigned.any(dim=-1, keepdim=True)
+    assigned[..., :1] |= empty_seed
+    return assigned
 
 
-def hard_cluster_weights(seed_key_logits, dtype):
-    """Convert seed/key logits into merge weights and routing bias.
+def assigned_key_log_softmax(seed_key_logits, assigned):
+    """Run log-softmax only over the keys assigned to each seed."""
+    masked_logits = seed_key_logits.float().masked_fill(~assigned, FLOAT_NEG_INF)
+    log_weights = masked_logits - torch.logsumexp(masked_logits, dim=-1, keepdim=True)
+    return log_weights.masked_fill(~assigned, 0.0)
 
-    This is the reference implementation of the first stage:
-      1. hard-assign each key to one seed;
-      2. softmax only inside that seed's assigned key cluster;
-      3. compute routing_bias = sum_l alpha_l log(alpha_l).
+
+def hard_route_merge_weights(seed_key_logits, dtype):
+    """Build merge weights and the entropy-style routing bias.
 
     seed_key_logits: [..., C, L]
-    weights:         [..., C, L], zeros outside each assigned cluster
-    routing_bias:    [..., C]
+    merge_weights:  [..., C, L], zero outside each seed cluster
+    routing_bias:   [..., C], equal to sum_l alpha_l log(alpha_l)
     """
-    assignment = assign_keys_to_seeds(seed_key_logits)
-    log_weights = masked_log_softmax(seed_key_logits, assignment)
-    weights = log_weights.exp().masked_fill(~assignment, 0.0)
-    routing_bias = (weights * log_weights).sum(dim=-1)
-    return weights.to(dtype), routing_bias
+    assigned = assign_keys_to_seeds(seed_key_logits)
+    log_weights = assigned_key_log_softmax(seed_key_logits, assigned)
+    merge_weights = log_weights.exp().masked_fill(~assigned, 0.0)
+    routing_bias = (merge_weights * log_weights).sum(dim=-1)
+    return merge_weights.to(dtype), routing_bias
+
+
+# Backward-compatible names used by older analysis scripts.
+masked_log_softmax = assigned_key_log_softmax
+hard_cluster_weights = hard_route_merge_weights
+
+
+def score_regular_blocks(seed_queries, key, scale):
+    """Seed-query/key logits for regular 30-query x 52-key blocks."""
+    # seed_queries: [B, A, F, K, J, C, H, D]
+    # key:          [B, F, K, L, H, D]
+    # logits:       [B, H, A, F, K, J, C, L]
+    return torch.einsum("bafkjchd,bfklhd->bhafkjcl", seed_queries, key).float() * float(scale)
+
+
+def score_transpose_blocks(seed_queries, key, scale):
+    """Seed-query/key logits for transposed 52-query x 30-key blocks."""
+    # seed_queries: [B, A, F, I, L, C, H, D]
+    # key:          [B, F, K, L, H, D]
+    # logits:       [B, H, A, F, I, L, C, K]
+    return torch.einsum("bafilchd,bfklhd->bhafilck", seed_queries, key).float() * float(scale)
+
+
+def merge_regular_blocks(merge_weights, key, value):
+    """Apply per-cluster weights to K/V for regular blocks."""
+    merged_key = torch.einsum("bhafkjcl,bfklhd->bafjkchd", merge_weights, key)
+    merged_value = torch.einsum("bhafkjcl,bfklhe->bafjkche", merge_weights, value)
+    return merged_key, merged_value
+
+
+def merge_transpose_blocks(merge_weights, key, value):
+    """Apply per-cluster weights to K/V for transposed blocks."""
+    merged_key = torch.einsum("bhafilck,bfklhd->bafilchd", merge_weights, key)
+    merged_value = torch.einsum("bhafilck,bfklhe->bafilche", merge_weights, value)
+    return merged_key, merged_value
 
 
 def hard_route_merge_kv_pytorch(seed_queries, key, value, scale):
-    """Readable PyTorch reference for one regular hard-route merge.
+    """Reference merge for the regular layout.
 
-    A fixed (query_outer, key_outer, query_column, key_row) block has
-    I queries x L keys. This function compresses those L keys into C merged
-    KV tokens. The later attention step still attends to all compressed tokens.
+    A fixed (query_outer, key_outer, query_column, key_row) block contains
+    30 query tokens x 52 key tokens in the default Wan 480p grid.
 
     seed_queries: [B, A, F, K, J, C, H, D]
     key/value:    [B, F, K, L, H, D]
     merged K/V:   [B, A, F, J, K, C, H, D]
     bias:         [B, H, A, F, K, J, C]
     """
-    # logits: [B, H, A, F, K, J, C, L]
-    seed_key_logits = torch.einsum("bafkjchd,bfklhd->bhafkjcl", seed_queries, key)
-    seed_key_logits = seed_key_logits.float() * float(scale)
-    weights, routing_bias = hard_cluster_weights(seed_key_logits, key.dtype)
-
-    merged_key = torch.einsum("bhafkjcl,bfklhd->bafjkchd", weights, key)
-    merged_value = torch.einsum("bhafkjcl,bfklhe->bafjkche", weights, value)
+    seed_key_logits = score_regular_blocks(seed_queries, key, scale)
+    merge_weights, routing_bias = hard_route_merge_weights(seed_key_logits, key.dtype)
+    merged_key, merged_value = merge_regular_blocks(merge_weights, key, value)
     return merged_key, merged_value, routing_bias
 
 
 def hard_route_merge_kv_transpose_pytorch(seed_queries, key, value, scale):
-    """Readable PyTorch reference for the transposed hard-route merge.
+    """Reference merge for the transposed layout.
 
-    The regular block is I queries x L keys. The transposed block is
-    J queries x K keys, so seed query columns compress key rows.
+    The regular block is 30 queries x 52 keys. The transposed block is
+    52 queries x 30 keys: seed query columns compress key rows.
     """
-    # logits: [B, H, A, F, I, L, C, K]
-    seed_key_logits = torch.einsum("bafilchd,bfklhd->bhafilck", seed_queries, key)
-    seed_key_logits = seed_key_logits.float() * float(scale)
-    weights, routing_bias = hard_cluster_weights(seed_key_logits, key.dtype)
-
-    merged_key = torch.einsum("bhafilck,bfklhd->bafilchd", weights, key)
-    merged_value = torch.einsum("bhafilck,bfklhe->bafilche", weights, value)
+    seed_key_logits = score_transpose_blocks(seed_queries, key, scale)
+    merge_weights, routing_bias = hard_route_merge_weights(seed_key_logits, key.dtype)
+    merged_key, merged_value = merge_transpose_blocks(merge_weights, key, value)
     return merged_key, merged_value, routing_bias
 
 
 __all__ = [
     "assign_keys_to_seeds",
+    "assigned_key_log_softmax",
     "hard_cluster_weights",
+    "hard_route_merge_weights",
     "masked_log_softmax",
     "hard_route_merge_kv_pytorch",
     "hard_route_merge_kv_transpose_pytorch",
+    "merge_regular_blocks",
+    "merge_transpose_blocks",
+    "score_regular_blocks",
+    "score_transpose_blocks",
 ]

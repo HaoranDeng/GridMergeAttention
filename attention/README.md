@@ -89,9 +89,11 @@ For understanding or changing the algorithm, start from
 `hard_route_pytorch.py`. The main helpers are:
 
 - `assign_keys_to_seeds`: hard-assign every key to one seed query.
-- `masked_log_softmax`: run softmax inside each assigned key cluster.
-- `hard_cluster_weights`: combines assignment, masked softmax, and entropy
-  routing-bias construction.
+- `assigned_key_log_softmax`: run softmax inside each assigned key cluster.
+- `hard_route_merge_weights`: combines assignment, masked softmax, and
+  entropy routing-bias construction.
+- `score_regular_blocks` / `merge_regular_blocks`: the regular `30q x 52k`
+  PyTorch merge steps.
 - `hard_route_merge_kv_pytorch`: regular `30q x 52k` PyTorch reference merge.
 - `hard_route_merge_kv_transpose_pytorch`: transposed `52q x 30k` reference
   merge.
@@ -124,68 +126,11 @@ The `bestlogit` suffix reuses the already computed winning seed/key logit when
 forming each assigned cluster. It keeps the same assignment and full compressed
 attention semantics as the full-core path.
 
-The `maxbias` suffix is a small routing-bias approximation candidate for the
-exact materialized K/V path. It keeps the log-normalizer term but uses
-`max(logit) - logsumexp(logit)` instead of
-`sum_l alpha_l logit_l - logsumexp(logit)`. This is not the rejected no-bias
-path; it still runs full compressed attention with a per-token bias.
+The current readable backend surface is intentionally small:
 
-The following suffixes are experimental memory-traffic/merge-compute
-approximations. They do not change the second stage: after compression, the
-model still runs full compressed attention over every compressed token.
-
-- `topkey`: compressed K is the top-logit original key in the seed cluster;
-  compressed V still uses the normal softmax merge.
-- `topkeyscale`: like `topkey`, but scales the top key so the seed query sees
-  the same expected logit as the normal softmax-merged K.
-- `topkeyaffine`: like `topkey`, but fits one scalar scale and one logit shift
-  against the four seed-query logits before full compressed attention.
-- `topkeyaffine_topvalue`: combines the affine top-key approximation with
-  top-logit V, skipping both softmax K merge and softmax V merge.
-- `topkeyaffine_seedvalue`: combines the affine top-key approximation with the
-  forced representative V, also skipping both softmax K merge and softmax V
-  merge.
-- `indirectkey`: for top-key variants, store only the top-key column index and
-  optional scale instead of materializing compressed K; full compressed
-  attention then gathers K from the original K tensor.
-- `topvalue`: compressed K still uses the normal softmax merge; compressed V is
-  the top-logit original value in the seed cluster.
-- `top2value`: compressed K still uses the normal softmax merge; compressed V
-  is approximated by the two largest value contributors in the seed cluster.
-  This keeps a closer V approximation than `topvalue` while avoiding the full
-  merged-V tensor.
-- `top2seedvalue`: like `top2value`, but keeps the original softmax mass for
-  the top two values and assigns the remaining value mass to the representative
-  seed value. This is a more conservative V approximation candidate.
-- `top3value`: compressed K still uses the normal softmax merge; compressed V
-  is approximated by the three largest value contributors in the seed cluster.
-- `top3seedvalue`: like `top3value`, but keeps the original softmax mass for
-  the top three values and assigns the remaining value mass to the
-  representative seed value. This is a more conservative V approximation.
-- `topkv`: compressed K and V are both the top-logit original token in the seed
-  cluster.
-- `seedvalue`: compressed V is the forced representative seed value.
-- `indirectkv`: for `topkv`, store only the top-token column index instead of
-  materializing compressed K/V; full compressed attention gathers original K/V
-  by that index.
-- `indirectvalue`: for top-value variants, avoid materializing compressed V;
-  full compressed attention gathers original V by the stored top-token column
-  index. This can be used with materialized K or indirect top-key K.
-- `indirecttop2value`: for `top2value`, store two original value-column
-  indices and one mixture weight instead of materializing compressed V. The
-  second stage is still full compressed attention over every compressed token.
-- `indirecttop2seedvalue`: for `top2seedvalue`, store two original value-column
-  indices and two original softmax weights; the routing kernel gathers those
-  two values plus the seed value and still runs full compressed attention.
-- `indirecttop3value`: for `top3value`, store three original value-column
-  indices and two mixture weights; the third weight is implicit. The routing
-  kernel gathers three original values and still runs full compressed attention.
-- `indirecttop3seedvalue`: for `top3seedvalue`, store three original
-  value-column indices and three softmax weights; the remaining mass goes to
-  the seed value during full compressed attention.
-- `indirectseedvalue`: for seed-value variants, avoid materializing compressed
-  V; full compressed attention gathers original V by seed id. This can be used
-  with materialized K or indirect top-key K.
+- `bestlogit`: exact hard-route merge, with less redundant merge-kernel math.
+- `maxbias`: a routing-bias approximation candidate. It is not no-bias; every
+  compressed token still keeps a per-token bias.
 - `recomputevalue`: materialize exact compressed K and routing bias, skip the
   merged-V intermediate, and recompute exact merged V inside the full
   compressed-attention routing kernel. This preserves the hard C4 math and is
@@ -195,10 +140,15 @@ model still runs full compressed attention over every compressed token.
   from original V inside the full compressed-attention routing kernel. This is
   a memory-traffic experiment; it keeps grid-local compression and full
   compressed attention.
+- `mergeweightskv`: store only the per-key merge weights and routing bias,
+  then reconstruct both compressed K and compressed V inside the full
+  compressed-attention routing kernel. This is the most aggressive exact
+  intermediate-traffic experiment for hard C4; it still keeps grid-local
+  compression and full compressed attention.
 
-These variants are benchmark candidates only. Keep the `bestlogit` path above
-as the default until a real-QKV benchmark shows a clear speed gain with
-acceptable dense-attention error.
+Older representative-key/value, global/shared, no-bias, and windowed-routing
+experiments are not part of the readable path. They are tracked only as
+negative results in `../docs/negative_results.md` so they are not repeated.
 
 ## Select Route
 
