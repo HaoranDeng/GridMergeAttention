@@ -589,6 +589,10 @@ def timed(fn):
     return out, time.perf_counter() - start
 
 
+def is_illegal_memory_error(exc):
+    return "illegal memory" in repr(exc).lower()
+
+
 def load_pipeline(config_path, checkpoint, dtype, device, use_ema):
     config = OmegaConf.load(config_path)
     pipeline = TokenMergingWanPipeline(config, device=device)
@@ -704,10 +708,14 @@ def install_probe(stats, args):
             _ = run_dense(q, k, v, self)
             for name, kwargs in variants.items():
                 try:
+                    print(f"warming variant: {name}", flush=True)
                     _ = run_variant(q, k, v, grid_size, kwargs)
+                    sync()
                 except Exception as exc:
                     state["disabled_variants"].add(name)
                     state["variant_errors"][name] = repr(exc)
+                    if is_illegal_memory_error(exc):
+                        raise RuntimeError(f"{name} failed with an illegal memory access during warmup.") from exc
             sync()
             state["warmed"] = True
 
@@ -729,12 +737,15 @@ def install_probe(stats, args):
                 if name in state["disabled_variants"]:
                     continue
                 try:
+                    print(f"timing variant: {name}", flush=True)
                     out, seconds = timed(lambda kwargs=kwargs: run_variant(q, k, v, grid_size, kwargs))
                     stats[name].add_time(seconds)
                     stats[name].add_error(out, dense, baseline=baseline)
                 except Exception as exc:
                     state["disabled_variants"].add(name)
                     state["variant_errors"][name] = repr(exc)
+                    if is_illegal_memory_error(exc):
+                        raise RuntimeError(f"{name} failed with an illegal memory access during timing.") from exc
             x = dense
         else:
             x = run_dense(q, k, v, self)

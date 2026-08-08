@@ -35,6 +35,15 @@ OUTPUT_JSON="${OUTPUT_JSON:-${RESULT_DIR}/smoke.json}"
 DTYPE="${DTYPE:-bf16}"
 GPU_ID="${GPU_ID:-0}"
 SMOKE_VARIANTS="${SMOKE_VARIANTS:-}"
+SMOKE_BATCH="${SMOKE_BATCH:-1}"
+SMOKE_QUERY_OUTER="${SMOKE_QUERY_OUTER:-2}"
+SMOKE_KEY_OUTER="${SMOKE_KEY_OUTER:-2}"
+SMOKE_ROWS="${SMOKE_ROWS:-30}"
+SMOKE_COLUMNS="${SMOKE_COLUMNS:-52}"
+SMOKE_HEADS="${SMOKE_HEADS:-2}"
+SMOKE_DIM="${SMOKE_DIM:-128}"
+SMOKE_WARMUP="${SMOKE_WARMUP:-2}"
+SMOKE_REPEATS="${SMOKE_REPEATS:-5}"
 
 cd "${REPO_DIR}"
 mkdir -p out "${RESULT_DIR}"
@@ -47,6 +56,7 @@ echo "Smoke-testing hard C4 kernel variants"
 echo "  output: ${OUTPUT_JSON}"
 echo "  dtype: ${DTYPE}"
 echo "  variants: ${SMOKE_VARIANTS:-<default>}"
+echo "  shape: B=${SMOKE_BATCH} A=${SMOKE_QUERY_OUTER} F=${SMOKE_KEY_OUTER} rows=${SMOKE_ROWS} cols=${SMOKE_COLUMNS} heads=${SMOKE_HEADS} dim=${SMOKE_DIM}"
 echo "  triton cache: ${TRITON_CACHE_DIR}"
 
 variant_args=()
@@ -59,4 +69,13 @@ PYTHONUNBUFFERED=1 \
 python analysis/smoke_hard_c4_kernel_variants.py \
   --output_json "${OUTPUT_JSON}" \
   --dtype "${DTYPE}" \
+  --batch "${SMOKE_BATCH}" \
+  --query_outer "${SMOKE_QUERY_OUTER}" \
+  --key_outer "${SMOKE_KEY_OUTER}" \
+  --rows "${SMOKE_ROWS}" \
+  --columns "${SMOKE_COLUMNS}" \
+  --heads "${SMOKE_HEADS}" \
+  --dim "${SMOKE_DIM}" \
+  --warmup "${SMOKE_WARMUP}" \
+  --repeats "${SMOKE_REPEATS}" \
   "${variant_args[@]}"
