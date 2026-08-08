@@ -531,6 +531,18 @@ check before launching another speed/quality sweep.
   real Wan tensor schedule, and `w4` increases resource pressure substantially.
 - Rule: keep merge `w2` for the default simplemerge path.
 
+### Simplemerge Merge Pipeline Stages
+
+- Result: no smoke speed improvement over the default one-stage merge kernel.
+- Change tested: keep corrected bestlogit/simplemerge semantics and only change
+  the direct C4 merge kernel launch from `s1` to `s2` or `s3`.
+- Evidence: Slurm job `366989` smoke-tested random hard C4 tensors on MI300X.
+  Default `s1` measured about 0.1484 ms/call, `s2` about 0.1512 ms/call, and
+  `s3` about 0.1488 ms/call; all matched output exactly.
+- Why not repeat directly: extra pipeline stages did not improve this
+  simplemerge tile and would add more scheduling/resource risk on real Wan QKV.
+- Rule: keep merge `s1` for the default simplemerge path.
+
 ## Current Best Direction
 
 The best accepted direction so far is still:
