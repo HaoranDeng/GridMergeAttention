@@ -12,7 +12,9 @@ from .hard_route_triton import (
 )
 
 
-_DIRECT_ROUTE_C4_BASE = "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
+_DIRECT_ROUTE_C4_RE = re.compile(
+    r"^triton_c4_direct_route_j(?P<j>\d+)_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot$"
+)
 _DIRECT_ROUTE_ATTENTION_RE = re.compile(
     r"^triton_direct_m(?P<m>\d+)_n(?P<n>\d+)_w(?P<w>\d+)_s(?P<s>\d+)_exp2$"
 )
@@ -48,6 +50,7 @@ class DirectRouteMergeConfig:
 
     supported: bool
     inline_local_seed: bool = False
+    block_j_target: int = 32
     key_outer_block: int = 1
     use_key_outer_kernel: bool = False
     use_assigned_logit: bool = False
@@ -147,9 +150,16 @@ def parse_direct_route_backend(backend):
         if not matched_any_suffix:
             break
 
+    match = _DIRECT_ROUTE_C4_RE.fullmatch(backend)
+    supported = token_major_output and match is not None
+    block_j_target = int(match.group("j")) if match is not None else 32
+    if block_j_target not in {16, 32, 52, 64}:
+        supported = False
+
     return DirectRouteMergeConfig(
-        supported=token_major_output and backend == _DIRECT_ROUTE_C4_BASE,
+        supported=supported,
         inline_local_seed=inline_local_seed,
+        block_j_target=block_j_target,
         **options,
     )
 
@@ -169,7 +179,7 @@ def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguou
         key,
         value,
         scale=scale,
-        block_j_target=32,
+        block_j_target=config.block_j_target,
         num_warps=2,
         bias_dtype=torch.bfloat16 if config.use_bf16_routing_bias else torch.float16,
         merged_key_dtype=torch.bfloat16 if config.use_bf16_merged_key else torch.float16,

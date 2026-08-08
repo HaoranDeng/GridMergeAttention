@@ -14,7 +14,7 @@ from pipeline import TokenMergingWanPipeline
 from utils.misc import set_seed
 
 
-DIRECT_MERGE_BASE = "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
+DIRECT_MERGE_TEMPLATE = "triton_c4_direct_route_j{block_j}_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
 DIRECT_ROUTING_BACKEND = "triton_direct_m32_n16_w1_s1_exp2_tokenmajor"
 CHUNK_VARIANT_RE = re.compile(r"^(?P<base>.+)_chunk(?P<chunk>\d+)$")
 
@@ -26,9 +26,9 @@ def direct_routing_backend(block_m=32, block_n=16, num_warps=1, num_stages=1):
     )
 
 
-def direct_merge_backend(*suffixes):
+def direct_merge_backend(*suffixes, block_j=32):
     suffix = "_".join([*suffixes, "tokenmajor", "inline_local_seed"])
-    return f"{DIRECT_MERGE_BASE}_{suffix}"
+    return f"{DIRECT_MERGE_TEMPLATE.format(block_j=int(block_j))}_{suffix}"
 
 
 def exact_backend(hard_route_backend, seed_mode=None, routing_backend=None):
@@ -102,6 +102,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         "bias_dtype": "bf16" if merge_config.use_bf16_routing_bias else "fp16",
         "packs_routing_bias": merge_config.use_packed_bias,
         "compact_packed_bias": merge_config.use_compact_packed_bias,
+        "block_j_target": merge_config.block_j_target,
         "packed_width": (
             _packed_kvbias_width(dim, compact=merge_config.use_compact_packed_bias)
             if merge_config.use_packed_bias
@@ -246,6 +247,9 @@ def exact_variants():
         "hard_c4_bestlogit_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit"), seed_mode="local_with_ith"
         ),
+        "hard_c4_bestlogit_j52_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", block_j=52), seed_mode="local_with_ith"
+        ),
         "hard_c4_bestlogit_recompute_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "recompute"), seed_mode="local_with_ith"
         ),
@@ -279,6 +283,10 @@ def exact_variants():
         ),
         "hard_c4_bestlogit_packkvbiascompact_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "packkvbiascompact"), seed_mode="local_with_ith"
+        ),
+        "hard_c4_bestlogit_packkvbiascompact_j52_tokenmajor": exact_backend(
+            direct_merge_backend("bestlogit", "packkvbiascompact", block_j=52),
+            seed_mode="local_with_ith",
         ),
         "hard_c4_bestlogit_recompute_packkvbias_tokenmajor": exact_backend(
             direct_merge_backend("bestlogit", "recompute", "packkvbias"),

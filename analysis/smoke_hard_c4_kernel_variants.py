@@ -79,9 +79,11 @@ def main():
     variants = exact_variants()
     names = [
         "hard_c4_bestlogit_tokenmajor",
+        "hard_c4_bestlogit_j52_tokenmajor",
         "hard_c4_bestlogit_packkv_tokenmajor",
         "hard_c4_bestlogit_packkvbias_tokenmajor",
         "hard_c4_bestlogit_packkvbiascompact_tokenmajor",
+        "hard_c4_bestlogit_packkvbiascompact_j52_tokenmajor",
         "hard_c4_bestlogit_recompute_tokenmajor",
         "hard_c4_bestlogit_recompute_packkv_tokenmajor",
         "hard_c4_bestlogit_recompute_packkvbias_tokenmajor",
