@@ -36,6 +36,39 @@ _DIRECT_ROUTE_ONLY_FLAGS = (
 )
 
 
+def _uses_indirect_key(config):
+    return config.use_indirect_top_key or config.use_indirect_top_kv
+
+
+def _uses_original_value(config):
+    return (
+        config.use_indirect_top_kv
+        or config.use_indirect_top3_value
+        or config.use_indirect_top2_seed_value
+        or config.use_indirect_top2_value
+        or config.use_indirect_top_value
+        or config.use_indirect_seed_value
+    )
+
+
+def _uses_indirect_value_attention(config):
+    return (
+        config.use_indirect_top3_value
+        or config.use_indirect_top2_seed_value
+        or config.use_indirect_top2_value
+        or config.use_indirect_top_value
+        or config.use_indirect_seed_value
+    )
+
+
+def _uses_weighted_indirect_value(config):
+    return (
+        config.use_indirect_top3_value
+        or config.use_indirect_top2_seed_value
+        or config.use_indirect_top2_value
+    )
+
+
 # ---------------------------------------------------------------------------
 # Seed query selection.
 # ---------------------------------------------------------------------------
@@ -112,7 +145,7 @@ def _build_seed_rows(
 # ---------------------------------------------------------------------------
 # Backend dispatch.
 # ---------------------------------------------------------------------------
-def _merge_kv(seed_queries, k, v, backend, scale):
+def _merge_reference_kv(seed_queries, k, v, backend, scale):
     backend = (backend or "sdpa").lower()
     if backend == "sdpa":
         return hard_route_merge_kv_pytorch(seed_queries, k, v, scale)
@@ -166,7 +199,7 @@ def _flatten_compressed_kv(merged_keys, merged_values, routing_bias):
 def _run_reference_path(q, k, v, scale, seed_rows, hard_route_backend, hard_route_routing_backend):
     """Readable path: gather seed queries, merge KV, then run full attention."""
     seed_queries = gather_seed_queries(q, seed_rows)
-    merged_keys, merged_values, routing_bias = _merge_kv(
+    merged_keys, merged_values, routing_bias = _merge_reference_kv(
         seed_queries,
         k,
         v,
@@ -198,16 +231,6 @@ def _route_direct_outputs(
     scale,
     output,
 ):
-    uses_indirect_key = direct_config.use_indirect_top_key or direct_config.use_indirect_top_kv
-    uses_original_value = (
-        direct_config.use_indirect_top_kv
-        or direct_config.use_indirect_top3_value
-        or direct_config.use_indirect_top2_seed_value
-        or direct_config.use_indirect_top2_value
-        or direct_config.use_indirect_top_value
-        or direct_config.use_indirect_seed_value
-    )
-
     if direct_config.use_seed_key:
         return direct_seed_key_attention(
             q,
@@ -220,11 +243,11 @@ def _route_direct_outputs(
             assume_contiguous=True,
         )
 
-    if uses_indirect_key:
+    if _uses_indirect_key(direct_config):
         return direct_top_key_attention(
             q,
             source_key,
-            source_value if uses_original_value else None,
+            source_value if _uses_original_value(direct_config) else None,
             key,
             value,
             bias,
@@ -235,25 +258,13 @@ def _route_direct_outputs(
             assume_contiguous=True,
         )
 
-    if (
-        direct_config.use_indirect_top3_value
-        or direct_config.use_indirect_top2_seed_value
-        or direct_config.use_indirect_top2_value
-        or direct_config.use_indirect_top_value
-        or direct_config.use_indirect_seed_value
-    ):
+    if _uses_indirect_value_attention(direct_config):
         return direct_indirect_value_attention(
             q,
             key,
             source_value,
             value,
-            key_scale
-            if (
-                direct_config.use_indirect_top3_value
-                or direct_config.use_indirect_top2_value
-                or direct_config.use_indirect_top2_seed_value
-            )
-            else None,
+            key_scale if _uses_weighted_indirect_value(direct_config) else None,
             bias,
             routing_backend,
             scale,
@@ -332,6 +343,15 @@ def _run_direct_path(q, k, v, scale, seed_rows, direct_config, hard_route_routin
     return _run_direct_fallback_attention(q, key, value, bias, hard_route_routing_backend, scale)
 
 
+def _validate_hard_route_request(k, num_merge_tokens, seed_mode, direct_backend):
+    validate_block_seed_mode(seed_mode, "multi-token merging")
+
+    if direct_backend.inline_local_seed and seed_mode != "local_with_ith":
+        raise ValueError("inline-local-seed hard-route backend requires seed_mode='local_with_ith'.")
+    if num_merge_tokens > k.size(3):
+        raise ValueError("num_merge_tokens cannot exceed key columns per block.")
+
+
 def hard_route_attention(
     q,
     k,
@@ -349,16 +369,11 @@ def hard_route_attention(
     # k/v: [B, F, K, L, H, D]
     # A fixed (a, f, j, k) block has I queries x L keys. This path merges
     # the L keys into several hard-assigned merged tokens instead of one.
-    validate_block_seed_mode(seed_mode, "multi-token merging")
     direct_backend = parse_direct_route_backend(hard_route_backend)
-    direct_path_uses_inline_seed = direct_backend.supported and direct_backend.inline_local_seed
-    if direct_path_uses_inline_seed and seed_mode != "local_with_ith":
-        raise ValueError("inline-local-seed hard-route backend requires seed_mode='local_with_ith'.")
-    if num_merge_tokens > k.size(3):
-        raise ValueError("num_merge_tokens cannot exceed key columns per block.")
+    _validate_hard_route_request(k, num_merge_tokens, seed_mode, direct_backend)
 
     seed_rows = None
-    if not direct_path_uses_inline_seed:
+    if not (direct_backend.supported and direct_backend.inline_local_seed):
         seed_rows = _build_seed_rows(
             q,
             k,
