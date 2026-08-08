@@ -625,8 +625,8 @@ if triton is not None:
                         )
                         - sum_x * sum_x
                     )
-                    safe_denominator = tl.where(tl.abs(denominator) > 1.0e-20, denominator, 1.0)
-                    top_scale = numerator / safe_denominator
+                    has_fit = tl.abs(denominator) > 1.0e-20
+                    top_scale = tl.where(has_fit, numerator / denominator, 0.0)
                     top_shift = (sum_y - top_scale * sum_x) * 0.25
                     merged_key = merged_key * top_scale[:, None]
                     routing_bias = expected_logit - log_denom - top_shift
