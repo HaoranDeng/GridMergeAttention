@@ -8,7 +8,7 @@ from .common import (
 )
 from .gridmerge_one import gridmerge_one
 from .gridmerge_one_transpose import gridmerge_one_transpose
-from .hard_route import hard_route_attention, uses_head_major_kv_backend
+from .hard_route import hard_route_attention
 from .hard_route_transpose import hard_route_attention_transpose
 from .select_route import select_route_attention
 from .select_route_transpose import select_route_attention_transpose
@@ -124,9 +124,6 @@ def token_merging_attn(
     q_blocks = video_to_blocks(q, f_tied, h_reduce, w_reduce, h, w)
     k_blocks = video_to_blocks(k, f_tied, h_reduce, w_reduce, h, w)
     v_blocks = video_to_blocks(v, f_tied, h_reduce, w_reduce, h, w)
-    if layout == LAYOUT_HARD_ROUTE and uses_head_major_kv_backend(hard_route_backend):
-        k_blocks = k_blocks.permute(0, 1, 2, 4, 3, 5).contiguous()
-        v_blocks = v_blocks.permute(0, 1, 2, 4, 3, 5).contiguous()
     key_valid_blocks = None
     if valid_tokens is not None:
         key_valid_blocks = video_to_blocks(valid_tokens, f_tied, h_reduce, w_reduce, h, w)

@@ -118,6 +118,38 @@ check before launching another speed/quality sweep.
 - Rule: do not keep or rerun these same tile/warp variants unless the merge
   kernel structure changes substantially.
 
+### Group-Major Inline-Seed Layout
+
+- Result: slower than the current token-major layout with the same output
+  error.
+- Change tested: keep the same non-shared C4 full-core method and inline
+  local-with-ith seed selection, but write/read compressed K/V in group-major
+  layout instead of token-major layout.
+- Evidence: Slurm job `366560` measured about 24.75 ms/call for
+  `hard_c4_full_core_groupmajor_inline_seed`, versus about 22.98 ms/call for
+  `hard_c4_full_core_tokenmajor`, with the same rel-L2 vs dense
+  (`0.096872`).
+- Why not repeat directly: routing reads are more contiguous in group-major
+  layout, but the merge-side stores/load scheduling lose more than routing
+  gains for the current kernel structure.
+- Rule: keep token-major compressed K/V layout for the current hard C4 fast
+  path unless the merge/routing fusion strategy changes.
+
+### A2 Query-Outer Pair Kernel
+
+- Result: slower than the current token-major direct-route kernel.
+- Change tested: process two query outer groups in one Triton program to reuse
+  key/value loads across neighboring query groups.
+- Evidence: Slurm job `366561` measured about 31.95 ms/call for
+  `hard_c4_full_core_a2_tokenmajor` in a smoke run, versus about 22.98 ms/call
+  for the current token-major path in Slurm job `366560`, with similar output
+  error.
+- Why not repeat directly: the intended key/value reuse is outweighed by
+  higher register pressure and lower occupancy in the fused two-outer program.
+- Rule: do not keep an A2/query-outer-pair merge kernel unless the kernel is
+  redesigned to reduce register pressure and revalidated against the current
+  token-major path.
+
 ### Whole-Outer `query_outer_chunk=21`
 
 - Result: unsafe for the current no-headmajor token-major hard C4 path.
@@ -156,8 +188,8 @@ The best accepted direction so far is still:
   merge kernel,
 - token-major intermediate compressed-KV layout, which preserves the same
   full-attention math but makes merge stores more contiguous,
-- no-headmajor K/V input for the current token-major `m32_n16` path, which was
-  slightly faster than the head-major variant while producing identical error,
+- standard K/V block layout for the current token-major `m32_n16` path, avoiding
+  the older head-major experiment branch,
 - `query_outer_chunk=10`, which was the fastest confirmed safe chunk size in
   `analysis/hard_c4_nohead_chunk_confirm_20260808`,
 - direct-route Triton kernels to avoid unnecessary reshape/copy overhead.

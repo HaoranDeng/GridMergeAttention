@@ -19,14 +19,8 @@ from .hard_route_triton import (
 _SEED_ROWS_CACHE = {}
 
 
-def uses_head_major_kv_backend(backend):
-    return str(backend or "").lower().endswith("_headmajor")
-
-
 def uses_inline_local_seed_backend(backend):
     backend = str(backend or "").lower()
-    if backend.endswith("_headmajor"):
-        backend = backend[: -len("_headmajor")]
     return backend.endswith("_inline_local_seed")
 
 
@@ -170,21 +164,17 @@ def _merge(seed_queries, k, v, backend, scale):
 
 def _direct_route_merge(q, seed_rows, k, v, backend, scale):
     backend = (backend or "").lower()
-    key_head_major = backend.endswith("_headmajor")
-    if key_head_major:
-        backend = backend[: -len("_headmajor")]
     inline_local_seed = backend.endswith("_inline_local_seed")
     if inline_local_seed:
         backend = backend[: -len("_inline_local_seed")]
     token_major_output = backend.endswith("_tokenmajor")
     if token_major_output:
         backend = backend[: -len("_tokenmajor")]
-    query_outer_block = 1
-    if backend.endswith("_a2"):
-        backend = backend[: -len("_a2")]
-        query_outer_block = 2
 
-    if backend != "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot":
+    if (
+        not token_major_output
+        or backend != "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
+    ):
         return None
 
     return triton_hard_route_merge_c4_direct_route(
@@ -201,10 +191,7 @@ def _direct_route_merge(q, seed_rows, k, v, backend, scale):
         force_seed_keys=True,
         num_stages=1,
         logit_input_precision="tf32",
-        key_head_major=key_head_major,
         inline_local_seed=inline_local_seed,
-        token_major_output=token_major_output,
-        query_outer_block=query_outer_block,
     )
 
 def hard_route_compressed_attention(query, key, value, bias, backend, scale):
@@ -221,8 +208,9 @@ def hard_route_compressed_attention(query, key, value, bias, backend, scale):
 def hard_route_direct_compressed_attention(q, key, value, bias, backend, scale, output=None):
     backend = (backend or "").lower()
     key_token_major = backend.endswith("_tokenmajor")
-    if key_token_major:
-        backend = backend[: -len("_tokenmajor")]
+    if not key_token_major:
+        return None
+    backend = backend[: -len("_tokenmajor")]
     direct_configs = {
         "triton_direct_m32_n16_w1_s1_exp2": (32, 16, 1),
         "triton_direct_m32_n32_w1_s1_exp2": (32, 32, 1),
@@ -244,7 +232,6 @@ def hard_route_direct_compressed_attention(q, key, value, bias, backend, scale, 
         num_stages=1,
         use_exp2=True,
         out=output,
-        key_token_major=key_token_major,
     )
 
 def hard_route_attention(
@@ -269,8 +256,7 @@ def hard_route_attention(
     inline_local_seed_backend = uses_inline_local_seed_backend(hard_route_backend)
     if inline_local_seed_backend and seed_mode != "local_with_ith":
         raise ValueError("inline-local-seed hard-route backend requires seed_mode='local_with_ith'.")
-    key_columns = k.size(4) if uses_head_major_kv_backend(hard_route_backend) else k.size(3)
-    if num_merge_tokens > key_columns:
+    if num_merge_tokens > k.size(3):
         raise ValueError("num_merge_tokens cannot exceed key columns per block.")
 
     seed_rows = None
@@ -352,5 +338,4 @@ __all__ = [
     "hard_route_compressed_attention",
     "hard_route_merge_weights",
     "uses_inline_local_seed_backend",
-    "uses_head_major_kv_backend",
 ]

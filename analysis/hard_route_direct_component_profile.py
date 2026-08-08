@@ -12,7 +12,6 @@ from attention.hard_route import (
     _build_seed_rows,
     _direct_route_merge,
     hard_route_direct_compressed_attention,
-    uses_head_major_kv_backend,
     uses_inline_local_seed_backend,
 )
 from generate import load_generator_checkpoint, load_prompts
@@ -134,18 +133,8 @@ def install_probe(stats, args):
             k_blocks = video_to_blocks(k, 1, 1, 1, height, width)
             v_blocks = video_to_blocks(v, 1, 1, 1, height, width)
 
-        if uses_head_major_kv_backend(args.hard_route_backend):
-            if record:
-                k_merge_blocks, seconds = timed(lambda: k_blocks.permute(0, 1, 2, 4, 3, 5).contiguous())
-                stats.add_time("head_major_k_blocks", seconds)
-                v_merge_blocks, seconds = timed(lambda: v_blocks.permute(0, 1, 2, 4, 3, 5).contiguous())
-                stats.add_time("head_major_v_blocks", seconds)
-            else:
-                k_merge_blocks = k_blocks.permute(0, 1, 2, 4, 3, 5).contiguous()
-                v_merge_blocks = v_blocks.permute(0, 1, 2, 4, 3, 5).contiguous()
-        else:
-            k_merge_blocks = k_blocks
-            v_merge_blocks = v_blocks
+        k_merge_blocks = k_blocks
+        v_merge_blocks = v_blocks
 
         out_blocks = torch.empty_like(q_blocks)
         for start in range(0, q_blocks.size(1), args.query_outer_chunk):
