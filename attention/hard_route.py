@@ -234,11 +234,6 @@ def _validate_hard_route_request(k, num_merge_tokens, seed_mode, direct_backend)
         raise ValueError("inline-local-seed hard-route backend requires seed_mode='local_with_ith'.")
     if num_merge_tokens > k.size(3):
         raise ValueError("num_merge_tokens cannot exceed key columns per block.")
-    if direct_backend.use_recompute_value:
-        if not direct_backend.inline_local_seed:
-            raise ValueError("recompute-value hard-route backend requires inline local seeds.")
-        if not direct_backend.use_assigned_logit:
-            raise ValueError("recompute-value hard-route backend currently requires bestlogit.")
 
 
 def hard_route_attention(

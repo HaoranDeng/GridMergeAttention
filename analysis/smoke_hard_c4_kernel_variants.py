@@ -96,17 +96,13 @@ def main():
     v = torch.randn(shape_kv, device=device, dtype=dtype)
 
     variants = exact_variants()
-    names = [
-        "hard_c4_bestlogit_tokenmajor",
-        # Recompute is lower priority but still useful as a regression check.
-        "hard_c4_bestlogit_recompute_tokenmajor",
-    ]
+    ref_name = "hard_c4_bestlogit_simplemerge_tokenmajor"
+    names = [ref_name]
     selected_names = parse_variant_names(args.variants)
     if selected_names:
         missing = [name for name in selected_names if name not in variants]
         if missing:
             raise ValueError(f"unknown smoke variants: {', '.join(missing)}")
-        ref_name = "hard_c4_bestlogit_tokenmajor"
         names = [ref_name, *[name for name in selected_names if name != ref_name]]
 
     results = {}
@@ -122,7 +118,6 @@ def main():
         "complete": False,
     }
 
-    ref_name = "hard_c4_bestlogit_tokenmajor"
     torch.cuda.synchronize()
     ref = run_variant(q, k, v, variants[ref_name])
     torch.cuda.synchronize()

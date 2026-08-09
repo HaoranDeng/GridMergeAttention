@@ -5,300 +5,69 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from attention.hard_route_backend import parse_direct_route_backend
+from attention.hard_route_backend import (  # noqa: E402
+    parse_direct_route_attention_backend,
+    parse_direct_route_backend,
+)
 
 
-BASE_DIRECT_C4 = "triton_c4_direct_route_j32_w{warps}_exp2merge_forcekeys_fp16kvbias_s{stages}_fastdot"
+SUPPORTED_MERGE_BACKEND = (
+    "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
+    "_bestlogit_simplemerge_tokenmajor_inline_local_seed"
+)
+SUPPORTED_ROUTING_BACKEND = "triton_direct_m32_n32_w1_s1_exp2_tokenmajor"
 
+REMOVED_MERGE_BACKENDS = [
+    "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
+    "_bestlogit_tokenmajor_inline_local_seed",
+    "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
+    "_bestlogit_recomputevalue_tokenmajor_inline_local_seed",
+    "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
+    "_bestlogit_mergeweights_tokenmajor_inline_local_seed",
+    "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
+    "_bestlogit_compactweights_tokenmajor_inline_local_seed",
+    "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
+    "_bestlogit_topkey_tokenmajor_inline_local_seed",
+    "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
+    "_bestlogit_topvalue_tokenmajor_inline_local_seed",
+    "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
+    "_seedkey_bestlogit_tokenmajor_inline_local_seed",
+    "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
+    "_bestlogit_maxbias_tokenmajor_inline_local_seed",
+    "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
+    "_stripe_tokenmajor_inline_local_seed",
+    "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
+    "_f2_bestlogit_tokenmajor_inline_local_seed",
+    "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
+    "_bestlogit_simplemerge_bf16kv_tokenmajor_inline_local_seed",
+]
 
-def backend(*suffixes, warps=2, stages=1):
-    suffix = "_".join([*suffixes, "tokenmajor", "inline_local_seed"])
-    return f"{BASE_DIRECT_C4.format(warps=int(warps), stages=int(stages))}_{suffix}"
-
-
-def expect_flags(name, config, **flags):
-    if not config.supported:
-        raise AssertionError(f"{name}: backend should be supported.")
-    for field, expected in flags.items():
-        actual = getattr(config, field)
-        if actual != expected:
-            raise AssertionError(f"{name}: {field}={actual!r}, expected {expected!r}.")
+REMOVED_ROUTING_BACKENDS = [
+    "triton_direct_g2_m32_n16_w1_s1_exp2_tokenmajor",
+    "triton_direct_m32_n16_w1_s1_exp2_tokenmajor",
+    "triton_direct_m16_n64_w1_s1_exp2_tokenmajor",
+]
 
 
 def main():
-    cases = {
-        "bestlogit": (
-            backend("bestlogit"),
-            {"use_assigned_logit": True},
-        ),
-        "bestlogit_maxbias": (
-            backend("bestlogit", "maxbias"),
-            {"use_assigned_logit": True, "use_max_bias": True},
-        ),
-        "bestlogit_simplemerge": (
-            backend("bestlogit", "simplemerge"),
-            {"use_assigned_logit": True, "use_simple_merge": True},
-        ),
-        "bestlogit_simplemerge_w1": (
-            backend("bestlogit", "simplemerge", warps=1),
-            {"use_assigned_logit": True, "use_simple_merge": True, "merge_num_warps": 1},
-        ),
-        "bestlogit_simplemerge_w4": (
-            backend("bestlogit", "simplemerge", warps=4),
-            {"use_assigned_logit": True, "use_simple_merge": True, "merge_num_warps": 4},
-        ),
-        "bestlogit_simplemerge_s2": (
-            backend("bestlogit", "simplemerge", stages=2),
-            {"use_assigned_logit": True, "use_simple_merge": True, "merge_num_stages": 2},
-        ),
-        "bestlogit_simplemerge_s3": (
-            backend("bestlogit", "simplemerge", stages=3),
-            {"use_assigned_logit": True, "use_simple_merge": True, "merge_num_stages": 3},
-        ),
-        "bestlogit_simplemerge_ieee": (
-            backend("bestlogit", "simplemerge", "ieee"),
-            {"use_assigned_logit": True, "use_simple_merge": True, "logit_input_precision": "ieee"},
-        ),
-        "bestlogit_simplemerge_bf16x3": (
-            backend("bestlogit", "simplemerge", "bf16x3"),
-            {"use_assigned_logit": True, "use_simple_merge": True, "logit_input_precision": "bf16x3"},
-        ),
-        "bestlogit_simplemerge_bf16x6": (
-            backend("bestlogit", "simplemerge", "bf16x6"),
-            {"use_assigned_logit": True, "use_simple_merge": True, "logit_input_precision": "bf16x6"},
-        ),
-        "bestlogit_recomputevalue": (
-            backend("bestlogit", "recomputevalue"),
-            {"use_assigned_logit": True, "use_recompute_value": True},
-        ),
-        "bestlogit_mergeweights": (
-            backend("bestlogit", "mergeweights"),
-            {"use_assigned_logit": True, "use_merge_weight_value": True},
-        ),
-        "bestlogit_mergeweightskv": (
-            backend("bestlogit", "mergeweightskv"),
-            {"use_assigned_logit": True, "use_merge_weight_kv": True},
-        ),
-        "bestlogit_compactweightskv": (
-            backend("bestlogit", "compactweightskv"),
-            {"use_assigned_logit": True, "use_compact_weight_kv": True},
-        ),
-        "bestlogit_compactweights": (
-            backend("bestlogit", "compactweights"),
-            {"use_assigned_logit": True, "use_compact_weight_value": True},
-        ),
-        "topkey": (
-            backend("bestlogit", "topkey"),
-            {"use_assigned_logit": True, "use_top_key": True},
-        ),
-        "topkeyscale": (
-            backend("bestlogit", "topkeyscale"),
-            {"use_assigned_logit": True, "use_top_key": True, "use_top_key_scale": True},
-        ),
-        "topkey_indirectkey": (
-            backend("bestlogit", "topkey", "indirectkey"),
-            {
-                "use_assigned_logit": True,
-                "use_top_key": True,
-                "use_indirect_top_key": True,
-            },
-        ),
-        "topkeyscale_indirectkey": (
-            backend("bestlogit", "topkeyscale", "indirectkey"),
-            {
-                "use_assigned_logit": True,
-                "use_top_key": True,
-                "use_top_key_scale": True,
-                "use_indirect_top_key": True,
-            },
-        ),
-        "topkeyaffine": (
-            backend("bestlogit", "topkeyaffine"),
-            {"use_assigned_logit": True, "use_top_key": True, "use_top_key_affine_scale": True},
-        ),
-        "topkeyaffine_topvalue": (
-            backend("bestlogit", "topkeyaffine", "topvalue"),
-            {
-                "use_assigned_logit": True,
-                "use_top_key": True,
-                "use_top_key_affine_scale": True,
-                "use_top_value": True,
-            },
-        ),
-        "topkeyaffine_topvalue_indirectvalue": (
-            backend("bestlogit", "topkeyaffine", "topvalue", "indirectvalue"),
-            {
-                "use_assigned_logit": True,
-                "use_top_key": True,
-                "use_top_key_affine_scale": True,
-                "use_top_value": True,
-                "use_indirect_top_value": True,
-            },
-        ),
-        "topkeyaffine_seedvalue": (
-            backend("bestlogit", "topkeyaffine", "seedvalue"),
-            {
-                "use_assigned_logit": True,
-                "use_top_key": True,
-                "use_top_key_affine_scale": True,
-                "use_seed_value": True,
-            },
-        ),
-        "topkeyaffine_seedvalue_indirectseedvalue": (
-            backend("bestlogit", "topkeyaffine", "seedvalue", "indirectseedvalue"),
-            {
-                "use_assigned_logit": True,
-                "use_top_key": True,
-                "use_top_key_affine_scale": True,
-                "use_seed_value": True,
-                "use_indirect_seed_value": True,
-            },
-        ),
-        "topkeyaffine_indirectkey": (
-            backend("bestlogit", "topkeyaffine", "indirectkey"),
-            {
-                "use_assigned_logit": True,
-                "use_top_key": True,
-                "use_top_key_affine_scale": True,
-                "use_indirect_top_key": True,
-            },
-        ),
-        "topkeyaffine_topvalue_indirectkey": (
-            backend("bestlogit", "topkeyaffine", "topvalue", "indirectkey"),
-            {
-                "use_assigned_logit": True,
-                "use_top_key": True,
-                "use_top_key_affine_scale": True,
-                "use_top_value": True,
-                "use_indirect_top_key": True,
-            },
-        ),
-        "topkeyaffine_topvalue_indirectkey_indirectvalue": (
-            backend("bestlogit", "topkeyaffine", "topvalue", "indirectkey", "indirectvalue"),
-            {
-                "use_assigned_logit": True,
-                "use_top_key": True,
-                "use_top_key_affine_scale": True,
-                "use_top_value": True,
-                "use_indirect_top_key": True,
-                "use_indirect_top_value": True,
-            },
-        ),
-        "topkeyaffine_seedvalue_indirectkey": (
-            backend("bestlogit", "topkeyaffine", "seedvalue", "indirectkey"),
-            {
-                "use_assigned_logit": True,
-                "use_top_key": True,
-                "use_top_key_affine_scale": True,
-                "use_seed_value": True,
-                "use_indirect_top_key": True,
-            },
-        ),
-        "topkeyaffine_seedvalue_indirectkey_indirectseedvalue": (
-            backend("bestlogit", "topkeyaffine", "seedvalue", "indirectkey", "indirectseedvalue"),
-            {
-                "use_assigned_logit": True,
-                "use_top_key": True,
-                "use_top_key_affine_scale": True,
-                "use_seed_value": True,
-                "use_indirect_top_key": True,
-                "use_indirect_seed_value": True,
-            },
-        ),
-        "topkv": (
-            backend("bestlogit", "topkv"),
-            {"use_assigned_logit": True, "use_top_kv": True},
-        ),
-        "topkv_indirectkv": (
-            backend("bestlogit", "topkv", "indirectkv"),
-            {
-                "use_assigned_logit": True,
-                "use_top_kv": True,
-                "use_indirect_top_kv": True,
-            },
-        ),
-        "topvalue": (
-            backend("bestlogit", "topvalue"),
-            {"use_assigned_logit": True, "use_top_value": True},
-        ),
-        "topvalue_indirectvalue": (
-            backend("bestlogit", "topvalue", "indirectvalue"),
-            {
-                "use_assigned_logit": True,
-                "use_top_value": True,
-                "use_indirect_top_value": True,
-            },
-        ),
-        "top2value_indirecttop2value": (
-            backend("bestlogit", "top2value", "indirecttop2value"),
-            {
-                "use_assigned_logit": True,
-                "use_top2_value": True,
-                "use_indirect_top2_value": True,
-            },
-        ),
-        "top2seedvalue_indirecttop2seedvalue": (
-            backend("bestlogit", "top2seedvalue", "indirecttop2seedvalue"),
-            {
-                "use_assigned_logit": True,
-                "use_top2_seed_value": True,
-                "use_indirect_top2_seed_value": True,
-            },
-        ),
-        "top3value_indirecttop3value": (
-            backend("bestlogit", "top3value", "indirecttop3value"),
-            {
-                "use_assigned_logit": True,
-                "use_top3_value": True,
-                "use_indirect_top3_value": True,
-            },
-        ),
-        "top3seedvalue_indirecttop3seedvalue": (
-            backend("bestlogit", "top3seedvalue", "indirecttop3seedvalue"),
-            {
-                "use_assigned_logit": True,
-                "use_top3_seed_value": True,
-                "use_indirect_top3_seed_value": True,
-            },
-        ),
-        "seedvalue": (
-            backend("bestlogit", "seedvalue"),
-            {"use_assigned_logit": True, "use_seed_value": True},
-        ),
-        "seedvalue_indirectseedvalue": (
-            backend("bestlogit", "seedvalue", "indirectseedvalue"),
-            {
-                "use_assigned_logit": True,
-                "use_seed_value": True,
-                "use_indirect_seed_value": True,
-            },
-        ),
-        "seedkey_topvalue": (
-            backend("seedkey", "bestlogit", "topvalue"),
-            {"use_seed_key": True, "use_assigned_logit": True, "use_top_value": True},
-        ),
-        "seedkeyproj_topvalue": (
-            backend("seedkeyproj", "bestlogit", "topvalue"),
-            {
-                "use_seed_key": True,
-                "use_seed_key_scale": True,
-                "use_assigned_logit": True,
-                "use_top_value": True,
-            },
-        ),
-    }
+    config = parse_direct_route_backend(SUPPORTED_MERGE_BACKEND)
+    assert config.supported
+    assert config.inline_local_seed
+    assert config.use_assigned_logit
+    assert config.use_simple_merge
+    assert config.block_j_target == 32
+    assert config.merge_num_warps == 2
+    assert config.merge_num_stages == 1
 
-    for name, (text, flags) in cases.items():
-        expect_flags(name, parse_direct_route_backend(text), **flags)
+    assert parse_direct_route_attention_backend(SUPPORTED_ROUTING_BACKEND) == (32, 32, 1, 1)
 
-    forbidden = {
-        "seedkey_topkey": backend("seedkey", "bestlogit", "topkey"),
-        "seedkey_topkv": backend("seedkey", "bestlogit", "topkv"),
-    }
-    for name, text in forbidden.items():
-        config = parse_direct_route_backend(text)
-        if not (config.use_seed_key and (config.use_top_key or config.use_top_kv)):
-            raise AssertionError(f"{name}: parser did not expose the expected conflict flags.")
+    for backend in REMOVED_MERGE_BACKENDS:
+        if parse_direct_route_backend(backend).supported:
+            raise AssertionError(f"removed merge backend is still supported: {backend}")
+
+    for backend in REMOVED_ROUTING_BACKENDS:
+        if parse_direct_route_attention_backend(backend) is not None:
+            raise AssertionError(f"removed routing backend is still supported: {backend}")
 
     print("hard_c4_backend_config_check_ok")
 

@@ -8,17 +8,9 @@ import torch
 from omegaconf import OmegaConf
 
 from attention.common import blocks_to_video, video_to_blocks
-from attention.hard_route import _build_seed_rows, hard_route_compressed_attention
+from attention.hard_route import _build_seed_rows
 from attention.hard_route_backend import (
-    direct_compact_weight_kv_attention,
-    direct_compact_weight_value_attention,
     direct_compressed_attention,
-    direct_indirect_value_attention,
-    direct_recompute_value_attention,
-    direct_seed_key_attention,
-    direct_top_key_attention,
-    direct_weight_kv_attention,
-    direct_weight_value_attention,
     merge_kv_direct_c4,
     parse_direct_route_backend,
     uses_inline_local_seed_backend,
@@ -157,172 +149,10 @@ def route_compressed_tokens(
     """Run full compressed attention after direct C4 merge.
 
     Direct Triton routing consumes token-major [K, group, D] intermediates.
-    Generic routing backends such as SDPA consume group-major [group, K, D].
-    Both paths compute the same full compressed attention.
+    Only the supported full compressed-attention kernel is kept here.
     """
+    del source_key, source_value, key_scale, config
     routing_backend = variant["hard_route_routing_backend"]
-    if config.use_seed_key:
-        routed = direct_seed_key_attention(
-            q_chunk,
-            merged_value,
-            routing_bias,
-            key_scale,
-            routing_backend,
-            scale,
-            output=output,
-            assume_contiguous=True,
-        )
-        if routed is None:
-            raise ValueError("seed-key profiling requires a triton_direct_*_tokenmajor routing backend.")
-        return routed
-
-    uses_indirect_key = config.use_indirect_top_key or config.use_indirect_top_kv
-    uses_original_value = (
-        config.use_indirect_top_kv
-        or config.use_indirect_top3_seed_value
-        or config.use_indirect_top3_value
-        or config.use_indirect_top2_seed_value
-        or config.use_indirect_top2_value
-        or config.use_indirect_top_value
-        or config.use_indirect_seed_value
-    )
-    if uses_indirect_key:
-        routed = direct_top_key_attention(
-            q_chunk,
-            source_key,
-            source_value if uses_original_value else None,
-            merged_key,
-            merged_value,
-            routing_bias,
-            key_scale,
-            routing_backend,
-            scale,
-            indirect_seed_value=config.use_indirect_seed_value,
-            output=output,
-            assume_contiguous=True,
-        )
-        if routed is None:
-            raise ValueError("indirect top-key profiling requires a triton_direct_*_tokenmajor routing backend.")
-        return routed
-
-    if (
-        config.use_indirect_top3_seed_value
-        or config.use_indirect_top3_value
-        or config.use_indirect_top2_seed_value
-        or config.use_indirect_top2_value
-        or config.use_indirect_top_value
-        or config.use_indirect_seed_value
-    ):
-        routed = direct_indirect_value_attention(
-            q_chunk,
-            merged_key,
-            source_value,
-            merged_value,
-            key_scale
-            if (
-                config.use_indirect_top3_seed_value
-                or config.use_indirect_top3_value
-                or config.use_indirect_top2_value
-                or config.use_indirect_top2_seed_value
-            )
-            else None,
-            routing_bias,
-            routing_backend,
-            scale,
-            indirect_seed_value=config.use_indirect_seed_value,
-            indirect_top3_seed_value=config.use_indirect_top3_seed_value,
-            indirect_top3_value=config.use_indirect_top3_value,
-            indirect_top2_value=config.use_indirect_top2_value,
-            indirect_top2_seed_value=config.use_indirect_top2_seed_value,
-            output=output,
-            assume_contiguous=True,
-        )
-        if routed is None:
-            raise ValueError("indirect-value profiling requires a triton_direct_*_tokenmajor routing backend.")
-        return routed
-
-    if config.use_recompute_value:
-        routed = direct_recompute_value_attention(
-            q_chunk,
-            merged_key,
-            source_key,
-            source_value,
-            routing_bias,
-            routing_backend,
-            scale,
-            output=output,
-            assume_contiguous=True,
-        )
-        if routed is None:
-            raise ValueError("recompute-value profiling requires a triton_direct_*_tokenmajor routing backend.")
-        return routed
-
-    if config.use_compact_weight_kv:
-        routed = direct_compact_weight_kv_attention(
-            q_chunk,
-            source_key,
-            source_value,
-            merged_value,
-            key_scale,
-            routing_bias,
-            routing_backend,
-            scale,
-            output=output,
-            assume_contiguous=True,
-        )
-        if routed is None:
-            raise ValueError("compact merge-weight K/V profiling requires a triton_direct_*_tokenmajor routing backend.")
-        return routed
-
-    if config.use_compact_weight_value:
-        routed = direct_compact_weight_value_attention(
-            q_chunk,
-            merged_key,
-            source_value,
-            merged_value,
-            key_scale,
-            routing_bias,
-            routing_backend,
-            scale,
-            output=output,
-            assume_contiguous=True,
-        )
-        if routed is None:
-            raise ValueError("compact merge-weight value profiling requires a triton_direct_*_tokenmajor routing backend.")
-        return routed
-
-    if config.use_merge_weight_kv:
-        routed = direct_weight_kv_attention(
-            q_chunk,
-            source_key,
-            source_value,
-            key_scale,
-            routing_bias,
-            routing_backend,
-            scale,
-            output=output,
-            assume_contiguous=True,
-        )
-        if routed is None:
-            raise ValueError("merge-weight K/V profiling requires a triton_direct_*_tokenmajor routing backend.")
-        return routed
-
-    if config.use_merge_weight_value:
-        routed = direct_weight_value_attention(
-            q_chunk,
-            merged_key,
-            source_value,
-            key_scale,
-            routing_bias,
-            routing_backend,
-            scale,
-            output=output,
-            assume_contiguous=True,
-        )
-        if routed is None:
-            raise ValueError("merge-weight value profiling requires a triton_direct_*_tokenmajor routing backend.")
-        return routed
-
     routed = direct_compressed_attention(
         q_chunk,
         merged_key,
@@ -336,23 +166,7 @@ def route_compressed_tokens(
     if routed is not None:
         return routed
 
-    query = q_chunk.permute(0, 4, 1, 3, 2, 5).reshape(-1, q_chunk.size(2), q_chunk.size(5))
-    out = hard_route_compressed_attention(
-        query,
-        merged_key.transpose(0, 1),
-        merged_value.transpose(0, 1),
-        routing_bias.transpose(0, 1),
-        routing_backend,
-        scale,
-    )
-    return out.reshape(
-        q_chunk.size(0),
-        q_chunk.size(4),
-        q_chunk.size(1),
-        q_chunk.size(3),
-        q_chunk.size(2),
-        q_chunk.size(5),
-    ).permute(0, 2, 4, 3, 1, 5)
+    raise ValueError("component profiling requires the supported triton_direct_*_tokenmajor routing backend.")
 
 
 def install_probe(stats, args):

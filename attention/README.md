@@ -128,21 +128,19 @@ This path is non-shared and grid-local: each
 KV tokens. The second step is full compressed attention, not sparse or
 windowed attention.
 
-The `bestlogit_simplemerge` suffix uses the same assignment, routing bias, and
-full compressed attention semantics as the exact bestlogit path, but removes
-generic backend branches from the merge kernel.
+The `bestlogit_simplemerge` suffix is now the only supported direct C4 backend.
+It uses the exact hard assignment, entropy routing bias, and full compressed
+attention semantics, while keeping the Python backend parser free of failed
+experiment suffixes.
 
 For new optimization work, treat the PyTorch file as the readable reference and
 the `bestlogit_simplemerge` C4 direct-route backend as the current optimized
 baseline.
-Older backend suffixes for representative keys, compact merge weights,
-seed-key approximations, global/shared compression, no-bias routing, and
-windowed routing are either removed from the main docs or tracked as negative
-results in `../docs/negative_results.md`.
-
-Older representative-key/value, global/shared, no-bias, and windowed-routing
-experiments are not part of the readable path. They are tracked only as
-negative results in `../docs/negative_results.md` so they are not repeated.
+Older suffixes for representative keys/values, compact or merge-weight
+reconstruction, seed-key approximations, key-outer grouping, global/shared
+compression, no-bias routing, stripe routing, and grouped/windowed routing are
+not accepted by the backend parser. They are tracked only as negative results
+in `../docs/negative_results.md` so they are not repeated.
 
 ## Select Route
 

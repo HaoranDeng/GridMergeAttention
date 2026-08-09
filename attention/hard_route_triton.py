@@ -5138,6 +5138,25 @@ def triton_hard_route_merge_c4_direct_route(
         raise RuntimeError("hard_route_backend='triton_c4_direct_route' requires CUDA/ROCm tensors.")
     if query.dtype not in (torch.float16, torch.bfloat16):
         raise RuntimeError("hard_route_backend='triton_c4_direct_route' requires fp16 or bf16 tensors.")
+    if not (
+        inline_local_seed
+        and force_seed_keys
+        and use_assigned_logit
+        and use_simple_merge
+        and use_exp2
+        and int(block_j_target) == 32
+        and int(num_warps) == 2
+        and (num_stages is None or int(num_stages) == 1)
+        and logit_input_precision == "tf32"
+        and int(block_l_target or 0) == 0
+        and bias_dtype == torch.float16
+        and (merged_key_dtype is None or merged_key_dtype == torch.float16)
+        and (merged_value_dtype is None or merged_value_dtype == torch.float16)
+    ):
+        raise ValueError(
+            "Only the exact bestlogit_simplemerge direct C4 backend is supported. "
+            "Removed experiment paths are documented in docs/negative_results.md."
+        )
 
     if not assume_contiguous:
         query = query.contiguous()
@@ -5963,15 +5982,6 @@ def triton_hard_route_merge_c4_direct_route(
 __all__ = [
     "triton_biased_attention",
     "triton_direct_route_biased_attention",
-    "triton_direct_route_biased_attention_g2",
-    "triton_direct_route_compact_weight_kv_attention",
-    "triton_direct_route_compact_weight_value_attention",
-    "triton_direct_route_indirect_value_attention",
-    "triton_direct_route_recompute_value_attention",
-    "triton_direct_route_seed_key_attention",
-    "triton_direct_route_top_key_attention",
-    "triton_direct_route_weight_kv_attention",
-    "triton_direct_route_weight_value_attention",
     "triton_hard_route_merge",
     "triton_hard_route_merge_c4",
     "triton_hard_route_merge_c4_direct_route",

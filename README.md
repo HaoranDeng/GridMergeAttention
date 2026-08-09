@@ -94,6 +94,10 @@ Supported layouts:
 
 `num_merge_tokens: 1` runs one-token GridMerge / MonarchRT-style compression.
 `num_merge_tokens: C > 1` runs C-seed hard-route or select-route compression.
+For optimized hard C4, the supported direct backend is the documented
+`bestlogit_simplemerge` path. Earlier representative-key/value, shared/global,
+no-bias, stripe, key-outer, and merge-weight reconstruction variants were
+removed from the callable backend parser after negative experiments.
 
 ## Guardrails
 

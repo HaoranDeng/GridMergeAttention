@@ -14,34 +14,12 @@ from pipeline import TokenMergingWanPipeline
 from utils.misc import set_seed
 
 
-DIRECT_MERGE_TEMPLATE = "triton_c4_direct_route_j{block_j}_w{block_w}_exp2merge_forcekeys_fp16kvbias_s{stages}_fastdot"
+DIRECT_MERGE_BACKEND = (
+    "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
+    "_bestlogit_simplemerge_tokenmajor_inline_local_seed"
+)
 DIRECT_ROUTING_BACKEND = "triton_direct_m32_n32_w1_s1_exp2_tokenmajor"
 CHUNK_VARIANT_RE = re.compile(r"^(?P<base>.+)_chunk(?P<chunk>\d+)$")
-
-
-def direct_routing_backend(block_m=32, block_n=16, num_warps=1, num_stages=1):
-    return (
-        f"triton_direct_m{int(block_m)}_n{int(block_n)}_w{int(num_warps)}"
-        f"_s{int(num_stages)}_exp2_tokenmajor"
-    )
-
-
-def direct_routing_g2_backend(block_m=32, block_n=16, num_warps=1, num_stages=1):
-    return (
-        f"triton_direct_g2_m{int(block_m)}_n{int(block_n)}_w{int(num_warps)}"
-        f"_s{int(num_stages)}_exp2_tokenmajor"
-    )
-
-
-def direct_merge_backend(*suffixes, block_j=32, block_w=2, stages=1, block_l=None):
-    tile_suffixes = [*suffixes]
-    if block_l is not None:
-        tile_suffixes.append(f"l{int(block_l)}")
-    suffix = "_".join([*tile_suffixes, "tokenmajor", "inline_local_seed"])
-    return (
-        f"{DIRECT_MERGE_TEMPLATE.format(block_j=int(block_j), block_w=int(block_w), stages=int(stages))}"
-        f"_{suffix}"
-    )
 
 
 def exact_backend(hard_route_backend, seed_mode=None, routing_backend=None):
@@ -63,7 +41,7 @@ def _dtype_bytes(dtype):
 
 
 def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant):
-    """Estimate compressed K/V/bias traffic for one self-attention call."""
+    """Estimate K/V/bias traffic for the supported direct C4 simplemerge path."""
     merge_config = parse_direct_route_backend(variant["hard_route_backend"])
     if not merge_config.supported:
         return None
@@ -71,117 +49,17 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
     batch, _, heads, dim = q.shape
     frames, height, width = grid_size
     route_tokens = int(frames) * int(height) * 4
-    materialized_key_bytes = _dtype_bytes(
-        torch.bfloat16 if merge_config.use_bf16_merged_key else torch.float16
-    )
-    if merge_config.use_seed_key or merge_config.use_compact_weight_kv or merge_config.use_merge_weight_kv:
-        key_bytes_per_route_token = 0
-    elif merge_config.use_indirect_top_key or merge_config.use_indirect_top_kv:
-        key_bytes_per_route_token = 2
-    else:
-        key_bytes_per_route_token = dim * materialized_key_bytes
-    value_bytes = (
-        0
-        if (
-            merge_config.use_indirect_top_kv
-            or merge_config.use_indirect_top3_seed_value
-            or merge_config.use_indirect_top3_value
-            or merge_config.use_indirect_top2_seed_value
-            or merge_config.use_indirect_top2_value
-            or merge_config.use_indirect_top_value
-            or merge_config.use_indirect_seed_value
-            or merge_config.use_recompute_value
-            or merge_config.use_compact_weight_kv
-            or merge_config.use_compact_weight_value
-            or merge_config.use_merge_weight_kv
-            or merge_config.use_merge_weight_value
-        )
-        else _dtype_bytes(torch.bfloat16 if merge_config.use_bf16_merged_value else torch.float16)
-    )
-    writes_separate_value_index = bool(
-        merge_config.use_indirect_top_value
-        and not merge_config.use_indirect_top_key
-        and not merge_config.use_indirect_top_kv
-    )
-    if merge_config.use_indirect_top3_seed_value or merge_config.use_indirect_top3_value:
-        # Three int16 source-value columns are stored for each compressed token.
-        value_index_bytes = 6
-    elif merge_config.use_indirect_top2_seed_value or merge_config.use_indirect_top2_value:
-        # Two int16 source-value columns are stored for each compressed token.
-        value_index_bytes = 4
-    elif writes_separate_value_index:
-        value_index_bytes = 2
-    elif merge_config.use_compact_weight_kv or merge_config.use_compact_weight_value:
-        # One int8 assignment per original key column, shared by the four
-        # compressed seed tokens in the key block.
-        value_index_bytes = int(width) // 4
-    else:
-        value_index_bytes = 0
-    bias_dtype = (
-        torch.float32
-        if merge_config.use_fp32_routing_bias
-        else (torch.bfloat16 if merge_config.use_bf16_routing_bias else torch.float16)
-    )
-    bias_bytes = _dtype_bytes(bias_dtype)
-    writes_key_scale = bool(
-        merge_config.use_seed_key_scale
-        or merge_config.use_compact_weight_kv
-        or merge_config.use_compact_weight_value
-        or merge_config.use_merge_weight_kv
-        or merge_config.use_merge_weight_value
-        or merge_config.use_indirect_top3_seed_value
-        or merge_config.use_indirect_top3_value
-        or merge_config.use_indirect_top2_seed_value
-        or merge_config.use_indirect_top2_value
-        or (
-            merge_config.use_indirect_top_key
-            and (merge_config.use_top_key_scale or merge_config.use_top_key_affine_scale)
-        )
-    )
-    if merge_config.use_indirect_top3_seed_value:
-        # Three fp16 top-value weights; the remaining mass goes to the seed V.
-        key_scale_bytes = 6
-    elif merge_config.use_compact_weight_kv or merge_config.use_compact_weight_value:
-        # One source-dtype merge weight per original key column, shared by
-        # the four compressed seed tokens in the key block.
-        key_scale_bytes = (
-            int(width) * _dtype_bytes(torch.float32 if merge_config.use_fp32_key_scale else q.dtype) // 4
-        )
-    elif merge_config.use_merge_weight_kv or merge_config.use_merge_weight_value:
-        # One source-dtype merge weight per original key column.
-        key_scale_bytes = int(width) * _dtype_bytes(torch.float32 if merge_config.use_fp32_key_scale else q.dtype)
-    elif merge_config.use_indirect_top3_value or merge_config.use_indirect_top2_seed_value:
-        # Two fp16 weights. Top-3 uses the remaining mass for the third value;
-        # top2+seed uses the remaining mass for the seed value.
-        key_scale_bytes = 4
-    elif writes_key_scale:
-        key_scale_bytes = _dtype_bytes(torch.float32 if merge_config.use_fp32_key_scale else torch.float16)
-    else:
-        key_scale_bytes = 0
-    merge_weight_dtype_name = (
-        "fp32"
-        if merge_config.use_fp32_key_scale
-        else ("bf16" if q.dtype == torch.bfloat16 else "fp16")
-    )
+    bytes_per_route_token = (2 * dim + 1) * _dtype_bytes(torch.float16)
 
     chunk_count = 0
     total_bytes = 0
     max_chunk_bytes = 0
-    seed_key_query_read_bytes = 0
     for start in range(0, int(frames), int(query_outer_chunk)):
         chunk_outer = min(int(query_outer_chunk), int(frames) - start)
         route_groups = int(batch) * int(heads) * chunk_outer * int(width)
-        chunk_bytes = route_tokens * route_groups * (
-            key_bytes_per_route_token
-            + value_index_bytes
-            + dim * value_bytes
-            + bias_bytes
-            + key_scale_bytes
-        )
+        chunk_bytes = route_tokens * route_groups * bytes_per_route_token
         total_bytes += chunk_bytes
         max_chunk_bytes = max(max_chunk_bytes, chunk_bytes)
-        if merge_config.use_seed_key:
-            seed_key_query_read_bytes += int(height) * 4 * route_groups * dim * materialized_key_bytes
         chunk_count += 1
 
     return {
@@ -190,93 +68,13 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         "max_chunk_intermediate_bytes": max_chunk_bytes,
         "intermediate_write_bytes_per_attention_call": total_bytes,
         "intermediate_read_bytes_per_attention_call": total_bytes,
-        "seed_key_query_read_bytes_per_attention_call": seed_key_query_read_bytes,
-        "key_dtype": (
-            "int16_index"
-            if (merge_config.use_indirect_top_key or merge_config.use_indirect_top_kv)
-            else (
-                "reconstructed_by_merge_weights"
-                if merge_config.use_merge_weight_kv
-                else "reconstructed_by_compact_merge_weights"
-                if merge_config.use_compact_weight_kv
-                else ("bf16" if merge_config.use_bf16_merged_key else "fp16")
-            )
-        ),
-        "value_dtype": (
-            "reconstructed_kv_by_merge_weights"
-            if merge_config.use_merge_weight_kv
-            else "reconstructed_kv_by_compact_merge_weights"
-            if merge_config.use_compact_weight_kv
-            else "original_value_by_compact_merge_weights"
-            if merge_config.use_compact_weight_value
-            else "original_value_by_merge_weights"
-            if merge_config.use_merge_weight_value
-            else (
-                "original_value_by_int16_index"
-                if (
-                    merge_config.use_indirect_top_kv
-                    or merge_config.use_indirect_top3_seed_value
-                    or merge_config.use_indirect_top3_value
-                    or merge_config.use_indirect_top2_seed_value
-                    or merge_config.use_indirect_top2_value
-                    or merge_config.use_indirect_top_value
-                    or merge_config.use_indirect_seed_value
-                    or merge_config.use_recompute_value
-                )
-                else ("bf16" if merge_config.use_bf16_merged_value else "fp16")
-            )
-        ),
-        "writes_separate_value_index": writes_separate_value_index,
-        "bias_dtype": (
-            "fp32"
-            if merge_config.use_fp32_routing_bias
-            else ("bf16" if merge_config.use_bf16_routing_bias else "fp16")
-        ),
-        "writes_key_scale": writes_key_scale,
-        "key_scale_dtype": (
-            "fp32"
-            if writes_key_scale and merge_config.use_fp32_key_scale
-            else (
-                "fp16_top3_seed_value_triple_weights"
-                if merge_config.use_indirect_top3_seed_value
-                else "fp16_top3_value_pair_weights"
-                if merge_config.use_indirect_top3_value
-                else "fp16_top2_value_pair_weights"
-                if merge_config.use_indirect_top2_seed_value
-                else "fp16_top2_value_mix"
-                if merge_config.use_indirect_top2_value
-                else f"{merge_weight_dtype_name}_compact_merge_weights"
-                if (merge_config.use_compact_weight_kv or merge_config.use_compact_weight_value)
-                else f"{merge_weight_dtype_name}_merge_weights"
-                if (merge_config.use_merge_weight_kv or merge_config.use_merge_weight_value)
-                else ("fp16" if writes_key_scale else None)
-            )
-        ),
+        "key_dtype": "fp16",
+        "value_dtype": "fp16",
+        "bias_dtype": "fp16",
         "block_j_target": merge_config.block_j_target,
-        "block_l_target": merge_config.block_l_target or None,
-        "writes_merged_key": not (
-            merge_config.use_seed_key
-            or merge_config.use_compact_weight_kv
-            or merge_config.use_merge_weight_kv
-            or merge_config.use_indirect_top_key
-        ),
-        "uses_indirect_top_key": bool(merge_config.use_indirect_top_key),
-        "uses_top_kv": bool(merge_config.use_top_kv),
-        "uses_top3_seed_value": bool(merge_config.use_top3_seed_value),
-        "uses_top3_value": bool(merge_config.use_top3_value),
-        "uses_top2_seed_value": bool(merge_config.use_top2_seed_value),
-        "uses_top2_value": bool(merge_config.use_top2_value),
-        "uses_top_key": bool(merge_config.use_top_key),
-        "uses_top_key_scale": bool(merge_config.use_top_key_scale),
-        "uses_top_key_affine_scale": bool(merge_config.use_top_key_affine_scale),
-        "uses_top_value": bool(merge_config.use_top_value),
-        "uses_representative_seed_value": bool(merge_config.use_seed_value),
-        "uses_max_bias": bool(merge_config.use_max_bias),
-        "uses_recompute_value": bool(merge_config.use_recompute_value),
-        "uses_compact_weight_kv": bool(merge_config.use_compact_weight_kv),
-        "uses_compact_weight_value": bool(merge_config.use_compact_weight_value),
-        "uses_merge_weight_kv": bool(merge_config.use_merge_weight_kv),
-        "uses_merge_weight_value": bool(merge_config.use_merge_weight_value),
+        "writes_merged_key": True,
+        "writes_merged_value": True,
+        "writes_routing_bias": True,
     }
 
 
@@ -353,573 +151,15 @@ def exact_variants():
             "hard_route_backend": "triton",
             "hard_route_routing_backend": "triton",
         },
-        "hard_c4_full_core_tokenmajor": exact_backend(
-            direct_merge_backend(), seed_mode="local_with_ith"
-        ),
-        "hard_c4_keyouter_f1_tokenmajor": exact_backend(
-            direct_merge_backend("f1"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_full_core_tokenmajor_n16_s2": exact_backend(
-            direct_merge_backend(),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=16, num_stages=2),
-        ),
-        "hard_c4_full_core_tokenmajor_n16_s3": exact_backend(
-            direct_merge_backend(),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=16, num_stages=3),
-        ),
-        "hard_c4_full_core_tokenmajor_n32_s2": exact_backend(
-            direct_merge_backend(),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=32, num_stages=2),
-        ),
-        "hard_c4_full_core_tokenmajor_n32_s3": exact_backend(
-            direct_merge_backend(),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=32, num_stages=3),
-        ),
-        "hard_c4_full_core_tokenmajor_m16_n16_w1": exact_backend(
-            direct_merge_backend(),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_m=16, block_n=16, num_warps=1),
-        ),
-        "hard_c4_full_core_tokenmajor_m16_n32_w1": exact_backend(
-            direct_merge_backend(),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_m=16, block_n=32, num_warps=1),
-        ),
-        "hard_c4_full_core_tokenmajor_m16_n64_w1": exact_backend(
-            direct_merge_backend(),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_m=16, block_n=64, num_warps=1),
-        ),
-        "hard_c4_full_core_tokenmajor_m16_n64_w2": exact_backend(
-            direct_merge_backend(),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_m=16, block_n=64, num_warps=2),
-        ),
-        "hard_c4_full_core_tokenmajor_n64_w1": exact_backend(
-            direct_merge_backend(),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=64, num_warps=1),
-        ),
-        "hard_c4_full_core_tokenmajor_n64_w2": exact_backend(
-            direct_merge_backend(),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=64, num_warps=2),
-        ),
-        "hard_c4_keyouter_f2_tokenmajor": exact_backend(
-            direct_merge_backend("f2"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_recomputevalue_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "recomputevalue"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=16),
-        ),
-        "hard_c4_bestlogit_recomputevalue_n32_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "recomputevalue"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=32),
-        ),
-        "hard_c4_bestlogit_mergeweights_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "mergeweights"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=16),
-        ),
-        "hard_c4_bestlogit_mergeweights_n32_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "mergeweights"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=32),
-        ),
-        "hard_c4_bestlogit_compactweights_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "compactweights"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=16),
-        ),
-        "hard_c4_bestlogit_compactweights_n32_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "compactweights"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=32),
-        ),
-        "hard_c4_bestlogit_mergeweightskv_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "mergeweightskv"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=16),
-        ),
-        "hard_c4_bestlogit_mergeweightskv_n32_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "mergeweightskv"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=32),
-        ),
-        "hard_c4_bestlogit_compactweightskv_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "compactweightskv"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=16),
-        ),
-        "hard_c4_bestlogit_compactweightskv_n32_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "compactweightskv"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=32),
-        ),
-        "hard_c4_bestlogit_maxbias_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "maxbias"), seed_mode="local_with_ith"
-        ),
         "hard_c4_bestlogit_simplemerge_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "simplemerge"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_simplemerge_j16_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "simplemerge", block_j=16),
+            DIRECT_MERGE_BACKEND,
             seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_simplemerge_j64_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "simplemerge", block_j=64),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_simplemerge_w1_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "simplemerge", block_w=1),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_simplemerge_w4_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "simplemerge", block_w=4),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_simplemerge_s2_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "simplemerge", stages=2),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_simplemerge_s3_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "simplemerge", stages=3),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_simplemerge_ieee_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "simplemerge", "ieee"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_simplemerge_bf16x3_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "simplemerge", "bf16x3"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_simplemerge_bf16x6_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "simplemerge", "bf16x6"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_simplemerge_bf16kv_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "simplemerge", "bf16kv"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_simplemerge_bf16k_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "simplemerge", "bf16k"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_simplemerge_bf16v_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "simplemerge", "bf16v"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_simplemerge_bf16bias_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "simplemerge", "bf16bias"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_bf16kv_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "bf16kv"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_bf16k_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "bf16k"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_bf16v_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "bf16v"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_bf16bias_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "bf16bias"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_fp32bias_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "fp32bias"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_bf16kv_bf16bias_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "bf16kv", "bf16bias"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_recompute_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "recompute"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_tokenmajor_sdpa": exact_backend(
-            direct_merge_backend("bestlogit"),
-            seed_mode="local_with_ith",
-            routing_backend="sdpa",
-        ),
-        "hard_c4_bestlogit_tokenmajor_n16_s1": exact_backend(
-            direct_merge_backend("bestlogit"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=16),
-        ),
-        "hard_c4_bestlogit_tokenmajor_n32_s1": exact_backend(
-            direct_merge_backend("bestlogit"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=32),
-        ),
-        "hard_c4_bestlogit_tokenmajor_g2": exact_backend(
-            direct_merge_backend("bestlogit"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_g2_backend(),
-        ),
-        "hard_c4_bestlogit_tokenmajor_g2_m16": exact_backend(
-            direct_merge_backend("bestlogit"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_g2_backend(block_m=16),
-        ),
-        "hard_c4_maskassign_tokenmajor": exact_backend(
-            direct_merge_backend("maskassign"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_maskassign_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "maskassign"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_stripe_tokenmajor": exact_backend(
-            direct_merge_backend("stripe"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_stripe_tokenmajor_n32_s1": exact_backend(
-            direct_merge_backend("stripe"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=32),
-        ),
-        "hard_c4_bestlogit_seedvalue_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "seedvalue"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_seedvalue_indirectseedvalue_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "seedvalue", "indirectseedvalue"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_topvalue_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "topvalue"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_topvalue_indirectvalue_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "topvalue", "indirectvalue"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_top2value_indirecttop2value_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "top2value", "indirecttop2value"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_top2seedvalue_indirecttop2seedvalue_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "top2seedvalue", "indirecttop2seedvalue"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_top3value_indirecttop3value_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "top3value", "indirecttop3value"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_top3seedvalue_indirecttop3seedvalue_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "top3seedvalue", "indirecttop3seedvalue"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_topkv_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "topkv"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_topkv_indirectkv_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "topkv", "indirectkv"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_topkey_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "topkey"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_topkeyscale_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "topkeyscale"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_topkey_indirectkey_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "topkey", "indirectkey"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_topkeyscale_indirectkey_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "topkeyscale", "indirectkey"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_topkeyaffine_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "topkeyaffine"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bestlogit_topkeyaffine_topvalue_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "topkeyaffine", "topvalue"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_topkeyaffine_topvalue_indirectvalue_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "topkeyaffine", "topvalue", "indirectvalue"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_topkeyaffine_seedvalue_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "topkeyaffine", "seedvalue"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_topkeyaffine_seedvalue_indirectseedvalue_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "topkeyaffine", "seedvalue", "indirectseedvalue"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_topkeyaffine_indirectkey_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "topkeyaffine", "indirectkey"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_topkeyaffine_topvalue_indirectkey_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "topkeyaffine", "topvalue", "indirectkey"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_topkeyaffine_topvalue_indirectkey_indirectvalue_tokenmajor": exact_backend(
-            direct_merge_backend(
-                "bestlogit",
-                "topkeyaffine",
-                "topvalue",
-                "indirectkey",
-                "indirectvalue",
-            ),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_topkeyaffine_seedvalue_indirectkey_tokenmajor": exact_backend(
-            direct_merge_backend("bestlogit", "topkeyaffine", "seedvalue", "indirectkey"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_bestlogit_topkeyaffine_seedvalue_indirectkey_indirectseedvalue_tokenmajor": exact_backend(
-            direct_merge_backend(
-                "bestlogit",
-                "topkeyaffine",
-                "seedvalue",
-                "indirectkey",
-                "indirectseedvalue",
-            ),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_seedkey_tokenmajor": exact_backend(
-            direct_merge_backend("seedkey", "bestlogit"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_seedkey_seedvalue_tokenmajor": exact_backend(
-            direct_merge_backend("seedkey", "bestlogit", "seedvalue"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_seedkey_topvalue_tokenmajor": exact_backend(
-            direct_merge_backend("seedkey", "bestlogit", "topvalue"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_seedkeymatch_tokenmajor": exact_backend(
-            direct_merge_backend("seedkeymatch", "bestlogit"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_seedkeymatch_seedvalue_tokenmajor": exact_backend(
-            direct_merge_backend("seedkeymatch", "bestlogit", "seedvalue"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_seedkeymatch_topvalue_tokenmajor": exact_backend(
-            direct_merge_backend("seedkeymatch", "bestlogit", "topvalue"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_seedkeyproj_tokenmajor": exact_backend(
-            direct_merge_backend("seedkeyproj", "bestlogit"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_seedkeyproj_seedvalue_tokenmajor": exact_backend(
-            direct_merge_backend("seedkeyproj", "bestlogit", "seedvalue"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_seedkeyproj_topvalue_tokenmajor": exact_backend(
-            direct_merge_backend("seedkeyproj", "bestlogit", "topvalue"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_seedkeyproj_fp32scale_tokenmajor": exact_backend(
-            direct_merge_backend("seedkeyproj", "fp32scale", "bestlogit"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_seedkeyls_fp32scale_tokenmajor": exact_backend(
-            direct_merge_backend("seedkeyls", "fp32scale", "bestlogit"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_seedkeyaffine_fp32scale_tokenmajor": exact_backend(
-            direct_merge_backend("seedkeyaffine", "fp32scale", "bestlogit"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_seedkeyproj_fp32scale_fp32bias_tokenmajor": exact_backend(
-            direct_merge_backend("seedkeyproj", "fp32scale", "fp32bias", "bestlogit"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_seedkeyls_fp32scale_fp32bias_tokenmajor": exact_backend(
-            direct_merge_backend("seedkeyls", "fp32scale", "fp32bias", "bestlogit"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_seedkeyaffine_fp32scale_fp32bias_tokenmajor": exact_backend(
-            direct_merge_backend("seedkeyaffine", "fp32scale", "fp32bias", "bestlogit"),
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_seedkey_tokenmajor_n32_s1": exact_backend(
-            direct_merge_backend("seedkey", "bestlogit"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=32),
-        ),
-        "hard_c4_seedkeymatch_tokenmajor_n32_s1": exact_backend(
-            direct_merge_backend("seedkeymatch", "bestlogit"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=32),
-        ),
-        "hard_c4_seedkeyproj_tokenmajor_n32_s1": exact_backend(
-            direct_merge_backend("seedkeyproj", "bestlogit"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=32),
-        ),
-        "hard_c4_seedkeyproj_fp32scale_tokenmajor_n32_s1": exact_backend(
-            direct_merge_backend("seedkeyproj", "fp32scale", "bestlogit"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=32),
-        ),
-        "hard_c4_seedkeyls_fp32scale_tokenmajor_n32_s1": exact_backend(
-            direct_merge_backend("seedkeyls", "fp32scale", "bestlogit"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=32),
-        ),
-        "hard_c4_seedkeyaffine_fp32scale_tokenmajor_n32_s1": exact_backend(
-            direct_merge_backend("seedkeyaffine", "fp32scale", "bestlogit"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=32),
-        ),
-        "hard_c4_seedkey_tokenmajor_n64_w1": exact_backend(
-            direct_merge_backend("seedkey", "bestlogit"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=64, num_warps=1),
-        ),
-        "hard_c4_seedkeymatch_tokenmajor_n64_w1": exact_backend(
-            direct_merge_backend("seedkeymatch", "bestlogit"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=64, num_warps=1),
-        ),
-        "hard_c4_seedkeyproj_tokenmajor_n64_w1": exact_backend(
-            direct_merge_backend("seedkeyproj", "bestlogit"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=64, num_warps=1),
-        ),
-        "hard_c4_seedkeyproj_fp32scale_tokenmajor_n64_w1": exact_backend(
-            direct_merge_backend("seedkeyproj", "fp32scale", "bestlogit"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=64, num_warps=1),
-        ),
-        "hard_c4_seedkeyls_fp32scale_tokenmajor_n64_w1": exact_backend(
-            direct_merge_backend("seedkeyls", "fp32scale", "bestlogit"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=64, num_warps=1),
-        ),
-        "hard_c4_seedkeyaffine_fp32scale_tokenmajor_n64_w1": exact_backend(
-            direct_merge_backend("seedkeyaffine", "fp32scale", "bestlogit"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=64, num_warps=1),
-        ),
-        "hard_c4_bf16kv_tokenmajor": exact_backend(
-            direct_merge_backend("bf16kv"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bf16k_tokenmajor": exact_backend(
-            direct_merge_backend("bf16k"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bf16v_tokenmajor": exact_backend(
-            direct_merge_backend("bf16v"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_bf16bias_tokenmajor": exact_backend(
-            direct_merge_backend("bf16bias"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_keyouter_f2_bestlogit_tokenmajor": exact_backend(
-            direct_merge_backend("f2", "bestlogit"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_keyouter_f3_tokenmajor": exact_backend(
-            direct_merge_backend("f3"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_keyouter_f3_bestlogit_tokenmajor": exact_backend(
-            direct_merge_backend("f3", "bestlogit"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_keyouter_f4_tokenmajor": exact_backend(
-            direct_merge_backend("f4"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_keyouter_f4_bestlogit_tokenmajor": exact_backend(
-            direct_merge_backend("f4", "bestlogit"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_keyouter_f4_bf16kv_tokenmajor": exact_backend(
-            direct_merge_backend("f4", "bf16kv"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_keyouter_f5_tokenmajor": exact_backend(
-            direct_merge_backend("f5"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_keyouter_f5_bestlogit_tokenmajor": exact_backend(
-            direct_merge_backend("f5", "bestlogit"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_keyouter_f6_tokenmajor": exact_backend(
-            direct_merge_backend("f6"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_keyouter_f6_tokenmajor_n16_s2": exact_backend(
-            direct_merge_backend("f6"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=16, num_stages=2),
-        ),
-        "hard_c4_keyouter_f6_tokenmajor_n16_s3": exact_backend(
-            direct_merge_backend("f6"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=16, num_stages=3),
-        ),
-        "hard_c4_keyouter_f6_tokenmajor_n32_s2": exact_backend(
-            direct_merge_backend("f6"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=32, num_stages=2),
-        ),
-        "hard_c4_keyouter_f6_tokenmajor_n32_s3": exact_backend(
-            direct_merge_backend("f6"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=32, num_stages=3),
-        ),
-        "hard_c4_keyouter_f6_tokenmajor_m16_n16_w1": exact_backend(
-            direct_merge_backend("f6"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_m=16, block_n=16, num_warps=1),
-        ),
-        "hard_c4_keyouter_f6_tokenmajor_m16_n32_w1": exact_backend(
-            direct_merge_backend("f6"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_m=16, block_n=32, num_warps=1),
-        ),
-        "hard_c4_keyouter_f6_tokenmajor_m16_n64_w1": exact_backend(
-            direct_merge_backend("f6"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_m=16, block_n=64, num_warps=1),
-        ),
-        "hard_c4_keyouter_f6_tokenmajor_m16_n64_w2": exact_backend(
-            direct_merge_backend("f6"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_m=16, block_n=64, num_warps=2),
-        ),
-        "hard_c4_keyouter_f6_tokenmajor_n64_w1": exact_backend(
-            direct_merge_backend("f6"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=64, num_warps=1),
-        ),
-        "hard_c4_keyouter_f6_tokenmajor_n64_w2": exact_backend(
-            direct_merge_backend("f6"),
-            seed_mode="local_with_ith",
-            routing_backend=direct_routing_backend(block_n=64, num_warps=2),
-        ),
-        "hard_c4_keyouter_f6_bestlogit_tokenmajor": exact_backend(
-            direct_merge_backend("f6", "bestlogit"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_keyouter_f6_bf16kv_tokenmajor": exact_backend(
-            direct_merge_backend("f6", "bf16kv"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_keyouter_f6_bf16k_tokenmajor": exact_backend(
-            direct_merge_backend("f6", "bf16k"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_keyouter_f6_bf16v_tokenmajor": exact_backend(
-            direct_merge_backend("f6", "bf16v"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_keyouter_f6_bf16bias_tokenmajor": exact_backend(
-            direct_merge_backend("f6", "bf16bias"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_keyouter_f7_tokenmajor": exact_backend(
-            direct_merge_backend("f7"), seed_mode="local_with_ith"
-        ),
-        "hard_c4_keyouter_f7_bestlogit_tokenmajor": exact_backend(
-            direct_merge_backend("f7", "bestlogit"), seed_mode="local_with_ith"
         ),
     }
 
 
 def resolve_variant(name, available):
-    """Resolve a named benchmark variant.
-
-    Any existing variant can be suffixed with `_chunkN` to benchmark the same
-    attention backend with a different query_outer_chunk in the same run.
-    """
+    """Resolve a named variant, optionally with a `_chunkN` suffix."""
     if name in available:
         return dict(available[name])
 
@@ -937,53 +177,21 @@ def resolve_variant(name, available):
 
 
 def parse_variant_names(text):
-    """Accept comma-separated or whitespace-separated variant lists."""
     return [name for name in (text or "").replace(",", " ").split() if name]
 
 
 def load_smoke_variant_filter(path):
-    """Return smoke-derived skip reasons and optional partial-smoke metadata.
-
-    A complete smoke JSON only filters variants that explicitly recorded an
-    error. An incomplete smoke JSON may have been left behind by a hard kernel
-    failure. In that case, only variants that were part of the smoke run and
-    did not finish successfully are skipped. Variants outside the smoke list
-    are allowed to run and handle their own warmup errors.
-    """
     if not path:
-        return {}, None, None
+        return {}
     smoke_path = Path(path)
     if not smoke_path.exists():
-        return {}, None, None
+        return {}
     payload = json.loads(smoke_path.read_text(encoding="utf-8"))
-    results = payload.get("results", {})
-    intended = set(payload.get("variant_names") or [])
-    errors = {
+    return {
         name: str(result["error"])
-        for name, result in results.items()
+        for name, result in payload.get("results", {}).items()
         if isinstance(result, dict) and result.get("error")
     }
-    if payload.get("complete", True):
-        return errors, None, intended or None
-
-    succeeded = {
-        name
-        for name, result in results.items()
-        if isinstance(result, dict) and not result.get("error")
-    }
-    return errors, succeeded, intended or None
-
-
-def smoke_skip_reason(name, smoke_variant_errors, smoke_success_names, smoke_intended_names):
-    if name in smoke_variant_errors:
-        return smoke_variant_errors[name]
-    if (
-        smoke_success_names is not None
-        and (smoke_intended_names is None or name in smoke_intended_names)
-        and name not in smoke_success_names
-    ):
-        return "missing from incomplete smoke JSON"
-    return None
 
 
 def sync():
@@ -1020,10 +228,9 @@ def install_probe(stats, args):
 
     all_variants = exact_variants()
     selected = parse_variant_names(args.variants)
-    smoke_variant_errors, smoke_success_names, smoke_intended_names = load_smoke_variant_filter(
-        args.skip_variant_errors_from_json
-    )
+    smoke_errors = load_smoke_variant_filter(args.skip_variant_errors_from_json)
     skipped_from_smoke = {}
+
     if selected:
         variants = {}
         missing = []
@@ -1031,29 +238,22 @@ def install_probe(stats, args):
             variant = resolve_variant(name, all_variants)
             if variant is None:
                 missing.append(name)
-            elif reason := smoke_skip_reason(
-                name,
-                smoke_variant_errors,
-                smoke_success_names,
-                smoke_intended_names,
-            ):
-                skipped_from_smoke[name] = reason
+            elif name in smoke_errors:
+                skipped_from_smoke[name] = smoke_errors[name]
             else:
                 variants[name] = variant
         if missing:
             raise ValueError(f"unknown variants: {', '.join(missing)}")
     else:
-        variants = {}
-        for name, variant in all_variants.items():
-            if reason := smoke_skip_reason(
-                name,
-                smoke_variant_errors,
-                smoke_success_names,
-                smoke_intended_names,
-            ):
-                skipped_from_smoke[name] = reason
-            else:
-                variants[name] = variant
+        variants = {
+            name: variant
+            for name, variant in all_variants.items()
+            if not smoke_errors.get(name)
+        }
+        skipped_from_smoke = {
+            name: reason for name, reason in smoke_errors.items() if name in all_variants
+        }
+
     if not args.skip_baseline and "hard_c4_baseline" not in variants:
         variants = {"hard_c4_baseline": all_variants["hard_c4_baseline"], **variants}
 
@@ -1125,7 +325,9 @@ def install_probe(stats, args):
                     state["disabled_variants"].add(name)
                     state["variant_errors"][name] = repr(exc)
                     if is_illegal_memory_error(exc):
-                        raise RuntimeError(f"{name} failed with an illegal memory access during warmup.") from exc
+                        raise RuntimeError(
+                            f"{name} failed with an illegal memory access during warmup."
+                        ) from exc
             sync()
             state["warmed"] = True
 
@@ -1142,9 +344,7 @@ def install_probe(stats, args):
                 stats["hard_c4_baseline"].add_error(baseline, dense)
 
             for name, kwargs in variants.items():
-                if name == "hard_c4_baseline":
-                    continue
-                if name in state["disabled_variants"]:
+                if name == "hard_c4_baseline" or name in state["disabled_variants"]:
                     continue
                 try:
                     print(f"timing variant: {name}", flush=True)
@@ -1155,7 +355,9 @@ def install_probe(stats, args):
                     state["disabled_variants"].add(name)
                     state["variant_errors"][name] = repr(exc)
                     if is_illegal_memory_error(exc):
-                        raise RuntimeError(f"{name} failed with an illegal memory access during timing.") from exc
+                        raise RuntimeError(
+                            f"{name} failed with an illegal memory access during timing."
+                        ) from exc
             x = dense
         else:
             x = run_dense(q, k, v, self)
@@ -1194,7 +396,7 @@ def run_denoise_only(pipeline, config, prompt, seed, dtype):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Benchmark exact non-shared hard C4 backends on real Wan self-attention QKV."
+        description="Benchmark supported hard C4 backend on real Wan self-attention QKV."
     )
     parser.add_argument("--config", default="configs/dense_wan_fewstep.yaml")
     parser.add_argument("--checkpoint", required=True)
@@ -1206,21 +408,13 @@ def parse_args():
     parser.add_argument("--use_ema", action="store_true")
     parser.add_argument("--max_calls", type=int, default=30)
     parser.add_argument("--query_outer_chunk", type=int, default=10)
-    parser.add_argument(
-        "--skip_baseline",
-        action="store_true",
-        help="Skip the slow legacy hard C4 baseline when only direct-route variants are needed.",
-    )
+    parser.add_argument("--skip_baseline", action="store_true")
     parser.add_argument(
         "--variants",
         default="",
-        help="Comma-separated subset. Empty runs all exact variants.",
+        help="Comma-separated subset. Empty runs supported hard C4 variants.",
     )
-    parser.add_argument(
-        "--skip_variant_errors_from_json",
-        default="",
-        help="Optional smoke JSON. Variants with an error in that JSON are skipped.",
-    )
+    parser.add_argument("--skip_variant_errors_from_json", default="")
     parser.add_argument("--output_json", required=True)
     return parser.parse_args()
 
