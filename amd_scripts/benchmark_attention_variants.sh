@@ -40,22 +40,14 @@ GPU_ID="${GPU_ID:-0}"
 
 NAMES=(
   "dense"
-  "gridmerge_one"
-  "gridmerge_one_transpose"
-  "hard_route_c6"
-  "hard_route_c6_transpose"
-  "select_route_c6"
-  "select_route_c6_transpose"
+  "hard_c4_pytorch"
+  "hard_c4_triton"
 )
 
 CONFIGS=(
   "configs/dense_wan_fewstep.yaml"
-  "configs/token_merging_wan_fewstep.yaml"
-  "configs/token_merging_wan_gridmerge_one_transpose_fewstep.yaml"
-  "configs/token_merging_wan_hard_route_c6_fewstep.yaml"
-  "configs/token_merging_wan_hard_route_c6_transpose_fewstep.yaml"
-  "configs/token_merging_wan_select_route_c6_fewstep.yaml"
-  "configs/token_merging_wan_select_route_c6_transpose_fewstep.yaml"
+  "configs/token_merging_wan_hard_c4_pytorch_fewstep.yaml"
+  "configs/token_merging_wan_hard_c4_triton_fewstep.yaml"
 )
 
 cd "${REPO_DIR}"

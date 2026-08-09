@@ -19,7 +19,8 @@ token_merging_args:
   h_reduce: 1
   w_reduce: 1
   layout: hard_route
-  q_init: ith
-  num_merge_tokens: 13
-  seed_mode: random
+  num_merge_tokens: 4
+  seed_mode: local_with_ith
   seed: 0
+  hard_route_backend: sdpa
+  hard_route_routing_backend: sdpa

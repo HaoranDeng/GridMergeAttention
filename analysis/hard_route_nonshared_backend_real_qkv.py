@@ -124,6 +124,7 @@ def exact_variants():
         "hard_c4_pytorch": {
             "hard_route_backend": "sdpa",
             "hard_route_routing_backend": "sdpa",
+            "seed_mode": "local_with_ith",
         },
         "hard_c4": exact_backend(
             DIRECT_MERGE_BACKEND,
@@ -256,7 +257,7 @@ def install_probe(stats, args):
             query_outer_chunk=kwargs.get("query_outer_chunk", args.query_outer_chunk),
             layout="hard_route",
             num_merge_tokens=4,
-            seed_mode=kwargs.get("seed_mode", "random_with_ith"),
+            seed_mode=kwargs.get("seed_mode", "local_with_ith"),
             seed=args.seed,
             hard_route_backend=kwargs["hard_route_backend"],
             hard_route_routing_backend=kwargs["hard_route_routing_backend"],

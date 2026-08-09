@@ -18,19 +18,7 @@ FLOAT_NEG_INF = torch.finfo(torch.float32).min
 #   A: query outer block, F: key outer block
 #   I: query rows, J: query columns
 #   K: key rows, L: key columns
-#   C: merged tokens / seed queries per block
-
-# Each tuple is: (seed-key logits, merged K, merged V).
-REGULAR_MERGE_EQUATIONS = (
-    "bafkjchd,bfklhd->bhafkjcl",
-    "bhafkjcl,bfklhd->bafjkchd",
-    "bhafkjcl,bfklhe->bafjkche",
-)
-TRANSPOSE_MERGE_EQUATIONS = (
-    "bafilchd,bfklhd->bhafilck",
-    "bhafilck,bfklhd->bafilchd",
-    "bhafilck,bfklhe->bafilche",
-)
+#   C: merged tokens / seed queries per block. Hard C4 keeps C=4.
 
 
 def assign_keys_to_seeds(seed_key_logits):
@@ -74,18 +62,8 @@ def hard_route_merge_weights(seed_key_logits, dtype):
     return weights_f32.to(dtype), routing_bias
 
 
-def _merge_kv_from_logits(seed_queries, key, value, scale, equations):
-    """Shared regular/transpose merge; equations keep the layout explicit."""
-    logit_eq, key_eq, value_eq = equations
-    seed_key_logits = torch.einsum(logit_eq, seed_queries, key).float() * float(scale)
-    merge_weights, routing_bias = hard_route_merge_weights(seed_key_logits, key.dtype)
-    merged_key = torch.einsum(key_eq, merge_weights, key)
-    merged_value = torch.einsum(value_eq, merge_weights, value)
-    return merged_key, merged_value, routing_bias
-
-
 def hard_route_merge_kv_pytorch(seed_queries, key, value, scale):
-    """Merge regular 30-query x 52-key blocks.
+    """Readable PyTorch reference for hard C4 merge.
 
     seed_queries: [B, A, F, K, J, C, H, D]
     key/value:    [B, F, K, L, H, D]
@@ -97,35 +75,14 @@ def hard_route_merge_kv_pytorch(seed_queries, key, value, scale):
       merged_key/value: [B, A, F, J, K, C, H, D]
       routing_bias:     [B, H, A, F, K, J, C]
     """
-    return _merge_kv_from_logits(
-        seed_queries,
-        key,
-        value,
-        scale,
-        REGULAR_MERGE_EQUATIONS,
-    )
-
-
-def hard_route_merge_kv_transpose_pytorch(seed_queries, key, value, scale):
-    """Merge transposed 52-query x 30-key blocks.
-
-    seed_queries: [B, A, F, I, L, C, H, D]
-    key/value:    [B, F, K, L, H, D]
-
-    A fixed (A, F, I, L) block has query columns J=52 and key rows K=30.
-    The C seed queries compress those K keys into C merged K/V tokens.
-
-    Returns:
-      merged_key/value: [B, A, F, I, L, C, H, D]
-      routing_bias:     [B, H, A, F, I, L, C]
-    """
-    return _merge_kv_from_logits(
-        seed_queries,
-        key,
-        value,
-        scale,
-        TRANSPOSE_MERGE_EQUATIONS,
-    )
+    if seed_queries.size(5) != 4:
+        raise ValueError("hard C4 PyTorch reference expects exactly four seed queries.")
+    seed_key_logits = torch.einsum("bafkjchd,bfklhd->bhafkjcl", seed_queries, key).float()
+    seed_key_logits = seed_key_logits * float(scale)
+    merge_weights, routing_bias = hard_route_merge_weights(seed_key_logits, key.dtype)
+    merged_key = torch.einsum("bhafkjcl,bfklhd->bafjkchd", merge_weights, key)
+    merged_value = torch.einsum("bhafkjcl,bfklhe->bafjkche", merge_weights, value)
+    return merged_key, merged_value, routing_bias
 
 
 # Legacy analysis scripts import this older name.
@@ -136,7 +93,6 @@ __all__ = [
     "assign_keys_to_seeds",
     "assigned_key_log_softmax",
     "hard_route_merge_kv_pytorch",
-    "hard_route_merge_kv_transpose_pytorch",
     "hard_route_merge_weights",
     "masked_cluster_log_softmax",
 ]

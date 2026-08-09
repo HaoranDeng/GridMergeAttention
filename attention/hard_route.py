@@ -95,17 +95,17 @@ def hard_route_attention(
 ):
     # q:   [B, A, I, J, H, D]
     # k/v: [B, F, K, L, H, D]
-    # A fixed (a, f, j, k) block has I queries x L keys. This path merges
-    # the L keys into several hard-assigned merged tokens instead of one.
+    # A fixed (a, f, j, k) block has I queries x L keys. Hard C4 merges the
+    # L keys into four local-with-ith seed clusters.
     use_hard_c4 = is_hard_c4_backend(hard_route_backend)
     validate_block_seed_mode(seed_mode, "multi-token merging")
 
-    if use_hard_c4 and seed_mode != "local_with_ith":
-        raise ValueError("hard_route_backend='hard_c4' requires seed_mode='local_with_ith'.")
-    if use_hard_c4 and int(num_merge_tokens) != 4:
-        raise ValueError("hard_route_backend='hard_c4' requires num_merge_tokens=4.")
-    if num_merge_tokens > k.size(3):
-        raise ValueError("num_merge_tokens cannot exceed key columns per block.")
+    if seed_mode != "local_with_ith":
+        raise ValueError("hard C4 keeps only seed_mode='local_with_ith'.")
+    if int(num_merge_tokens) != 4:
+        raise ValueError("hard C4 keeps only num_merge_tokens=4.")
+    if q.size(2) < 4 or k.size(3) < 4:
+        raise ValueError("hard C4 requires at least four query rows and four key columns per block.")
 
     if use_hard_c4:
         # Optimized C4 path: Triton merge writes token-major compressed KV
@@ -132,12 +132,7 @@ def hard_route_attention(
         if out is not None:
             return out
 
-        # Fallback for direct merge + generic routing backend. Direct merge
-        # returns token-major tensors [compressed_token, route_group, ...].
-        query = rearrange(q, "b a i j h d -> (b h a j) i d")
-        key = key.transpose(0, 1)
-        value = value.transpose(0, 1)
-        bias = bias.transpose(0, 1)
+        raise ValueError("hard_route_backend='hard_c4' requires the supported Triton routing backend.")
     else:
         # Readable path: gather seed queries, merge KV, then run full
         # compressed attention over all merged tokens.

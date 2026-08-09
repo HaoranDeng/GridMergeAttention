@@ -19,7 +19,11 @@ token_merging_args:
   h_reduce: 1
   w_reduce: 1
   layout: hard_route
-  q_init: ith
+  query_outer_chunk: 10
   num_merge_tokens: 4
-  seed_mode: random_with_ith
+  seed_mode: local_with_ith
   seed: 0
+  # Non-shared hard-route keeps query-dependent KV compression for each
+  # attention grid and still runs full compressed attention after merging.
+  hard_route_backend: hard_c4
+  hard_route_routing_backend: triton_direct_m32_n32_w1_s1_exp2_tokenmajor

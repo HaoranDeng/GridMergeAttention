@@ -44,18 +44,14 @@ GPU_ID="${GPU_ID:-0}"
 
 NAMES=(
   "dense"
-  "hard_route_c2_native"
-  "hard_route_c4_native"
-  "hard_route_c6_native"
-  "hard_route_c4_hard_c4"
+  "hard_c4_pytorch"
+  "hard_c4_triton"
 )
 
 CONFIGS=(
   "configs/dense_wan_fewstep.yaml"
-  "configs/token_merging_wan_hard_route_c2_fewstep.yaml"
-  "configs/token_merging_wan_hard_route_c4_fewstep.yaml"
-  "configs/token_merging_wan_hard_route_c6_fewstep.yaml"
-  "configs/token_merging_wan_hard_route_c4_fastseed_full_core_fewstep.yaml"
+  "configs/token_merging_wan_hard_c4_pytorch_fewstep.yaml"
+  "configs/token_merging_wan_hard_c4_triton_fewstep.yaml"
 )
 
 cd "${REPO_DIR}"
@@ -161,10 +157,8 @@ from pathlib import Path
 result_dir = Path(sys.argv[1])
 order = [
     "dense",
-    "hard_route_c2_native",
-    "hard_route_c4_native",
-    "hard_route_c6_native",
-    "hard_route_c4_hard_c4",
+    "hard_c4_pytorch",
+    "hard_c4_triton",
 ]
 rows = {json.loads(path.read_text())["name"]: json.loads(path.read_text()) for path in result_dir.glob("*.json")}
 dense_seconds = rows.get("dense", {}).get("seconds_per_mp4")

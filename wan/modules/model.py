@@ -240,8 +240,8 @@ class WanSelfAttention(nn.Module):
         self.token_merging_q_init = None
         self.token_merging_query_outer_chunk = None
         self.token_merging_layout = "hard_route"
-        self.token_merging_num_merge_tokens = 1
-        self.token_merging_seed_mode = "random"
+        self.token_merging_num_merge_tokens = 4
+        self.token_merging_seed_mode = "local_with_ith"
         self.token_merging_seed = 0
         self.token_merging_hard_route_backend = "sdpa"
         self.token_merging_hard_route_routing_backend = "sdpa"
@@ -787,8 +787,8 @@ class WanModel(ModelMixin, ConfigMixin):
         q_init = args.get("q_init", None)
         query_outer_chunk = args.get("query_outer_chunk", None)
         layout = args.get("layout", "hard_route")
-        num_merge_tokens = args.get("num_merge_tokens", 1)
-        seed_mode = args.get("seed_mode", "random")
+        num_merge_tokens = args.get("num_merge_tokens", 4)
+        seed_mode = args.get("seed_mode", "local_with_ith")
         seed = args.get("seed", 0)
         hard_route_backend = args.get("hard_route_backend", "sdpa")
         hard_route_routing_backend = args.get("hard_route_routing_backend", "sdpa")

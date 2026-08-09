@@ -1,114 +1,70 @@
 # GridMergeAttention
 
-Minimal Wan2.1 text-to-video generation with grid-based token-merging
-attention. The repository keeps the inference code, configs, and attention
-experiments needed to compare dense attention, MonarchRT-style one-token
-GridMerge, and multi-token GridMerge routing methods.
+Minimal Wan2.1 text-to-video generation with the best current hard C4
+GridMergeAttention path. The repository keeps:
+
+- dense attention for baseline comparison,
+- hard C4 PyTorch reference implementation,
+- hard C4 Triton implementation for speed.
 
 Large Wan model weights and checkpoints are not stored here.
 
 ## Layout
 
-- `attention/`: dense attention plus GridMerge attention variants.
+- `attention/`: dense attention plus hard C4 GridMergeAttention.
 - `wan/`: minimal Wan2.1 model, text encoder, tokenizer, and VAE runtime.
 - `pipeline/`: few-step text-to-video pipeline.
-- `configs/`: dense, MonarchRT/GridMerge, hard-route, select-route, and
-  transpose experiment configs.
+- `configs/`: dense baseline and hard C4 PyTorch/Triton configs.
 - `generate.py`: video generation entry point.
-- `docs/negative_results.md`: failed directions and constraints that should be
-  checked before starting new attention experiments.
+- `docs/negative_results.md`: failed routes and constraints that should not be
+  repeated.
 
-## Attention Variants
+## Configs
 
 Dense baseline:
 
 - `configs/dense_wan_fewstep.yaml`
 
-One-token GridMerge / MonarchRT-style compression:
+Hard C4 GridMergeAttention:
 
-- `configs/token_merging_wan_fewstep.yaml`
-- `configs/token_merging_wan_h_reduce2_fewstep.yaml`
-- `configs/token_merging_wan_h_reduce4_fewstep.yaml`
-- `configs/token_merging_wan_w_reduce2_fewstep.yaml`
-- `configs/token_merging_wan_w_reduce4_fewstep.yaml`
-- `configs/token_merging_wan_w_reduce13_fewstep.yaml`
+- `configs/token_merging_wan_hard_c4_pytorch_fewstep.yaml`
+- `configs/token_merging_wan_hard_c4_triton_fewstep.yaml`
 
-Multi-token hard routing:
-
-- `configs/token_merging_wan_hard_route_c2_fewstep.yaml`
-- `configs/token_merging_wan_hard_route_c4_fewstep.yaml`
-- `configs/token_merging_wan_hard_route_c6_fewstep.yaml`
-- `configs/token_merging_wan_hard_route_c13_fewstep.yaml`
-- `configs/token_merging_wan_hard_route_c4_fastseed_full_core_fewstep.yaml`
-
-Select routing:
-
-- `configs/token_merging_wan_select_route_c2_fewstep.yaml`
-- `configs/token_merging_wan_select_route_c4_fewstep.yaml`
-- `configs/token_merging_wan_select_route_c6_fewstep.yaml`
-
-Transpose layouts:
-
-- `configs/token_merging_wan_gridmerge_one_transpose_fewstep.yaml`
-- `configs/token_merging_wan_hard_route_c2_transpose_fewstep.yaml`
-- `configs/token_merging_wan_hard_route_c4_transpose_fewstep.yaml`
-- `configs/token_merging_wan_hard_route_c6_transpose_fewstep.yaml`
-- `configs/token_merging_wan_select_route_c2_transpose_fewstep.yaml`
-- `configs/token_merging_wan_select_route_c4_transpose_fewstep.yaml`
-- `configs/token_merging_wan_select_route_c6_transpose_fewstep.yaml`
-
-For the current recommended hard C4 path, use
-`configs/token_merging_wan_hard_route_c4_fastseed_full_core_fewstep.yaml`.
-It keeps non-shared grid-local KV compression and runs full compressed
-attention after token merging.
-
-## Token-Merging Args
-
-Token merging is controlled by `token_merging_args`:
+The PyTorch config is the readable correctness reference:
 
 ```yaml
 token_merging_args:
   enable: true
-  f_tied: 1
-  h_reduce: 1
-  w_reduce: 1
   layout: hard_route
-  q_init: ith
+  num_merge_tokens: 4
+  seed_mode: local_with_ith
+  hard_route_backend: sdpa
+  hard_route_routing_backend: sdpa
+```
+
+The Triton config is the current best speed/quality path:
+
+```yaml
+token_merging_args:
+  enable: true
+  layout: hard_route
   query_outer_chunk: 10
   num_merge_tokens: 4
   seed_mode: local_with_ith
-  seed: 0
   hard_route_backend: hard_c4
   hard_route_routing_backend: triton_direct_m32_n32_w1_s1_exp2_tokenmajor
 ```
 
-Supported layouts:
-
-- `hard_route`: default GridMerge layout. For default 480p/81-frame Wan tokens,
-  each block is `30 queries x 52 keys`.
-- `select_route`: each seed independently compresses a full key group, then
-  each query selects the best compressed KV candidate.
-- `hard_route_transpose`: transposed layout, with `52 queries x 30 keys` per
-  block.
-- `select_route_transpose`: transpose version of select routing.
-
-`num_merge_tokens: 1` runs one-token GridMerge / MonarchRT-style compression.
-`num_merge_tokens: C > 1` runs C-seed hard-route or select-route compression.
-For optimized hard C4, the supported direct backend is the documented
-`hard_c4` path. Earlier representative-key/value, shared/global, no-bias,
-stripe, key-outer, old long backend aliases, and merge-weight reconstruction
-variants were removed from the callable backend parser after negative
-experiments.
-
 ## Guardrails
 
-The main quality-preserving path should follow these rules:
+The maintained hard C4 path follows these rules:
 
-- Keep grid-local compression. Do not use global/share-all compression.
-- After token merging, keep full compressed attention. Do not replace the
-  second step with sparse, sliding-window, or local-only routing.
-- Keep the routing bias. No-bias variants produced bad videos.
-- Do not use quantization for the current memory-bound optimization direction.
+- Keep grid-local compression.
+- Use `local_with_ith` C4 seeds.
+- After token merging, keep full compressed attention.
+- Keep the entropy/routing bias.
+- Do not use global/share-all compression, no-bias routing, sparse/windowed
+  second-stage attention, or quantization for the current path.
 
 Rejected directions and benchmark evidence are recorded in
 `docs/negative_results.md`.
@@ -119,7 +75,7 @@ Set `WAN_MODEL_ROOT` to a directory containing `Wan2.1-T2V-1.3B/`, then run:
 
 ```bash
 python generate.py \
-  --config configs/token_merging_wan_hard_route_c4_fastseed_full_core_fewstep.yaml \
+  --config configs/token_merging_wan_hard_c4_triton_fewstep.yaml \
   --checkpoint /path/to/self_forcing_dmd.pt \
   --prompt_path prompts/MovieGenVideoBench_extended.txt \
   --output_dir videos/gridmerge_hard_c4 \
