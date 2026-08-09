@@ -105,34 +105,6 @@ def biased_sdpa(query, key, value, bias, scale=1.0):
     return out.squeeze(1).to(query.dtype)
 
 
-def assign_keys_to_seeds(seed_key_logits):
-    """Assign each key to the seed query with the largest dot product.
-
-    seed_key_logits: [..., C, L]
-      C: seed queries inside one block
-      L: keys inside one block
-
-    Returns: bool mask [..., C, L]. Hard C4 also pins key c to seed c for
-    c=0..3, matching the optimized Triton path and guaranteeing that each seed
-    produces one compressed token.
-    """
-    best_seed = seed_key_logits.argmax(dim=-2, keepdim=True)
-    assignment = torch.zeros_like(seed_key_logits, dtype=torch.bool)
-    assignment.scatter_(dim=-2, index=best_seed, value=True)
-    num_seeds = seed_key_logits.size(-2)
-    forced_key = torch.arange(num_seeds, device=seed_key_logits.device)
-    assignment[..., :, :num_seeds] = False
-    assignment[..., forced_key, forced_key] = True
-    return assignment
-
-
-def masked_cluster_log_softmax(seed_key_logits, assignment):
-    """Softmax over keys in each assigned seed cluster."""
-    logits = seed_key_logits.float().masked_fill(~assignment, FLOAT_NEG_INF)
-    log_weights = torch.log_softmax(logits, dim=-1)
-    return log_weights.masked_fill(~assignment, 0.0)
-
-
 def hard_route_merge_kv_pytorch(seed_queries, key, value, scale):
     """Readable PyTorch reference for hard C4 merge.
 
@@ -151,8 +123,19 @@ def hard_route_merge_kv_pytorch(seed_queries, key, value, scale):
     seed_key_logits = torch.einsum("bafkjchd,bfklhd->bhafkjcl", seed_queries, key).float()
     seed_key_logits = seed_key_logits * float(scale)
 
-    assignment = assign_keys_to_seeds(seed_key_logits)
-    log_weights = masked_cluster_log_softmax(seed_key_logits, assignment)
+    # Hard-assign each key column L to the seed C with the largest seed-key logit.
+    assignment = torch.zeros_like(seed_key_logits, dtype=torch.bool)
+    best_seed = seed_key_logits.argmax(dim=-2, keepdim=True)
+    assignment.scatter_(dim=-2, index=best_seed, value=True)
+
+    # Pin key c to seed c so every one of the four merged tokens is non-empty.
+    num_seeds = seed_key_logits.size(-2)
+    forced_key = torch.arange(num_seeds, device=seed_key_logits.device)
+    assignment[..., :, :num_seeds] = False
+    assignment[..., forced_key, forced_key] = True
+
+    logits = seed_key_logits.masked_fill(~assignment, FLOAT_NEG_INF)
+    log_weights = torch.log_softmax(logits, dim=-1).masked_fill(~assignment, 0.0)
     weights_f32 = log_weights.exp().masked_fill(~assignment, 0.0)
     routing_bias = (weights_f32 * log_weights).sum(dim=-1)
     merge_weights = weights_f32.to(key.dtype)
@@ -198,18 +181,11 @@ def hard_route_attention_pytorch(q, k, v, scale, query_outer_offset=0):
     )
 
 
-# Legacy analysis scripts import this older name.
-assigned_key_log_softmax = masked_cluster_log_softmax
-
-
 __all__ = [
-    "assign_keys_to_seeds",
-    "assigned_key_log_softmax",
     "biased_sdpa",
     "cached_local_c4_seed_rows",
     "gather_seed_queries",
     "hard_route_attention_pytorch",
     "hard_route_merge_kv_pytorch",
     "local_c4_seed_rows",
-    "masked_cluster_log_softmax",
 ]
