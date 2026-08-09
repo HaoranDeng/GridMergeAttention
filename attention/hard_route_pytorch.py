@@ -105,7 +105,7 @@ def biased_sdpa(query, key, value, bias, scale=1.0):
     return out.squeeze(1).to(query.dtype)
 
 
-def hard_route_merge_kv_pytorch(seed_queries, key, value, scale):
+def hard_route_merge_kv_pytorch(seed_queries, key, value, scale, force_nonempty=True):
     """Readable PyTorch reference for hard C4 merge.
 
     seed_queries: [B, A, F, K, J, C, H, D]
@@ -128,16 +128,18 @@ def hard_route_merge_kv_pytorch(seed_queries, key, value, scale):
     best_seed = seed_key_logits.argmax(dim=-2, keepdim=True)
     assignment.scatter_(dim=-2, index=best_seed, value=True)
 
-    # Pin key c to seed c so every one of the four merged tokens is non-empty.
-    num_seeds = seed_key_logits.size(-2)
-    forced_key = torch.arange(num_seeds, device=seed_key_logits.device)
-    assignment[..., :, :num_seeds] = False
-    assignment[..., forced_key, forced_key] = True
+    # The default path pins key c to seed c so all four merged tokens are non-empty.
+    if force_nonempty:
+        num_seeds = seed_key_logits.size(-2)
+        forced_key = torch.arange(num_seeds, device=seed_key_logits.device)
+        assignment[..., :, :num_seeds] = False
+        assignment[..., forced_key, forced_key] = True
 
     logits = seed_key_logits.masked_fill(~assignment, FLOAT_NEG_INF)
     log_weights = torch.log_softmax(logits, dim=-1).masked_fill(~assignment, 0.0)
     weights_f32 = log_weights.exp().masked_fill(~assignment, 0.0)
     routing_bias = (weights_f32 * log_weights).sum(dim=-1)
+    routing_bias = routing_bias.masked_fill(~assignment.any(dim=-1), float("inf"))
     merge_weights = weights_f32.to(key.dtype)
 
     merged_key = torch.einsum("bhafkjcl,bfklhd->bafjkchd", merge_weights, key)
@@ -145,7 +147,7 @@ def hard_route_merge_kv_pytorch(seed_queries, key, value, scale):
     return merged_key, merged_value, routing_bias
 
 
-def hard_route_attention_pytorch(q, k, v, scale, query_outer_offset=0):
+def hard_route_attention_pytorch(q, k, v, scale, query_outer_offset=0, force_nonempty=True):
     """Readable end-to-end hard C4 attention reference.
 
     q:   [B, A, I, J, H, D]
@@ -164,7 +166,13 @@ def hard_route_attention_pytorch(q, k, v, scale, query_outer_offset=0):
         q.size(2),
     )
     seed_queries = gather_seed_queries(q, seed_rows)
-    merged_keys, merged_values, routing_bias = hard_route_merge_kv_pytorch(seed_queries, k, v, scale)
+    merged_keys, merged_values, routing_bias = hard_route_merge_kv_pytorch(
+        seed_queries,
+        k,
+        v,
+        scale,
+        force_nonempty=force_nonempty,
+    )
 
     query = rearrange(q, "b a i j h d -> (b h a j) i d")
     key = rearrange(merged_keys, "b a f j k c h d -> (b h a j) (f k c) d")

@@ -8,6 +8,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from attention.hard_route_triton import (  # noqa: E402
     DIRECT_ROUTING_BACKEND,
     HARD_C4_BACKEND,
+    HARD_C4_NO_FORCE_BACKEND,
     MERGE_BLOCK_J,
     MERGE_LOGIT_INPUT_PRECISION,
     MERGE_NUM_STAGES,
@@ -52,6 +53,7 @@ REMOVED_ROUTING_BACKENDS = [
 
 def main():
     assert is_hard_c4_backend(SUPPORTED_MERGE_BACKEND)
+    assert is_hard_c4_backend(HARD_C4_NO_FORCE_BACKEND)
     assert MERGE_BLOCK_J == 32
     assert MERGE_NUM_WARPS == 2
     assert MERGE_NUM_STAGES == 1

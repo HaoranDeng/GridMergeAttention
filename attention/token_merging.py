@@ -1,7 +1,7 @@
 import torch
 
 from .hard_route_pytorch import hard_route_attention_pytorch
-from .hard_route_triton import HARD_C4_BACKEND, hard_route_attention_triton
+from .hard_route_triton import HARD_C4_BACKEND, HARD_C4_NO_FORCE_BACKEND, hard_route_attention_triton
 
 
 LAYOUT_HARD_ROUTE = "hard_route"
@@ -44,6 +44,7 @@ def token_merging_attn(
     The two maintained paths are:
       - hard_route_backend="sdpa": readable PyTorch reference.
       - hard_route_backend="hard_c4": optimized Triton path.
+      - append "_no_force" to let empty seed clusters be masked instead of pinned.
     """
     del f_tied, h_reduce, w_reduce, q_init, layout, num_merge_tokens, seed_mode, seed
 
@@ -64,7 +65,7 @@ def token_merging_attn(
         q_chunk = q_blocks[:, start:end]
         out_slice = out[:, start:end]
 
-        if backend == HARD_C4_BACKEND:
+        if backend in {HARD_C4_BACKEND, HARD_C4_NO_FORCE_BACKEND}:
             chunk = hard_route_attention_triton(
                 q_chunk,
                 k_blocks,
@@ -72,14 +73,16 @@ def token_merging_attn(
                 sm_scale,
                 hard_route_routing_backend=hard_route_routing_backend,
                 output=out_slice,
+                force_nonempty=backend == HARD_C4_BACKEND,
             )
-        elif backend == "sdpa":
+        elif backend in {"sdpa", "sdpa_no_force"}:
             chunk = hard_route_attention_pytorch(
                 q_chunk,
                 k_blocks,
                 v_blocks,
                 sm_scale,
                 query_outer_offset=start,
+                force_nonempty=backend == "sdpa",
             )
         else:
             raise ValueError(f"unsupported hard_route_backend={hard_route_backend!r}.")

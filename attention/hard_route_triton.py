@@ -9,6 +9,7 @@ except Exception:  # pragma: no cover - exercised only when Triton is missing.
 
 
 HARD_C4_BACKEND = "hard_c4"
+HARD_C4_NO_FORCE_BACKEND = "hard_c4_no_force"
 DIRECT_ROUTING_BACKEND = "triton_direct_m32_n32_w1_s1_exp2_tokenmajor"
 MERGE_BLOCK_J = 32
 MERGE_NUM_WARPS = 2
@@ -21,7 +22,7 @@ ROUTING_NUM_STAGES = 1
 
 
 def is_hard_c4_backend(backend):
-    return (backend or "").lower() == HARD_C4_BACKEND
+    return (backend or "").lower() in {HARD_C4_BACKEND, HARD_C4_NO_FORCE_BACKEND}
 
 
 def is_direct_route_attention_backend(backend):
@@ -65,6 +66,7 @@ if triton is not None:
         BLOCK_D: tl.constexpr,
         SCORE_SCALE: tl.constexpr,
         LOGIT_INPUT_PRECISION: tl.constexpr,
+        FORCE_NONEMPTY: tl.constexpr,
     ):
         """Specialized exact C4 merge for the current bestlogit fast path."""
         group_id = tl.program_id(0)
@@ -166,17 +168,17 @@ if triton is not None:
         update = logits3 > best_logits
         best_logits = tl.where(update, logits3, best_logits)
         assignments = tl.where(update, 3, assignments)
-        assignments = tl.where(
-            valid_logits & (key_offsets[None, :] < 4),
-            key_offsets[None, :],
-            assignments,
-        )
-
         assigned_logits = best_logits
-        assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 0), logits0, assigned_logits)
-        assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 1), logits1, assigned_logits)
-        assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 2), logits2, assigned_logits)
-        assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 3), logits3, assigned_logits)
+        if FORCE_NONEMPTY:
+            assignments = tl.where(
+                valid_logits & (key_offsets[None, :] < 4),
+                key_offsets[None, :],
+                assignments,
+            )
+            assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 0), logits0, assigned_logits)
+            assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 1), logits1, assigned_logits)
+            assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 2), logits2, assigned_logits)
+            assigned_logits = tl.where(valid_logits & (key_offsets[None, :] == 3), logits3, assigned_logits)
 
         route_group = (((batch * H + head) * A + query_outer) * J + query_offsets)
         route_token_base = (key_outer * K_ROWS + key_row) * 4
@@ -184,20 +186,22 @@ if triton is not None:
         for seed_idx in tl.static_range(0, 4):
             active = valid_logits & (assignments == seed_idx)
             row_max = tl.max(tl.where(active, assigned_logits, -float("inf")), axis=1)
+            has_keys = row_max > -float("inf")
+            safe_row_max = tl.where(has_keys, row_max, 0.0)
             probs = tl.where(
                 active,
-                tl.exp2((assigned_logits - row_max[:, None]) * 1.4426950408889634),
+                tl.exp2((assigned_logits - safe_row_max[:, None]) * 1.4426950408889634),
                 0.0,
             )
             denom = tl.sum(probs, axis=1)
-            safe_denom = tl.where(valid_query, denom, 1.0)
+            safe_denom = tl.where(has_keys, denom, 1.0)
             weights = probs / safe_denom[:, None]
-            log_denom = row_max + tl.log2(safe_denom) * 0.6931471805599453
+            log_denom = safe_row_max + tl.log2(safe_denom) * 0.6931471805599453
 
             merged_key = tl.dot(weights.to(key_block.dtype), key_block)
             merged_value = tl.dot(weights.to(value_block.dtype), value_block)
             expected_logit = tl.sum(tl.where(active, weights * assigned_logits, 0.0), axis=1)
-            routing_bias = expected_logit - log_denom
+            routing_bias = tl.where(has_keys, expected_logit - log_denom, float("inf"))
 
             route_token = route_token_base + seed_idx
             bias_offset = route_token * ROUTE_GROUPS + route_group
@@ -412,6 +416,7 @@ def triton_hard_route_merge_c4_direct_route(
     num_warps=2,
     num_stages=1,
     logit_input_precision="ieee",
+    force_nonempty=True,
     assume_contiguous=False,
 ):
     """Current optimized non-shared C=4 merge for hard-route GridMerge.
@@ -515,13 +520,14 @@ def triton_hard_route_merge_c4_direct_route(
         BLOCK_D=block_d,
         SCORE_SCALE=float(scale),
         LOGIT_INPUT_PRECISION=logit_input_precision,
+        FORCE_NONEMPTY=bool(force_nonempty),
         num_warps=2,
         num_stages=1,
     )
     return merged_key, merged_value, routing_bias, None
 
 
-def merge_kv_direct_c4(q, key, value, scale, assume_contiguous=False):
+def merge_kv_direct_c4(q, key, value, scale, force_nonempty=True, assume_contiguous=False):
     return triton_hard_route_merge_c4_direct_route(
         q,
         key,
@@ -531,6 +537,7 @@ def merge_kv_direct_c4(q, key, value, scale, assume_contiguous=False):
         num_warps=MERGE_NUM_WARPS,
         num_stages=MERGE_NUM_STAGES,
         logit_input_precision=MERGE_LOGIT_INPUT_PRECISION,
+        force_nonempty=force_nonempty,
         assume_contiguous=assume_contiguous,
     )
 
@@ -574,6 +581,7 @@ def hard_route_attention_triton(
     scale,
     hard_route_routing_backend=DIRECT_ROUTING_BACKEND,
     output=None,
+    force_nonempty=True,
 ):
     """Optimized hard C4 attention: Triton merge followed by full compressed attention."""
     q = q.contiguous()
@@ -582,6 +590,7 @@ def hard_route_attention_triton(
         k,
         v,
         scale,
+        force_nonempty=force_nonempty,
         assume_contiguous=True,
     )
     output = output if output is not None and output.is_contiguous() else None
@@ -600,6 +609,7 @@ def hard_route_attention_triton(
 __all__ = [
     "DIRECT_ROUTING_BACKEND",
     "HARD_C4_BACKEND",
+    "HARD_C4_NO_FORCE_BACKEND",
     "MERGE_BLOCK_J",
     "MERGE_LOGIT_INPUT_PRECISION",
     "MERGE_NUM_STAGES",
