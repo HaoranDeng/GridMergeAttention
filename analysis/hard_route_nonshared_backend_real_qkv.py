@@ -147,6 +147,10 @@ class Stats:
 
 def exact_variants():
     return {
+        "hard_c4_pytorch": {
+            "hard_route_backend": "sdpa",
+            "hard_route_routing_backend": "sdpa",
+        },
         "hard_c4_baseline": {
             "hard_route_backend": "triton",
             "hard_route_routing_backend": "triton",
