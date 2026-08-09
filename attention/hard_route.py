@@ -4,8 +4,7 @@ from einops import rearrange
 from .common import (
     biased_sdpa,
     gather_seed_queries,
-    seed_rows_by_mode,
-    validate_block_seed_mode,
+    local_c4_seed_rows,
 )
 from .hard_route_backend import (
     direct_compressed_attention,
@@ -29,9 +28,6 @@ def _cached_seed_rows(
     key_rows,
     query_columns,
     query_rows,
-    num_seeds,
-    seed,
-    seed_mode,
 ):
     cache_key = (
         str(device),
@@ -41,9 +37,6 @@ def _cached_seed_rows(
         int(key_rows),
         int(query_columns),
         int(query_rows),
-        int(num_seeds),
-        int(seed),
-        str(seed_mode),
     )
     seed_rows = _SEED_ROWS_CACHE.get(cache_key)
     if seed_rows is not None:
@@ -55,29 +48,9 @@ def _cached_seed_rows(
         device=device,
     )
     key_outer = torch.arange(key_outer_count, device=device)
-    seed_rows = seed_rows_by_mode(
-        query_outer,
-        key_outer,
-        key_rows,
-        query_columns,
-        query_rows,
-        num_seeds,
-        seed,
-        seed_mode,
-    )
+    seed_rows = local_c4_seed_rows(query_outer, key_outer, key_rows, query_columns, query_rows)
     _SEED_ROWS_CACHE[cache_key] = seed_rows
     return seed_rows
-
-
-def hard_route_compressed_attention(query, key, value, bias, backend, scale):
-    """Second hard-route stage: full attention over compressed KV tokens."""
-    backend = (backend or "sdpa").lower()
-    if backend == "sdpa":
-        return biased_sdpa(query, key, value, bias, scale=scale)
-    raise ValueError(
-        f"unsupported hard_route_routing_backend={backend!r}; expected 'sdpa' "
-        "or the supported direct-route backend."
-    )
 
 
 def hard_route_attention(
@@ -98,14 +71,7 @@ def hard_route_attention(
     # A fixed (a, f, j, k) block has I queries x L keys. Hard C4 merges the
     # L keys into four local-with-ith seed clusters.
     use_hard_c4 = is_hard_c4_backend(hard_route_backend)
-    validate_block_seed_mode(seed_mode, "multi-token merging")
-
-    if seed_mode != "local_with_ith":
-        raise ValueError("hard C4 keeps only seed_mode='local_with_ith'.")
-    if int(num_merge_tokens) != 4:
-        raise ValueError("hard C4 keeps only num_merge_tokens=4.")
-    if q.size(2) < 4 or k.size(3) < 4:
-        raise ValueError("hard C4 requires at least four query rows and four key columns per block.")
+    del num_merge_tokens, seed_mode, seed
 
     if use_hard_c4:
         # Optimized C4 path: Triton merge writes token-major compressed KV
@@ -119,7 +85,7 @@ def hard_route_attention(
             assume_contiguous=True,
         )
         output = output if output is not None and output.is_contiguous() else None
-        out = direct_compressed_attention(
+        return direct_compressed_attention(
             q,
             key,
             value,
@@ -129,10 +95,6 @@ def hard_route_attention(
             output=output,
             assume_contiguous=True,
         )
-        if out is not None:
-            return out
-
-        raise ValueError("hard_route_backend='hard_c4' requires the supported Triton routing backend.")
     else:
         # Readable path: gather seed queries, merge KV, then run full
         # compressed attention over all merged tokens.
@@ -144,9 +106,6 @@ def hard_route_attention(
             k.size(2),
             q.size(3),
             q.size(2),
-            num_merge_tokens,
-            seed,
-            seed_mode,
         )
         seed_queries = gather_seed_queries(q, seed_rows)
         backend = (hard_route_backend or "sdpa").lower()
@@ -168,13 +127,12 @@ def hard_route_attention(
         value = rearrange(merged_values, "b a f j k c h d -> (b h a j) (f k c) d")
         bias = rearrange(routing_bias, "b h a f k j c -> (b h a j) (f k c)")
 
-    out = hard_route_compressed_attention(
+    out = biased_sdpa(
         query,
         key,
         value,
         bias,
-        hard_route_routing_backend,
-        scale,
+        scale=scale,
     )
     return rearrange(
         out,
@@ -188,5 +146,4 @@ def hard_route_attention(
 
 __all__ = [
     "hard_route_attention",
-    "hard_route_compressed_attention",
 ]

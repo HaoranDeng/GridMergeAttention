@@ -132,7 +132,7 @@ def route_compressed_tokens(
     Only the supported full compressed-attention kernel is kept here.
     """
     routing_backend = variant["hard_route_routing_backend"]
-    routed = direct_compressed_attention(
+    return direct_compressed_attention(
         q_chunk,
         merged_key,
         merged_value,
@@ -142,10 +142,6 @@ def route_compressed_tokens(
         output=output,
         assume_contiguous=True,
     )
-    if routed is not None:
-        return routed
-
-    raise ValueError("component profiling requires the supported triton_direct_*_tokenmajor routing backend.")
 
 
 def install_probe(stats, args):
@@ -170,16 +166,16 @@ def install_probe(stats, args):
         variant_stats = stats[variant_name]
         _, height, width = grid_size
         if record:
-            q_blocks, seconds = timed(lambda: video_to_blocks(q, 1, 1, 1, height, width))
+            q_blocks, seconds = timed(lambda: video_to_blocks(q, height, width))
             variant_stats.add_time("video_to_q_blocks", seconds)
-            k_blocks, seconds = timed(lambda: video_to_blocks(k, 1, 1, 1, height, width))
+            k_blocks, seconds = timed(lambda: video_to_blocks(k, height, width))
             variant_stats.add_time("video_to_k_blocks", seconds)
-            v_blocks, seconds = timed(lambda: video_to_blocks(v, 1, 1, 1, height, width))
+            v_blocks, seconds = timed(lambda: video_to_blocks(v, height, width))
             variant_stats.add_time("video_to_v_blocks", seconds)
         else:
-            q_blocks = video_to_blocks(q, 1, 1, 1, height, width)
-            k_blocks = video_to_blocks(k, 1, 1, 1, height, width)
-            v_blocks = video_to_blocks(v, 1, 1, 1, height, width)
+            q_blocks = video_to_blocks(q, height, width)
+            k_blocks = video_to_blocks(k, height, width)
+            v_blocks = video_to_blocks(v, height, width)
 
         k_merge_blocks = k_blocks
         v_merge_blocks = v_blocks
@@ -215,8 +211,6 @@ def install_probe(stats, args):
                     assume_contiguous=True,
                 )
 
-            if merge_out is None:
-                raise RuntimeError("hard_route_backend must be a direct-route backend.")
             merged_key, merged_value, routing_bias, _ = merge_out
             output = out_slice if out_slice.is_contiguous() else None
 
@@ -250,10 +244,10 @@ def install_probe(stats, args):
                     out_slice.copy_(routed)
 
         if record:
-            out, seconds = timed(lambda: blocks_to_video(out_blocks, 1, 1, 1))
+            out, seconds = timed(lambda: blocks_to_video(out_blocks))
             variant_stats.add_time("blocks_to_video", seconds)
             return out
-        return blocks_to_video(out_blocks, 1, 1, 1)
+        return blocks_to_video(out_blocks)
 
     def probed_self_attention(self, x, grid_size, rope_cache):
         batch, seq_len, heads, dim = *x.shape[:2], self.num_heads, self.head_dim

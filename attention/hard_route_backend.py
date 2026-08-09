@@ -64,7 +64,10 @@ def direct_compressed_attention(
     assume_contiguous=False,
 ):
     if not is_direct_route_attention_backend(backend):
-        return None
+        raise ValueError(
+            f"hard_route_backend='hard_c4' requires "
+            f"hard_route_routing_backend={DIRECT_ROUTING_BACKEND!r}."
+        )
 
     return triton_direct_route_biased_attention(
         q,
