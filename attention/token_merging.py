@@ -56,76 +56,6 @@ def normalize_layout(layout):
     return LAYOUT_ALIASES.get(layout, layout)
 
 
-def _local_attention_impl(layout, num_merge_tokens):
-    impls = MULTI_TOKEN_IMPLS if num_merge_tokens > 1 else ONE_TOKEN_IMPLS
-    return impls[layout]
-
-
-def _can_write_directly_to_output(layout, hard_route_routing_backend):
-    return (
-        layout == LAYOUT_HARD_ROUTE
-        and str(hard_route_routing_backend).startswith("triton_direct_")
-    )
-
-
-def _run_attention_chunk(
-    attention_impl,
-    layout,
-    q_chunk,
-    k_blocks,
-    v_blocks,
-    scale,
-    num_merge_tokens,
-    seed_mode,
-    seed,
-    query_outer_offset,
-    q_init,
-    key_valid_blocks,
-    hard_route_backend,
-    hard_route_routing_backend,
-    out_slice,
-):
-    if num_merge_tokens == 1:
-        return attention_impl(
-            q_chunk,
-            k_blocks,
-            v_blocks,
-            scale,
-            q_init,
-            key_valid=key_valid_blocks,
-        )
-
-    if layout in HARD_ROUTE_LAYOUTS:
-        kwargs = {}
-        if _can_write_directly_to_output(layout, hard_route_routing_backend):
-            kwargs["output"] = out_slice
-
-        return attention_impl(
-            q_chunk,
-            k_blocks,
-            v_blocks,
-            scale,
-            num_merge_tokens,
-            seed_mode,
-            seed,
-            query_outer_offset,
-            hard_route_backend,
-            hard_route_routing_backend,
-            **kwargs,
-        )
-
-    return attention_impl(
-        q_chunk,
-        k_blocks,
-        v_blocks,
-        scale,
-        num_merge_tokens,
-        seed_mode,
-        seed,
-        query_outer_offset,
-    )
-
-
 def token_merging_attn(
     q,
     k,
@@ -190,30 +120,56 @@ def token_merging_attn(
     if valid_tokens is not None:
         key_valid_blocks = video_to_blocks(valid_tokens, f_tied, h_reduce, w_reduce, h, w)
         key_valid_blocks = key_valid_blocks[..., 0, 0]
-    attention_impl = _local_attention_impl(layout, num_merge_tokens)
+    attention_impl = (MULTI_TOKEN_IMPLS if num_merge_tokens > 1 else ONE_TOKEN_IMPLS)[layout]
 
     out = torch.empty_like(q_blocks)
     for start in range(0, q_blocks.size(1), query_outer_chunk):
         end = min(start + query_outer_chunk, q_blocks.size(1))
         q_chunk = q_blocks[:, start:end]
         out_slice = out[:, start:end]
-        chunk = _run_attention_chunk(
-            attention_impl,
-            layout,
-            q_chunk,
-            k_blocks,
-            v_blocks,
-            sm_scale,
-            num_merge_tokens,
-            seed_mode,
-            seed,
-            start,
-            q_init,
-            key_valid_blocks,
-            hard_route_backend,
-            hard_route_routing_backend,
-            out_slice,
-        )
+
+        if num_merge_tokens == 1:
+            chunk = attention_impl(
+                q_chunk,
+                k_blocks,
+                v_blocks,
+                sm_scale,
+                q_init,
+                key_valid=key_valid_blocks,
+            )
+        elif layout in HARD_ROUTE_LAYOUTS:
+            kwargs = {}
+            if (
+                layout == LAYOUT_HARD_ROUTE
+                and str(hard_route_routing_backend).startswith("triton_direct_")
+            ):
+                kwargs["output"] = out_slice
+
+            chunk = attention_impl(
+                q_chunk,
+                k_blocks,
+                v_blocks,
+                sm_scale,
+                num_merge_tokens,
+                seed_mode,
+                seed,
+                start,
+                hard_route_backend,
+                hard_route_routing_backend,
+                **kwargs,
+            )
+        else:
+            chunk = attention_impl(
+                q_chunk,
+                k_blocks,
+                v_blocks,
+                sm_scale,
+                num_merge_tokens,
+                seed_mode,
+                seed,
+                start,
+            )
+
         if chunk is not out_slice:
             out_slice.copy_(chunk)
 

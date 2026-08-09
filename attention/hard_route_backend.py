@@ -132,44 +132,11 @@ def direct_compressed_attention(
     )
 
 
-def direct_route_only_feature(config):
-    return None
-
-
-def run_direct_route_attention(
-    q,
-    source_key,
-    source_value,
-    key,
-    value,
-    bias,
-    key_scale,
-    config,
-    routing_backend,
-    scale,
-    output=None,
-    assume_contiguous=False,
-):
-    del source_key, source_value, key_scale, config
-    return direct_compressed_attention(
-        q,
-        key,
-        value,
-        bias,
-        routing_backend,
-        scale,
-        output=output,
-        assume_contiguous=assume_contiguous,
-    )
-
-
 __all__ = [
     "DirectRouteMergeConfig",
     "direct_compressed_attention",
-    "direct_route_only_feature",
     "merge_kv_direct_c4",
     "parse_direct_route_attention_backend",
     "parse_direct_route_backend",
-    "run_direct_route_attention",
     "uses_inline_local_seed_backend",
 ]
