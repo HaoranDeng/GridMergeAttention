@@ -84,8 +84,8 @@ With `layout: hard_route` and `num_merge_tokens=C`, each block:
 4. Runs full compressed attention from all queries to all compressed KV tokens.
 
 In `hard_route.py`, `hard_route_backend: sdpa` is the readable PyTorch
-reference merge. Triton backends implement the same two-stage algorithm but
-replace the merge and/or compressed-attention stages with kernels.
+reference merge. `hard_route_backend: hard_c4` is the current optimized C4
+Triton path.
 
 For understanding or changing the algorithm, start from
 `hard_route_pytorch.py`. The main helpers are:
@@ -128,11 +128,10 @@ This path is non-shared and grid-local: each
 KV tokens. The second step is full compressed attention, not sparse or
 windowed attention.
 
-`hard_c4` is now the documented direct C4 backend. The old long
-`bestlogit_simplemerge_ieee` string is accepted only as a compatibility alias.
-It uses the exact hard assignment, entropy routing bias, and full compressed
-attention semantics, while keeping the Python backend parser free of failed
-experiment suffixes.
+`hard_c4` is now the only supported direct C4 backend name. Old generic
+`triton`, `triton_c4`, `triton_c4_j16`, and long experiment-suffix aliases were
+removed so new work has only two paths to read: PyTorch `sdpa` for correctness
+and `hard_c4` for speed.
 
 For new optimization work, treat the PyTorch file as the readable reference and
 the `hard_c4` direct-route backend as the current optimized

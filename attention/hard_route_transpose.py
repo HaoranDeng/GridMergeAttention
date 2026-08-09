@@ -8,60 +8,6 @@ from .common import (
 )
 from .hard_route import hard_route_compressed_attention
 from .hard_route_pytorch import hard_route_merge_kv_transpose_pytorch
-from .hard_route_triton import triton_hard_route_merge, triton_hard_route_merge_c4
-
-
-def _triton_merge_kv_transpose(seed_queries, k, v, scale, use_c4_kernel=False, block_j_target=8):
-    # Reuse the row-routing Triton kernel by treating original key columns as
-    # fixed key rows and original key rows as the merged key-token dimension.
-    seed_queries_for_kernel = rearrange(
-        seed_queries,
-        "b a f i l c h d -> b a f l i c h d",
-    ).contiguous()
-    key_for_kernel = rearrange(k, "b f k l h d -> b f l k h d").contiguous()
-    value_for_kernel = rearrange(v, "b f k l h d -> b f l k h d").contiguous()
-
-    if use_c4_kernel:
-        result = triton_hard_route_merge_c4(
-            seed_queries_for_kernel,
-            key_for_kernel,
-            value_for_kernel,
-            scale=scale,
-            block_j_target=block_j_target,
-        )
-    else:
-        result = triton_hard_route_merge(
-            seed_queries_for_kernel,
-            key_for_kernel,
-            value_for_kernel,
-            scale=scale,
-        )
-    merged_keys, merged_values, routing_bias = result[:3]
-    routing_bias = rearrange(routing_bias, "b h a f l i c -> b h a f i l c")
-    return merged_keys, merged_values, routing_bias
-
-
-def _merge(seed_queries, k, v, backend, scale):
-    backend = (backend or "sdpa").lower()
-    if backend == "sdpa":
-        return hard_route_merge_kv_transpose_pytorch(seed_queries, k, v, scale)
-    if backend == "triton":
-        return _triton_merge_kv_transpose(seed_queries, k, v, scale)
-    if backend == "triton_c4":
-        return _triton_merge_kv_transpose(seed_queries, k, v, scale, use_c4_kernel=True)
-    if backend == "triton_c4_j16":
-        return _triton_merge_kv_transpose(
-            seed_queries,
-            k,
-            v,
-            scale,
-            use_c4_kernel=True,
-            block_j_target=16,
-        )
-    raise ValueError(
-        f"unsupported hard_route_backend={backend!r}; expected 'sdpa', 'triton', "
-        "'triton_c4', or 'triton_c4_j16'."
-    )
 
 
 def hard_route_attention_transpose(
@@ -101,11 +47,12 @@ def hard_route_attention_transpose(
     )
     seed_queries = gather_seed_queries_transpose(q, seed_cols)
 
-    merged_keys, merged_values, routing_bias = _merge(
+    if (hard_route_backend or "sdpa").lower() != "sdpa":
+        raise ValueError("transpose hard-route keeps only hard_route_backend='sdpa'.")
+    merged_keys, merged_values, routing_bias = hard_route_merge_kv_transpose_pytorch(
         seed_queries,
         k,
         v,
-        hard_route_backend,
         scale,
     )
 

@@ -47,10 +47,7 @@ NAMES=(
   "hard_route_c2_native"
   "hard_route_c4_native"
   "hard_route_c6_native"
-  "hard_route_c2_triton"
-  "hard_route_c4_triton"
-  "hard_route_c6_triton"
-  "hard_route_c4_full_core"
+  "hard_route_c4_hard_c4"
 )
 
 CONFIGS=(
@@ -58,9 +55,6 @@ CONFIGS=(
   "configs/token_merging_wan_hard_route_c2_fewstep.yaml"
   "configs/token_merging_wan_hard_route_c4_fewstep.yaml"
   "configs/token_merging_wan_hard_route_c6_fewstep.yaml"
-  "configs/token_merging_wan_hard_route_c2_triton_fewstep.yaml"
-  "configs/token_merging_wan_hard_route_c4_triton_fewstep.yaml"
-  "configs/token_merging_wan_hard_route_c6_triton_fewstep.yaml"
   "configs/token_merging_wan_hard_route_c4_fastseed_full_core_fewstep.yaml"
 )
 
@@ -170,10 +164,7 @@ order = [
     "hard_route_c2_native",
     "hard_route_c4_native",
     "hard_route_c6_native",
-    "hard_route_c2_triton",
-    "hard_route_c4_triton",
-    "hard_route_c6_triton",
-    "hard_route_c4_full_core",
+    "hard_route_c4_hard_c4",
 ]
 rows = {json.loads(path.read_text())["name"]: json.loads(path.read_text()) for path in result_dir.glob("*.json")}
 dense_seconds = rows.get("dense", {}).get("seconds_per_mp4")

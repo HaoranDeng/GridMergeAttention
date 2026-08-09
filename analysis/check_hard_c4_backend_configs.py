@@ -8,9 +8,16 @@ sys.path.insert(0, str(REPO_ROOT))
 from attention.hard_route_backend import (  # noqa: E402
     DIRECT_ROUTING_BACKEND,
     HARD_C4_BACKEND,
-    LEGACY_HARD_C4_BACKEND,
-    parse_direct_route_attention_backend,
-    parse_direct_route_backend,
+    MERGE_BLOCK_J,
+    MERGE_LOGIT_INPUT_PRECISION,
+    MERGE_NUM_STAGES,
+    MERGE_NUM_WARPS,
+    ROUTING_BLOCK_M,
+    ROUTING_BLOCK_N,
+    ROUTING_NUM_STAGES,
+    ROUTING_NUM_WARPS,
+    is_direct_route_attention_backend,
+    is_hard_c4_backend,
 )
 
 
@@ -30,6 +37,7 @@ REMOVED_MERGE_SUFFIXES = [
     "_stripe_tokenmajor_inline_local_seed",
     "_f2_bestlogit_tokenmajor_inline_local_seed",
     "_bestlogit_simplemerge_tokenmajor_inline_local_seed",
+    "_bestlogit_simplemerge_ieee_tokenmajor_inline_local_seed",
     "_bestlogit_simplemerge_bf16kv_tokenmajor_inline_local_seed",
     "_bestlogit_simplemerge_bf16x3_tokenmajor_inline_local_seed",
 ]
@@ -43,22 +51,24 @@ REMOVED_ROUTING_BACKENDS = [
 
 
 def main():
-    config = parse_direct_route_backend(SUPPORTED_MERGE_BACKEND)
-    assert config.supported
-    assert config.block_j_target == 32
-    assert config.merge_num_warps == 2
-    assert config.merge_num_stages == 1
-    assert config.logit_input_precision == "ieee"
-    assert parse_direct_route_backend(LEGACY_HARD_C4_BACKEND).supported
+    assert is_hard_c4_backend(SUPPORTED_MERGE_BACKEND)
+    assert MERGE_BLOCK_J == 32
+    assert MERGE_NUM_WARPS == 2
+    assert MERGE_NUM_STAGES == 1
+    assert MERGE_LOGIT_INPUT_PRECISION == "ieee"
 
-    assert parse_direct_route_attention_backend(SUPPORTED_ROUTING_BACKEND) == (32, 32, 1, 1)
+    assert is_direct_route_attention_backend(SUPPORTED_ROUTING_BACKEND)
+    assert ROUTING_BLOCK_M == 32
+    assert ROUTING_BLOCK_N == 32
+    assert ROUTING_NUM_WARPS == 1
+    assert ROUTING_NUM_STAGES == 1
 
     for backend in REMOVED_MERGE_BACKENDS:
-        if parse_direct_route_backend(backend).supported:
+        if is_hard_c4_backend(backend):
             raise AssertionError(f"removed merge backend is still supported: {backend}")
 
     for backend in REMOVED_ROUTING_BACKENDS:
-        if parse_direct_route_attention_backend(backend) is not None:
+        if is_direct_route_attention_backend(backend):
             raise AssertionError(f"removed routing backend is still supported: {backend}")
 
     print("hard_c4_backend_config_check_ok")

@@ -11,7 +11,8 @@ from omegaconf import OmegaConf
 from attention.hard_route_backend import (
     DIRECT_ROUTING_BACKEND,
     HARD_C4_BACKEND,
-    parse_direct_route_backend,
+    MERGE_BLOCK_J,
+    is_hard_c4_backend,
 )
 from generate import load_generator_checkpoint, load_prompts
 from pipeline import TokenMergingWanPipeline
@@ -42,8 +43,7 @@ def _dtype_bytes(dtype):
 
 def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant):
     """Estimate K/V/bias traffic for the supported direct C4 simplemerge path."""
-    merge_config = parse_direct_route_backend(variant["hard_route_backend"])
-    if not merge_config.supported:
+    if not is_hard_c4_backend(variant["hard_route_backend"]):
         return None
 
     batch, _, heads, dim = q.shape
@@ -71,7 +71,7 @@ def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant)
         "key_dtype": "fp16",
         "value_dtype": "fp16",
         "bias_dtype": "fp16",
-        "block_j_target": merge_config.block_j_target,
+        "block_j_target": MERGE_BLOCK_J,
         "writes_merged_key": True,
         "writes_merged_value": True,
         "writes_routing_bias": True,
@@ -84,17 +84,14 @@ class Stats:
         self.seconds = 0.0
         self.sqerr_dense = 0.0
         self.ref_sq_dense = 0.0
-        self.sqerr_baseline = 0.0
-        self.ref_sq_baseline = 0.0
         self.numel = 0
         self.max_abs_vs_dense = 0.0
-        self.max_abs_vs_baseline = 0.0
 
     def add_time(self, seconds):
         self.calls += 1
         self.seconds += float(seconds)
 
-    def add_error(self, out, dense, baseline=None):
+    def add_error(self, out, dense):
         out_f = out.float().reshape(-1)
         dense_f = dense.float().reshape(-1)
         diff_dense = out_f - dense_f
@@ -103,17 +100,7 @@ class Stats:
         self.max_abs_vs_dense = max(self.max_abs_vs_dense, float(diff_dense.abs().max().item()))
         self.numel += diff_dense.numel()
 
-        if baseline is not None:
-            baseline_f = baseline.float().reshape(-1)
-            diff_baseline = out_f - baseline_f
-            self.sqerr_baseline += float(torch.dot(diff_baseline, diff_baseline).item())
-            self.ref_sq_baseline += float(torch.dot(baseline_f, baseline_f).clamp_min(1e-20).item())
-            self.max_abs_vs_baseline = max(
-                self.max_abs_vs_baseline,
-                float(diff_baseline.abs().max().item()),
-            )
-
-    def summary(self, dense_seconds=None, baseline_seconds=None):
+    def summary(self, dense_seconds=None):
         out = {
             "calls": self.calls,
             "seconds": self.seconds,
@@ -121,8 +108,6 @@ class Stats:
         }
         if dense_seconds is not None and self.seconds:
             out["speedup_vs_dense_attention"] = dense_seconds / self.seconds
-        if baseline_seconds is not None and self.seconds:
-            out["speedup_vs_hard_c4_baseline"] = baseline_seconds / self.seconds
         if self.numel:
             out.update(
                 {
@@ -131,17 +116,6 @@ class Stats:
                     "max_abs_vs_dense": self.max_abs_vs_dense,
                 }
             )
-            if self.ref_sq_baseline:
-                out.update(
-                    {
-                        "mse_vs_hard_c4_baseline": self.sqerr_baseline / self.numel,
-                        "rel_l2_vs_hard_c4_baseline": (
-                            self.sqerr_baseline / max(self.ref_sq_baseline, 1e-20)
-                        )
-                        ** 0.5,
-                        "max_abs_vs_hard_c4_baseline": self.max_abs_vs_baseline,
-                    }
-                )
         return out
 
 
@@ -151,11 +125,7 @@ def exact_variants():
             "hard_route_backend": "sdpa",
             "hard_route_routing_backend": "sdpa",
         },
-        "hard_c4_baseline": {
-            "hard_route_backend": "triton",
-            "hard_route_routing_backend": "triton",
-        },
-        "hard_c4_bestlogit_simplemerge_tokenmajor": exact_backend(
+        "hard_c4": exact_backend(
             DIRECT_MERGE_BACKEND,
             seed_mode="local_with_ith",
         ),
@@ -258,9 +228,6 @@ def install_probe(stats, args):
             name: reason for name, reason in smoke_errors.items() if name in all_variants
         }
 
-    if not args.skip_baseline and "hard_c4_baseline" not in variants:
-        variants = {"hard_c4_baseline": all_variants["hard_c4_baseline"], **variants}
-
     state = {
         "calls_total": 0,
         "calls_current_prompt": 0,
@@ -339,22 +306,14 @@ def install_probe(stats, args):
             dense, seconds = timed(lambda: run_dense(q, k, v, self))
             stats["dense"].add_time(seconds)
 
-            baseline = None
-            if not args.skip_baseline:
-                baseline, seconds = timed(
-                    lambda: run_variant(q, k, v, grid_size, variants["hard_c4_baseline"])
-                )
-                stats["hard_c4_baseline"].add_time(seconds)
-                stats["hard_c4_baseline"].add_error(baseline, dense)
-
             for name, kwargs in variants.items():
-                if name == "hard_c4_baseline" or name in state["disabled_variants"]:
+                if name in state["disabled_variants"]:
                     continue
                 try:
                     print(f"timing variant: {name}", flush=True)
                     out, seconds = timed(lambda kwargs=kwargs: run_variant(q, k, v, grid_size, kwargs))
                     stats[name].add_time(seconds)
-                    stats[name].add_error(out, dense, baseline=baseline)
+                    stats[name].add_error(out, dense)
                 except Exception as exc:
                     state["disabled_variants"].add(name)
                     state["variant_errors"][name] = repr(exc)
@@ -412,7 +371,6 @@ def parse_args():
     parser.add_argument("--use_ema", action="store_true")
     parser.add_argument("--max_calls", type=int, default=30)
     parser.add_argument("--query_outer_chunk", type=int, default=10)
-    parser.add_argument("--skip_baseline", action="store_true")
     parser.add_argument(
         "--variants",
         default="",
@@ -455,14 +413,9 @@ def main():
     wall_seconds = time.perf_counter() - start
 
     dense_seconds = stats["dense"].seconds
-    baseline_stat = stats.get("hard_c4_baseline")
-    baseline_seconds = baseline_stat.seconds if baseline_stat is not None and baseline_stat.calls else None
     variant_summaries = {}
     for name, value in sorted(stats.items()):
-        summary = value.summary(
-            dense_seconds=dense_seconds if name != "dense" else None,
-            baseline_seconds=baseline_seconds if baseline_seconds and name != "dense" else None,
-        )
+        summary = value.summary(dense_seconds=dense_seconds if name != "dense" else None)
         estimate = probe_state["intermediate_estimates"].get(name)
         if estimate is not None:
             summary["direct_intermediate_estimate"] = estimate

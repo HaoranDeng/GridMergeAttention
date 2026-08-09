@@ -571,9 +571,12 @@ The best accepted direction so far is still:
   the older head-major experiment branch,
 - `query_outer_chunk=10`, which was the fastest confirmed safe chunk size in
   `analysis/hard_c4_nohead_chunk_confirm_20260808`,
-- direct-route Triton kernels to avoid unnecessary reshape/copy overhead.
-- expose this path as `hard_c4`; keep the old long backend string only as a
-  compatibility alias, not as the public config style.
+- direct-route Triton kernels to avoid unnecessary reshape/copy overhead,
+- only two maintained implementation paths: PyTorch `sdpa` as the readable
+  correctness reference and `hard_c4` as the optimized Triton path. Old generic
+  `triton`, `triton_c4`, `triton_c4_j16`, and long experiment-suffix aliases
+  were removed from active code so they are not accidentally reused.
+- expose this path only as `hard_c4`.
 
 This direction improves the old hard C4 implementation substantially, but it
 has not yet achieved a clear 2x attention speedup over dense attention while

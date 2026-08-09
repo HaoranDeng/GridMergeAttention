@@ -39,9 +39,8 @@ PROMPT_PATH="${PROMPT_PATH:-${REPO_DIR}/prompts/MovieGenVideoBench_extended.txt}
 OUTPUT_JSON="${OUTPUT_JSON:-${RESULT_DIR}/hard_c4_attention_backends.json}"
 MAX_CALLS="${MAX_CALLS:-30}"
 NUM_PROMPTS="${NUM_PROMPTS:-1}"
-VARIANTS="${VARIANTS:-hard_c4_bestlogit_simplemerge_tokenmajor}"
+VARIANTS="${VARIANTS:-hard_c4}"
 QUERY_OUTER_CHUNK="${QUERY_OUTER_CHUNK:-10}"
-SKIP_BASELINE="${SKIP_BASELINE:-0}"
 SKIP_VARIANT_ERRORS_JSON="${SKIP_VARIANT_ERRORS_JSON:-}"
 SEED="${SEED:-0}"
 DTYPE="${DTYPE:-bf16}"
@@ -59,15 +58,10 @@ echo "Benchmarking non-shared hard C4 attention backends"
 echo "  max calls: ${MAX_CALLS}"
 echo "  prompts:   ${NUM_PROMPTS}"
 echo "  variants:  ${VARIANTS}"
-echo "  skip baseline: ${SKIP_BASELINE}"
 echo "  skip variant errors json: ${SKIP_VARIANT_ERRORS_JSON:-<none>}"
 echo "  output:    ${OUTPUT_JSON}"
 echo "  triton cache: ${TRITON_CACHE_DIR}"
 
-baseline_args=()
-case "${SKIP_BASELINE,,}" in
-  1|true|yes|y) baseline_args+=(--skip_baseline) ;;
-esac
 smoke_error_args=()
 if [ -n "${SKIP_VARIANT_ERRORS_JSON}" ]; then
   smoke_error_args+=(--skip_variant_errors_from_json "${SKIP_VARIANT_ERRORS_JSON}")
@@ -86,6 +80,5 @@ python analysis/hard_route_nonshared_backend_real_qkv.py \
   --query_outer_chunk "${QUERY_OUTER_CHUNK}" \
   --variants "${VARIANTS}" \
   --seed "${SEED}" \
-  "${baseline_args[@]}" \
   "${smoke_error_args[@]}" \
   --output_json "${OUTPUT_JSON}"

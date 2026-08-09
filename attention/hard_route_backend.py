@@ -11,9 +11,6 @@ paths are documented in docs/negative_results.md and are intentionally not
 accepted by the parser here.
 """
 
-from dataclasses import dataclass
-from functools import lru_cache
-
 from .hard_route_triton import (
     triton_direct_route_biased_attention,
     triton_hard_route_merge_c4_direct_route,
@@ -21,56 +18,37 @@ from .hard_route_triton import (
 
 
 HARD_C4_BACKEND = "hard_c4"
-LEGACY_HARD_C4_BACKEND = (
-    "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
-    "_bestlogit_simplemerge_ieee_tokenmajor_inline_local_seed"
-)
 DIRECT_ROUTING_BACKEND = "triton_direct_m32_n32_w1_s1_exp2_tokenmajor"
+MERGE_BLOCK_J = 32
+MERGE_NUM_WARPS = 2
+MERGE_NUM_STAGES = 1
+MERGE_LOGIT_INPUT_PRECISION = "ieee"
+ROUTING_BLOCK_M = 32
+ROUTING_BLOCK_N = 32
+ROUTING_NUM_WARPS = 1
+ROUTING_NUM_STAGES = 1
 
 
-@dataclass(frozen=True)
-class DirectRouteMergeConfig:
-    """Parsed options for the single supported direct-route C4 backend."""
-
-    supported: bool
-    block_j_target: int = 32
-    merge_num_warps: int = 2
-    merge_num_stages: int = 1
-    logit_input_precision: str = "ieee"
+def is_direct_route_attention_backend(backend):
+    """Return whether the requested routing backend is the supported full-attention kernel."""
+    return (backend or "").lower() == DIRECT_ROUTING_BACKEND
 
 
-@lru_cache(maxsize=16)
-def parse_direct_route_attention_backend(backend):
-    """Return the only supported full compressed-attention tile config."""
-    if (backend or "").lower() != DIRECT_ROUTING_BACKEND:
-        return None
-    return 32, 32, 1, 1
+def is_hard_c4_backend(backend):
+    """Return whether the requested merge backend is the supported C4 path."""
+    return (backend or "").lower() == HARD_C4_BACKEND
 
 
-@lru_cache(maxsize=16)
-def parse_direct_route_backend(backend):
-    """Parse the direct C4 merge backend.
-
-    Unsupported historical experiment suffixes deliberately return
-    supported=False instead of exposing half-dead code paths.
-    """
-    backend = (backend or "").lower()
-    return DirectRouteMergeConfig(supported=backend in {HARD_C4_BACKEND, LEGACY_HARD_C4_BACKEND})
-
-
-def merge_kv_direct_c4(q, key, value, config, scale, assume_contiguous=False):
-    if not config.supported:
-        raise ValueError("unsupported hard-route C4 backend; use hard_route_backend='hard_c4'.")
-
+def merge_kv_direct_c4(q, key, value, scale, assume_contiguous=False):
     return triton_hard_route_merge_c4_direct_route(
         q,
         key,
         value,
         scale=scale,
-        block_j_target=config.block_j_target,
-        num_warps=config.merge_num_warps,
-        num_stages=config.merge_num_stages,
-        logit_input_precision=config.logit_input_precision,
+        block_j_target=MERGE_BLOCK_J,
+        num_warps=MERGE_NUM_WARPS,
+        num_stages=MERGE_NUM_STAGES,
+        logit_input_precision=MERGE_LOGIT_INPUT_PRECISION,
         assume_contiguous=assume_contiguous,
     )
 
@@ -85,21 +63,19 @@ def direct_compressed_attention(
     output=None,
     assume_contiguous=False,
 ):
-    config = parse_direct_route_attention_backend((backend or "").lower())
-    if config is None:
+    if not is_direct_route_attention_backend(backend):
         return None
 
-    block_m, block_n, num_warps, num_stages = config
     return triton_direct_route_biased_attention(
         q,
         key,
         value,
         bias,
-        block_m=block_m,
-        block_n=block_n,
+        block_m=ROUTING_BLOCK_M,
+        block_n=ROUTING_BLOCK_N,
         scale=scale,
-        num_warps=num_warps,
-        num_stages=num_stages,
+        num_warps=ROUTING_NUM_WARPS,
+        num_stages=ROUTING_NUM_STAGES,
         use_exp2=True,
         out=output,
         assume_contiguous=assume_contiguous,
@@ -107,12 +83,18 @@ def direct_compressed_attention(
 
 
 __all__ = [
-    "DirectRouteMergeConfig",
     "DIRECT_ROUTING_BACKEND",
     "HARD_C4_BACKEND",
-    "LEGACY_HARD_C4_BACKEND",
+    "MERGE_BLOCK_J",
+    "MERGE_LOGIT_INPUT_PRECISION",
+    "MERGE_NUM_STAGES",
+    "MERGE_NUM_WARPS",
+    "ROUTING_BLOCK_M",
+    "ROUTING_BLOCK_N",
+    "ROUTING_NUM_STAGES",
+    "ROUTING_NUM_WARPS",
     "direct_compressed_attention",
+    "is_direct_route_attention_backend",
+    "is_hard_c4_backend",
     "merge_kv_direct_c4",
-    "parse_direct_route_attention_backend",
-    "parse_direct_route_backend",
 ]

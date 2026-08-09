@@ -10,8 +10,8 @@ from omegaconf import OmegaConf
 from attention.common import blocks_to_video, video_to_blocks
 from attention.hard_route_backend import (
     direct_compressed_attention,
+    is_hard_c4_backend,
     merge_kv_direct_c4,
-    parse_direct_route_backend,
 )
 from analysis.hard_route_nonshared_backend_real_qkv import (
     estimate_direct_intermediate_bytes,
@@ -106,7 +106,6 @@ def selected_variants(args):
             "profiled_backend": {
                 "hard_route_backend": args.hard_route_backend,
                 "hard_route_routing_backend": args.hard_route_routing_backend,
-                "seed_mode": args.seed_mode,
             }
         }
 
@@ -153,10 +152,9 @@ def install_probe(stats, args):
     import wan.modules.model as wan_model
 
     variants = selected_variants(args)
-    direct_merge_configs = {
-        name: parse_direct_route_backend(variant["hard_route_backend"])
-        for name, variant in variants.items()
-    }
+    for name, variant in variants.items():
+        if not is_hard_c4_backend(variant["hard_route_backend"]):
+            raise ValueError(f"{name} must use hard_route_backend='hard_c4'.")
     state = {
         "calls_current_prompt": 0,
         "warmed": False,
@@ -170,7 +168,6 @@ def install_probe(stats, args):
 
     def run_split(q, k, v, grid_size, scale, variant_name, variant, record):
         variant_stats = stats[variant_name]
-        direct_merge_config = direct_merge_configs[variant_name]
         _, height, width = grid_size
         if record:
             q_blocks, seconds = timed(lambda: video_to_blocks(q, 1, 1, 1, height, width))
@@ -204,7 +201,6 @@ def install_probe(stats, args):
                         q_chunk,
                         k_merge_blocks,
                         v_merge_blocks,
-                        direct_merge_config,
                         scale,
                         assume_contiguous=True,
                     )
@@ -215,7 +211,6 @@ def install_probe(stats, args):
                     q_chunk,
                     k_merge_blocks,
                     v_merge_blocks,
-                    direct_merge_config,
                     scale,
                     assume_contiguous=True,
                 )
@@ -344,8 +339,6 @@ def parse_args():
     parser.add_argument("--use_ema", action="store_true")
     parser.add_argument("--max_calls", type=int, default=20)
     parser.add_argument("--query_outer_chunk", type=int, default=10)
-    parser.add_argument("--num_merge_tokens", type=int, default=4)
-    parser.add_argument("--seed_mode", default="fast_random_with_ith")
     parser.add_argument(
         "--variants",
         default="",

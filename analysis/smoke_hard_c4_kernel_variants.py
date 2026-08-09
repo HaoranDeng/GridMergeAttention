@@ -96,7 +96,7 @@ def main():
     v = torch.randn(shape_kv, device=device, dtype=dtype)
 
     variants = exact_variants()
-    ref_name = "hard_c4_bestlogit_simplemerge_tokenmajor"
+    ref_name = "hard_c4"
     names = [ref_name]
     selected_names = parse_variant_names(args.variants)
     if selected_names:

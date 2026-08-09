@@ -9,15 +9,10 @@ from .common import (
 )
 from .hard_route_backend import (
     direct_compressed_attention,
+    is_hard_c4_backend,
     merge_kv_direct_c4,
-    parse_direct_route_backend,
 )
 from .hard_route_pytorch import hard_route_merge_kv_pytorch
-from .hard_route_triton import (
-    triton_biased_attention,
-    triton_hard_route_merge,
-    triton_hard_route_merge_c4,
-)
 
 
 _SEED_ROWS_CACHE = {}
@@ -74,38 +69,14 @@ def _cached_seed_rows(
     return seed_rows
 
 
-def _build_seed_rows(
-    q,
-    k,
-    query_outer_offset,
-    num_merge_tokens,
-    seed,
-    seed_mode,
-):
-    return _cached_seed_rows(
-        q.device,
-        query_outer_offset,
-        q.size(1),
-        k.size(1),
-        k.size(2),
-        q.size(3),
-        q.size(2),
-        num_merge_tokens,
-        seed,
-        seed_mode,
-    )
-
-
 def hard_route_compressed_attention(query, key, value, bias, backend, scale):
     """Second hard-route stage: full attention over compressed KV tokens."""
     backend = (backend or "sdpa").lower()
     if backend == "sdpa":
         return biased_sdpa(query, key, value, bias, scale=scale)
-    if backend == "triton":
-        return triton_biased_attention(query, key, value, bias, scale=scale)
     raise ValueError(
-        f"unsupported hard_route_routing_backend={backend!r}; expected 'sdpa', "
-        "'triton', or a direct-route backend."
+        f"unsupported hard_route_routing_backend={backend!r}; expected 'sdpa' "
+        "or the supported direct-route backend."
     )
 
 
@@ -126,17 +97,17 @@ def hard_route_attention(
     # k/v: [B, F, K, L, H, D]
     # A fixed (a, f, j, k) block has I queries x L keys. This path merges
     # the L keys into several hard-assigned merged tokens instead of one.
-    direct_backend = parse_direct_route_backend(hard_route_backend)
+    use_hard_c4 = is_hard_c4_backend(hard_route_backend)
     validate_block_seed_mode(seed_mode, "multi-token merging")
 
-    if direct_backend.supported and seed_mode != "local_with_ith":
+    if use_hard_c4 and seed_mode != "local_with_ith":
         raise ValueError("hard_route_backend='hard_c4' requires seed_mode='local_with_ith'.")
-    if direct_backend.supported and int(num_merge_tokens) != 4:
+    if use_hard_c4 and int(num_merge_tokens) != 4:
         raise ValueError("hard_route_backend='hard_c4' requires num_merge_tokens=4.")
     if num_merge_tokens > k.size(3):
         raise ValueError("num_merge_tokens cannot exceed key columns per block.")
 
-    if direct_backend.supported:
+    if use_hard_c4:
         # Optimized C4 path: Triton merge writes token-major compressed KV
         # directly into the layout expected by direct compressed attention.
         q = q.contiguous()
@@ -144,7 +115,6 @@ def hard_route_attention(
             q,
             k,
             v,
-            direct_backend,
             scale,
             assume_contiguous=True,
         )
@@ -171,10 +141,14 @@ def hard_route_attention(
     else:
         # Readable path: gather seed queries, merge KV, then run full
         # compressed attention over all merged tokens.
-        seed_rows = _build_seed_rows(
-            q,
-            k,
+        seed_rows = _cached_seed_rows(
+            q.device,
             query_outer_offset,
+            q.size(1),
+            k.size(1),
+            k.size(2),
+            q.size(3),
+            q.size(2),
             num_merge_tokens,
             seed,
             seed_mode,
@@ -188,32 +162,10 @@ def hard_route_attention(
                 v,
                 scale,
             )
-        elif backend == "triton":
-            merged_keys, merged_values, routing_bias = triton_hard_route_merge(
-                seed_queries,
-                k,
-                v,
-                scale=scale,
-            )[:3]
-        elif backend == "triton_c4":
-            merged_keys, merged_values, routing_bias = triton_hard_route_merge_c4(
-                seed_queries,
-                k,
-                v,
-                scale=scale,
-            )[:3]
-        elif backend == "triton_c4_j16":
-            merged_keys, merged_values, routing_bias = triton_hard_route_merge_c4(
-                seed_queries,
-                k,
-                v,
-                scale=scale,
-                block_j_target=16,
-            )[:3]
         else:
             raise ValueError(
-                f"unsupported hard_route_backend={backend!r}; expected 'sdpa', 'triton', "
-                "'triton_c4', 'triton_c4_j16', or a direct-route C4 backend."
+                f"unsupported hard_route_backend={backend!r}; expected 'sdpa' "
+                "or hard_route_backend='hard_c4'."
             )
 
         query = rearrange(q, "b a i j h d -> (b h a j) i d")
