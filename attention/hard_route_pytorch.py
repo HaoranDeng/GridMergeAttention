@@ -133,21 +133,6 @@ def masked_cluster_log_softmax(seed_key_logits, assignment):
     return log_weights.masked_fill(~assignment, 0.0)
 
 
-def hard_route_merge_weights(seed_key_logits, dtype):
-    """Turn seed-key logits into merge weights and entropy routing bias.
-
-    merge_weights[..., c, l] is nonzero only when key l is assigned to seed c.
-    routing_bias[..., c] = sum_l alpha_l log(alpha_l). The second attention
-    stage subtracts this value, which preserves the entropy term in the
-    softmax variational objective.
-    """
-    assignment = assign_keys_to_seeds(seed_key_logits)
-    log_weights = masked_cluster_log_softmax(seed_key_logits, assignment)
-    weights_f32 = log_weights.exp().masked_fill(~assignment, 0.0)
-    routing_bias = (weights_f32 * log_weights).sum(dim=-1)
-    return weights_f32.to(dtype), routing_bias
-
-
 def hard_route_merge_kv_pytorch(seed_queries, key, value, scale):
     """Readable PyTorch reference for hard C4 merge.
 
@@ -165,7 +150,13 @@ def hard_route_merge_kv_pytorch(seed_queries, key, value, scale):
         raise ValueError("hard C4 PyTorch reference expects exactly four seed queries.")
     seed_key_logits = torch.einsum("bafkjchd,bfklhd->bhafkjcl", seed_queries, key).float()
     seed_key_logits = seed_key_logits * float(scale)
-    merge_weights, routing_bias = hard_route_merge_weights(seed_key_logits, key.dtype)
+
+    assignment = assign_keys_to_seeds(seed_key_logits)
+    log_weights = masked_cluster_log_softmax(seed_key_logits, assignment)
+    weights_f32 = log_weights.exp().masked_fill(~assignment, 0.0)
+    routing_bias = (weights_f32 * log_weights).sum(dim=-1)
+    merge_weights = weights_f32.to(key.dtype)
+
     merged_key = torch.einsum("bhafkjcl,bfklhd->bafjkchd", merge_weights, key)
     merged_value = torch.einsum("bhafkjcl,bfklhe->bafjkche", merge_weights, value)
     return merged_key, merged_value, routing_bias
@@ -219,7 +210,6 @@ __all__ = [
     "gather_seed_queries",
     "hard_route_attention_pytorch",
     "hard_route_merge_kv_pytorch",
-    "hard_route_merge_weights",
     "local_c4_seed_rows",
     "masked_cluster_log_softmax",
 ]
