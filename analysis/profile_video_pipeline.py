@@ -93,7 +93,6 @@ def install_profiled_wan_forwards(timer):
                     seed_mode=self.token_merging_seed_mode,
                     seed=self.token_merging_seed,
                     hard_route_backend=self.token_merging_hard_route_backend,
-                    hard_route_routing_backend=self.token_merging_hard_route_routing_backend,
                 )
             else:
                 x = wan_model.flash_attention(

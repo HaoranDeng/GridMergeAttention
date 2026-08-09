@@ -9,7 +9,6 @@ except Exception:  # pragma: no cover - exercised only when Triton is missing.
 
 
 HARD_C4_BACKEND = "hard_c4"
-DIRECT_ROUTING_BACKEND = "triton_direct_m32_n32_w1_s1_exp2_tokenmajor"
 MERGE_BLOCK_J = 32
 MERGE_NUM_WARPS = 2
 MERGE_NUM_STAGES = 1
@@ -18,14 +17,6 @@ ROUTING_BLOCK_M = 32
 ROUTING_BLOCK_N = 32
 ROUTING_NUM_WARPS = 1
 ROUTING_NUM_STAGES = 1
-
-
-def is_hard_c4_backend(backend):
-    return (backend or "").lower() == HARD_C4_BACKEND
-
-
-def is_direct_route_attention_backend(backend):
-    return (backend or "").lower() == DIRECT_ROUTING_BACKEND
 
 
 if triton is not None:
@@ -312,42 +303,20 @@ if triton is not None:
         )
 
 
-def triton_direct_route_biased_attention(
-    query,
-    key,
-    value,
-    bias,
-    block_m=32,
-    block_n=64,
-    scale=1.0,
-    num_warps=1,
-    num_stages=1,
-    use_exp2=True,
-    out=None,
-    assume_contiguous=False,
-):
-    """Fused routing attention that reads/writes hard-route block layout.
+def route_compressed_attention(query, key, value, bias, scale, out=None):
+    """Full compressed attention over token-major hard C4 K/V/bias.
 
     query/out: [B, A, query_rows, query_columns, heads, dim]
     key/value: [compressed_tokens, B*heads*A*query_columns, dim]
     bias:      [compressed_tokens, B*heads*A*query_columns]
     """
-    if not assume_contiguous:
-        query = query.contiguous()
-        key = key.contiguous()
-        value = value.contiguous()
-        bias = bias.contiguous()
-
     batch, query_outer, query_rows, query_columns, heads, dim = query.shape
     key_len, groups, _ = key.shape
     block_d = triton.next_power_of_2(dim)
 
     if out is None:
         out = _cached_empty("direct_route_attention_out", query.shape, query.device, query.dtype)
-    grid = (groups, triton.cdiv(query_rows, block_m))
-    meta = {"num_warps": int(num_warps)}
-    if num_stages is not None:
-        meta["num_stages"] = int(num_stages)
+    grid = (groups, triton.cdiv(query_rows, ROUTING_BLOCK_M))
     _direct_route_biased_attention_kernel[grid](
         query,
         key,
@@ -360,34 +329,24 @@ def triton_direct_route_biased_attention(
         H_HEADS=heads,
         K_LEN=key_len,
         D_HEAD=dim,
-        BLOCK_M=block_m,
-        BLOCK_N=block_n,
+        BLOCK_M=ROUTING_BLOCK_M,
+        BLOCK_N=ROUTING_BLOCK_N,
         BLOCK_D=block_d,
         SCORE_SCALE=float(scale),
-        USE_EXP2=bool(use_exp2),
+        USE_EXP2=True,
         CAST_Q_TO_FP16=bool(key.dtype == torch.float16 and query.dtype != torch.float16),
         GROUPS=groups,
-        **meta,
+        num_warps=ROUTING_NUM_WARPS,
+        num_stages=ROUTING_NUM_STAGES,
     )
     return out
 
 
-def triton_hard_route_merge_c4_direct_route(
-    query,
-    key,
-    value,
-    scale=1.0,
-    block_j_target=32,
-    num_warps=2,
-    num_stages=1,
-    logit_input_precision="ieee",
-    assume_contiguous=False,
-):
-    """Current optimized non-shared C=4 merge for hard-route GridMerge.
+def merge_kv_direct_c4(query, key, value, scale):
+    """Merge each 30q x 52k hard C4 block into four compressed K/V tokens.
 
     This is intentionally narrow: it implements only the accepted
-    bestlogit_simplemerge path. Removed direct-route experiments are documented
-    in docs/negative_results.md and are not kept as dormant branches here.
+    no-force bestlogit_simplemerge path.
 
     query:     [B, A, query_rows, query_columns, H, D]
     key/value: [B, F, key_rows, key_columns, H, D]
@@ -396,15 +355,10 @@ def triton_hard_route_merge_c4_direct_route(
       key/value: [F * key_rows * 4, B * H * A * query_columns, D]
       bias:      [F * key_rows * 4, B * H * A * query_columns]
     """
-    if not assume_contiguous:
-        query = query.contiguous()
-        key = key.contiguous()
-        value = value.contiguous()
-
     batch, query_outer, query_rows, query_columns, heads, dim = query.shape
     _, key_outer, key_rows, key_columns, _, _ = key.shape
 
-    block_j = min(32, triton.next_power_of_2(query_columns))
+    block_j = min(MERGE_BLOCK_J, triton.next_power_of_2(query_columns))
     block_l = triton.next_power_of_2(key_columns)
     block_d = triton.next_power_of_2(dim)
 
@@ -454,51 +408,11 @@ def triton_hard_route_merge_c4_direct_route(
         BLOCK_L=block_l,
         BLOCK_D=block_d,
         SCORE_SCALE=float(scale),
-        LOGIT_INPUT_PRECISION=logit_input_precision,
-        num_warps=2,
-        num_stages=1,
-    )
-    return merged_key, merged_value, routing_bias, None
-
-
-def merge_kv_direct_c4(q, key, value, scale, assume_contiguous=False):
-    return triton_hard_route_merge_c4_direct_route(
-        q,
-        key,
-        value,
-        scale=scale,
-        block_j_target=MERGE_BLOCK_J,
+        LOGIT_INPUT_PRECISION=MERGE_LOGIT_INPUT_PRECISION,
         num_warps=MERGE_NUM_WARPS,
         num_stages=MERGE_NUM_STAGES,
-        logit_input_precision=MERGE_LOGIT_INPUT_PRECISION,
-        assume_contiguous=assume_contiguous,
     )
-
-
-def direct_compressed_attention(
-    q,
-    key,
-    value,
-    bias,
-    backend,
-    scale,
-    output=None,
-    assume_contiguous=False,
-):
-    return triton_direct_route_biased_attention(
-        q,
-        key,
-        value,
-        bias,
-        block_m=ROUTING_BLOCK_M,
-        block_n=ROUTING_BLOCK_N,
-        scale=scale,
-        num_warps=ROUTING_NUM_WARPS,
-        num_stages=ROUTING_NUM_STAGES,
-        use_exp2=True,
-        out=output,
-        assume_contiguous=assume_contiguous,
-    )
+    return merged_key, merged_value, routing_bias
 
 
 def hard_route_attention_triton(
@@ -506,33 +420,23 @@ def hard_route_attention_triton(
     k,
     v,
     scale,
-    hard_route_routing_backend=DIRECT_ROUTING_BACKEND,
     output=None,
 ):
     """Optimized hard C4 attention: Triton merge followed by full compressed attention."""
     q = q.contiguous()
-    key, value, bias, _ = merge_kv_direct_c4(
-        q,
-        k,
-        v,
-        scale,
-        assume_contiguous=True,
-    )
+    key, value, bias = merge_kv_direct_c4(q, k, v, scale)
     output = output if output is not None and output.is_contiguous() else None
-    return direct_compressed_attention(
+    return route_compressed_attention(
         q,
         key,
         value,
         bias,
-        hard_route_routing_backend,
         scale,
-        output=output,
-        assume_contiguous=True,
+        out=output,
     )
 
 
 __all__ = [
-    "DIRECT_ROUTING_BACKEND",
     "HARD_C4_BACKEND",
     "MERGE_BLOCK_J",
     "MERGE_LOGIT_INPUT_PRECISION",
@@ -542,11 +446,7 @@ __all__ = [
     "ROUTING_BLOCK_N",
     "ROUTING_NUM_STAGES",
     "ROUTING_NUM_WARPS",
-    "direct_compressed_attention",
     "hard_route_attention_triton",
-    "is_direct_route_attention_backend",
-    "is_hard_c4_backend",
     "merge_kv_direct_c4",
-    "triton_direct_route_biased_attention",
-    "triton_hard_route_merge_c4_direct_route",
+    "route_compressed_attention",
 ]

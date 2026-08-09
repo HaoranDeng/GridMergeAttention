@@ -37,7 +37,6 @@ def token_merging_attn(
     seed_mode="local_with_ith",
     seed=0,
     hard_route_backend="sdpa",
-    hard_route_routing_backend="sdpa",
 ):
     """Hard C4 GridMerge attention for Wan video self-attention.
 
@@ -70,7 +69,6 @@ def token_merging_attn(
                 k_blocks,
                 v_blocks,
                 sm_scale,
-                hard_route_routing_backend=hard_route_routing_backend,
                 output=out_slice,
             )
         else:

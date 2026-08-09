@@ -23,4 +23,3 @@ token_merging_args:
   seed_mode: local_with_ith
   seed: 0
   hard_route_backend: sdpa
-  hard_route_routing_backend: sdpa

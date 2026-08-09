@@ -9,10 +9,8 @@ import torch
 from omegaconf import OmegaConf
 
 from attention.hard_route_triton import (
-    DIRECT_ROUTING_BACKEND,
     HARD_C4_BACKEND,
     MERGE_BLOCK_J,
-    is_hard_c4_backend,
 )
 from generate import load_generator_checkpoint, load_prompts
 from pipeline import TokenMergingWanPipeline
@@ -23,11 +21,8 @@ DIRECT_MERGE_BACKEND = HARD_C4_BACKEND
 CHUNK_VARIANT_RE = re.compile(r"^(?P<base>.+)_chunk(?P<chunk>\d+)$")
 
 
-def exact_backend(hard_route_backend, seed_mode=None, routing_backend=None):
-    config = {
-        "hard_route_backend": hard_route_backend,
-        "hard_route_routing_backend": routing_backend or DIRECT_ROUTING_BACKEND,
-    }
+def exact_backend(hard_route_backend, seed_mode=None):
+    config = {"hard_route_backend": hard_route_backend}
     if seed_mode is not None:
         config["seed_mode"] = seed_mode
     return config
@@ -43,7 +38,7 @@ def _dtype_bytes(dtype):
 
 def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant):
     """Estimate K/V/bias traffic for the supported direct C4 simplemerge path."""
-    if not is_hard_c4_backend(variant["hard_route_backend"]):
+    if variant["hard_route_backend"] != HARD_C4_BACKEND:
         return None
 
     batch, _, heads, dim = q.shape
@@ -123,7 +118,6 @@ def exact_variants():
     return {
         "hard_c4_pytorch": {
             "hard_route_backend": "sdpa",
-            "hard_route_routing_backend": "sdpa",
             "seed_mode": "local_with_ith",
         },
         "hard_c4": exact_backend(
@@ -260,7 +254,6 @@ def install_probe(stats, args):
             seed_mode=kwargs.get("seed_mode", "local_with_ith"),
             seed=args.seed,
             hard_route_backend=kwargs["hard_route_backend"],
-            hard_route_routing_backend=kwargs["hard_route_routing_backend"],
         )
 
     def probed_self_attention(self, x, grid_size, rope_cache):

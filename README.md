@@ -39,7 +39,6 @@ token_merging_args:
   num_merge_tokens: 4
   seed_mode: local_with_ith
   hard_route_backend: sdpa
-  hard_route_routing_backend: sdpa
 ```
 
 The Triton config is the current best speed/quality path:
@@ -52,7 +51,6 @@ token_merging_args:
   num_merge_tokens: 4
   seed_mode: local_with_ith
   hard_route_backend: hard_c4
-  hard_route_routing_backend: triton_direct_m32_n32_w1_s1_exp2_tokenmajor
 ```
 
 ## Guardrails

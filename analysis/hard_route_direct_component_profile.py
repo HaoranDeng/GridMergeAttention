@@ -8,9 +8,9 @@ import torch
 from omegaconf import OmegaConf
 
 from attention.hard_route_triton import (
-    direct_compressed_attention,
-    is_hard_c4_backend,
+    HARD_C4_BACKEND,
     merge_kv_direct_c4,
+    route_compressed_attention,
 )
 from attention.token_merging import blocks_to_video, video_to_blocks
 from analysis.hard_route_nonshared_backend_real_qkv import (
@@ -105,7 +105,6 @@ def selected_variants(args):
         return {
             "profiled_backend": {
                 "hard_route_backend": args.hard_route_backend,
-                "hard_route_routing_backend": args.hard_route_routing_backend,
             }
         }
 
@@ -117,39 +116,12 @@ def selected_variants(args):
     return {name: available[name] for name in names}
 
 
-def route_compressed_tokens(
-    q_chunk,
-    merged_key,
-    merged_value,
-    routing_bias,
-    variant,
-    scale,
-    output,
-):
-    """Run full compressed attention after direct C4 merge.
-
-    Direct Triton routing consumes token-major [K, group, D] intermediates.
-    Only the supported full compressed-attention kernel is kept here.
-    """
-    routing_backend = variant["hard_route_routing_backend"]
-    return direct_compressed_attention(
-        q_chunk,
-        merged_key,
-        merged_value,
-        routing_bias,
-        routing_backend,
-        scale,
-        output=output,
-        assume_contiguous=True,
-    )
-
-
 def install_probe(stats, args):
     import wan.modules.model as wan_model
 
     variants = selected_variants(args)
     for name, variant in variants.items():
-        if not is_hard_c4_backend(variant["hard_route_backend"]):
+        if variant["hard_route_backend"] != HARD_C4_BACKEND:
             raise ValueError(f"{name} must use hard_route_backend='hard_c4'.")
     state = {
         "calls_current_prompt": 0,
@@ -162,7 +134,7 @@ def install_probe(stats, args):
     def run_dense(q, k, v, self):
         return wan_model.flash_attention(q=q, k=k, v=v, window_size=self.window_size)
 
-    def run_split(q, k, v, grid_size, scale, variant_name, variant, record):
+    def run_split(q, k, v, grid_size, scale, variant_name, record):
         variant_stats = stats[variant_name]
         _, height, width = grid_size
         if record:
@@ -198,7 +170,6 @@ def install_probe(stats, args):
                         k_merge_blocks,
                         v_merge_blocks,
                         scale,
-                        assume_contiguous=True,
                     )
                 )
                 variant_stats.add_time("direct_merge", seconds)
@@ -208,22 +179,20 @@ def install_probe(stats, args):
                     k_merge_blocks,
                     v_merge_blocks,
                     scale,
-                    assume_contiguous=True,
                 )
 
-            merged_key, merged_value, routing_bias, _ = merge_out
+            merged_key, merged_value, routing_bias = merge_out
             output = out_slice if out_slice.is_contiguous() else None
 
             if record:
                 routed, seconds = timed(
-                    lambda: route_compressed_tokens(
+                    lambda: route_compressed_attention(
                         q_chunk,
                         merged_key,
                         merged_value,
                         routing_bias,
-                        variant,
                         scale,
-                        output,
+                        out=output,
                     )
                 )
                 variant_stats.add_time("direct_routing", seconds)
@@ -231,14 +200,13 @@ def install_probe(stats, args):
                     _, seconds = timed(lambda: out_slice.copy_(routed))
                     variant_stats.add_time("output_copy", seconds)
             else:
-                routed = route_compressed_tokens(
+                routed = route_compressed_attention(
                     q_chunk,
                     merged_key,
                     merged_value,
                     routing_bias,
-                    variant,
                     scale,
-                    output,
+                    out=output,
                 )
                 if routed is not out_slice:
                     out_slice.copy_(routed)
@@ -274,7 +242,7 @@ def install_probe(stats, args):
         if should_record and not state["warmed"]:
             _ = run_dense(q, k, v, self)
             for name, variant in variants.items():
-                _ = run_split(q, k, v, grid_size, dim**-0.5, name, variant, record=False)
+                _ = run_split(q, k, v, grid_size, dim**-0.5, name, record=False)
             sync()
             state["warmed"] = True
 
@@ -284,7 +252,7 @@ def install_probe(stats, args):
             state["dense_seconds"] += float(seconds)
             for name, variant in variants.items():
                 stats[name].attention_calls += 1
-                out = run_split(q, k, v, grid_size, dim**-0.5, name, variant, record=True)
+                out = run_split(q, k, v, grid_size, dim**-0.5, name, record=True)
                 stats[name].add_error(out, dense)
             x = dense
         else:
@@ -342,10 +310,6 @@ def parse_args():
         "--hard_route_backend",
         default="hard_c4",
     )
-    parser.add_argument(
-        "--hard_route_routing_backend",
-        default="triton_direct_m32_n32_w1_s1_exp2_tokenmajor",
-    )
     parser.add_argument("--output_json", required=True)
     return parser.parse_args()
 
@@ -383,7 +347,7 @@ def main():
             "config": {
                 key: value
                 for key, value in variants[name].items()
-                if key in {"hard_route_backend", "hard_route_routing_backend", "seed_mode"}
+                if key in {"hard_route_backend", "seed_mode"}
             },
             "summary": stats[name].summary(),
         }
