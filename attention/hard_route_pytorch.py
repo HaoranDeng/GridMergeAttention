@@ -28,15 +28,17 @@ def assign_keys_to_seeds(seed_key_logits):
       C: seed queries inside one block
       L: keys inside one block
 
-    Returns: bool mask [..., C, L]. If a seed receives no key, key 0 is assigned
-    to it so every block still produces exactly C compressed tokens.
+    Returns: bool mask [..., C, L]. Hard C4 also pins key c to seed c for
+    c=0..3, matching the optimized Triton path and guaranteeing that each seed
+    produces one compressed token.
     """
     best_seed = seed_key_logits.argmax(dim=-2, keepdim=True)
     assignment = torch.zeros_like(seed_key_logits, dtype=torch.bool)
     assignment.scatter_(dim=-2, index=best_seed, value=True)
-
-    empty_seed = ~assignment.any(dim=-1, keepdim=True)
-    assignment[..., :1] |= empty_seed
+    num_seeds = seed_key_logits.size(-2)
+    forced_key = torch.arange(num_seeds, device=seed_key_logits.device)
+    assignment[..., :, :num_seeds] = False
+    assignment[..., forced_key, forced_key] = True
     return assignment
 
 
