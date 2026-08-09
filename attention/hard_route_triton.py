@@ -10,7 +10,6 @@ except Exception:  # pragma: no cover - exercised only when Triton is missing.
 
 HARD_C4_BACKEND = "hard_c4"
 DIRECT_ROUTING_BACKEND = "triton_direct_m32_n32_w1_s1_exp2_tokenmajor"
-C4_SEED_ROW_STRIDE = 7
 MERGE_BLOCK_J = 32
 MERGE_NUM_WARPS = 2
 MERGE_NUM_STAGES = 1
@@ -66,9 +65,8 @@ if triton is not None:
         BLOCK_D: tl.constexpr,
         SCORE_SCALE: tl.constexpr,
         LOGIT_INPUT_PRECISION: tl.constexpr,
-        SEED_ROW_STRIDE: tl.constexpr,
     ):
-        """Specialized exact C4 merge for the current spread-seed bestlogit fast path."""
+        """Specialized exact C4 merge for the current bestlogit fast path."""
         group_id = tl.program_id(0)
         query_col_block = tl.program_id(1)
 
@@ -102,9 +100,17 @@ if triton is not None:
             other=0.0,
         )
 
-        seed_row1 = (key_row + SEED_ROW_STRIDE) % Q_ROWS
-        seed_row2 = (key_row + 2 * SEED_ROW_STRIDE) % Q_ROWS
-        seed_row3 = (key_row + 3 * SEED_ROW_STRIDE) % Q_ROWS
+        seed_row1 = tl.where(key_row > 0, key_row - 1, 1)
+        seed_row2 = tl.where(
+            key_row == 0,
+            2,
+            tl.where(key_row == Q_ROWS - 1, Q_ROWS - 3, key_row + 1),
+        )
+        seed_row3 = tl.where(
+            key_row <= 1,
+            3,
+            tl.where(key_row >= Q_ROWS - 2, Q_ROWS - 4, key_row - 2),
+        )
         seed_row0 = tl.full((BLOCK_J,), key_row, tl.int64)
         seed_row1 = tl.full((BLOCK_J,), seed_row1, tl.int64)
         seed_row2 = tl.full((BLOCK_J,), seed_row2, tl.int64)
@@ -444,7 +450,7 @@ def triton_hard_route_merge_c4_direct_route(
     if key_batch != batch or key_heads != heads or key_dim != dim:
         raise ValueError("query/key/value batch, head, or dim shapes are inconsistent.")
     if query_rows < 4:
-        raise ValueError("hard C4 spread seeds require at least 4 query rows.")
+        raise ValueError("hard C4 local-with-ith seeds require at least 4 query rows.")
     if key_columns < 4:
         raise ValueError("hard C4 direct merge requires at least 4 key columns.")
 
@@ -509,7 +515,6 @@ def triton_hard_route_merge_c4_direct_route(
         BLOCK_D=block_d,
         SCORE_SCALE=float(scale),
         LOGIT_INPUT_PRECISION=logit_input_precision,
-        SEED_ROW_STRIDE=C4_SEED_ROW_STRIDE,
         num_warps=2,
         num_stages=1,
     )
@@ -594,7 +599,6 @@ def hard_route_attention_triton(
 
 __all__ = [
     "DIRECT_ROUTING_BACKEND",
-    "C4_SEED_ROW_STRIDE",
     "HARD_C4_BACKEND",
     "MERGE_BLOCK_J",
     "MERGE_LOGIT_INPUT_PRECISION",

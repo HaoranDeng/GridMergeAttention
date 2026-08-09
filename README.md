@@ -37,7 +37,7 @@ token_merging_args:
   enable: true
   layout: hard_route
   num_merge_tokens: 4
-  seed_mode: spread_c4
+  seed_mode: local_with_ith
   hard_route_backend: sdpa
   hard_route_routing_backend: sdpa
 ```
@@ -50,7 +50,7 @@ token_merging_args:
   layout: hard_route
   query_outer_chunk: 10
   num_merge_tokens: 4
-  seed_mode: spread_c4
+  seed_mode: local_with_ith
   hard_route_backend: hard_c4
   hard_route_routing_backend: triton_direct_m32_n32_w1_s1_exp2_tokenmajor
 ```
@@ -60,7 +60,7 @@ token_merging_args:
 The maintained hard C4 path follows these rules:
 
 - Keep grid-local compression.
-- Use spread C4 seeds: `k, k+7, k+14, k+21 (mod 30)`.
+- Use `local_with_ith` C4 seeds.
 - After token merging, keep full compressed attention.
 - Keep the entropy/routing bias.
 - Do not use global/share-all compression, no-bias routing, sparse/windowed

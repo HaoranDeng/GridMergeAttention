@@ -34,7 +34,7 @@ def token_merging_attn(
     query_outer_chunk=None,
     layout=LAYOUT_HARD_ROUTE,
     num_merge_tokens=4,
-    seed_mode="spread_c4",
+    seed_mode="local_with_ith",
     seed=0,
     hard_route_backend="sdpa",
     hard_route_routing_backend="sdpa",
