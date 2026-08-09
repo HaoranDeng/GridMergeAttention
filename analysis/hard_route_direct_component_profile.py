@@ -8,12 +8,10 @@ import torch
 from omegaconf import OmegaConf
 
 from attention.common import blocks_to_video, video_to_blocks
-from attention.hard_route import _build_seed_rows
 from attention.hard_route_backend import (
     direct_compressed_attention,
     merge_kv_direct_c4,
     parse_direct_route_backend,
-    uses_inline_local_seed_backend,
 )
 from analysis.hard_route_nonshared_backend_real_qkv import (
     estimate_direct_intermediate_bytes,
@@ -120,29 +118,12 @@ def selected_variants(args):
     return {name: available[name] for name in names}
 
 
-def make_seed_rows(q_chunk, k_blocks, query_outer_offset, args, variant):
-    if uses_inline_local_seed_backend(variant["hard_route_backend"]):
-        return None
-    return _build_seed_rows(
-        q_chunk,
-        k_blocks,
-        query_outer_offset,
-        args.num_merge_tokens,
-        args.seed,
-        variant.get("seed_mode", args.seed_mode),
-    )
-
-
 def route_compressed_tokens(
     q_chunk,
-    source_key,
-    source_value,
     merged_key,
     merged_value,
     routing_bias,
-    key_scale,
     variant,
-    config,
     scale,
     output,
 ):
@@ -151,7 +132,6 @@ def route_compressed_tokens(
     Direct Triton routing consumes token-major [K, group, D] intermediates.
     Only the supported full compressed-attention kernel is kept here.
     """
-    del source_key, source_value, key_scale, config
     routing_backend = variant["hard_route_routing_backend"]
     routed = direct_compressed_attention(
         q_chunk,
@@ -219,12 +199,9 @@ def install_probe(stats, args):
                 q_chunk = q_chunk.contiguous()
 
             if record:
-                seed_rows, seconds = timed(lambda: make_seed_rows(q_chunk, k_blocks, start, args, variant))
-                variant_stats.add_time("seed_rows", seconds)
                 merge_out, seconds = timed(
                     lambda: merge_kv_direct_c4(
                         q_chunk,
-                        seed_rows,
                         k_merge_blocks,
                         v_merge_blocks,
                         direct_merge_config,
@@ -234,10 +211,8 @@ def install_probe(stats, args):
                 )
                 variant_stats.add_time("direct_merge", seconds)
             else:
-                seed_rows = make_seed_rows(q_chunk, k_blocks, start, args, variant)
                 merge_out = merge_kv_direct_c4(
                     q_chunk,
-                    seed_rows,
                     k_merge_blocks,
                     v_merge_blocks,
                     direct_merge_config,
@@ -247,21 +222,17 @@ def install_probe(stats, args):
 
             if merge_out is None:
                 raise RuntimeError("hard_route_backend must be a direct-route backend.")
-            merged_key, merged_value, routing_bias, key_scale = merge_out
+            merged_key, merged_value, routing_bias, _ = merge_out
             output = out_slice if out_slice.is_contiguous() else None
 
             if record:
                 routed, seconds = timed(
                     lambda: route_compressed_tokens(
                         q_chunk,
-                        k_merge_blocks,
-                        v_merge_blocks,
                         merged_key,
                         merged_value,
                         routing_bias,
-                        key_scale,
                         variant,
-                        direct_merge_config,
                         scale,
                         output,
                     )
@@ -273,14 +244,10 @@ def install_probe(stats, args):
             else:
                 routed = route_compressed_tokens(
                     q_chunk,
-                    k_merge_blocks,
-                    v_merge_blocks,
                     merged_key,
                     merged_value,
                     routing_bias,
-                    key_scale,
                     variant,
-                    direct_merge_config,
                     scale,
                     output,
                 )
@@ -386,7 +353,7 @@ def parse_args():
     )
     parser.add_argument(
         "--hard_route_backend",
-        default="triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_bestlogit_simplemerge_ieee_tokenmajor_inline_local_seed",
+        default="hard_c4",
     )
     parser.add_argument(
         "--hard_route_routing_backend",

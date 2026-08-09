@@ -572,6 +572,8 @@ The best accepted direction so far is still:
 - `query_outer_chunk=10`, which was the fastest confirmed safe chunk size in
   `analysis/hard_c4_nohead_chunk_confirm_20260808`,
 - direct-route Triton kernels to avoid unnecessary reshape/copy overhead.
+- expose this path as `hard_c4`; keep the old long backend string only as a
+  compatibility alias, not as the public config style.
 
 This direction improves the old hard C4 implementation substantially, but it
 has not yet achieved a clear 2x attention speedup over dense attention while

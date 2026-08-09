@@ -78,7 +78,7 @@ token_merging_args:
   num_merge_tokens: 4
   seed_mode: local_with_ith
   seed: 0
-  hard_route_backend: triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_bestlogit_simplemerge_ieee_tokenmajor_inline_local_seed
+  hard_route_backend: hard_c4
   hard_route_routing_backend: triton_direct_m32_n32_w1_s1_exp2_tokenmajor
 ```
 
@@ -95,7 +95,8 @@ Supported layouts:
 `num_merge_tokens: 1` runs one-token GridMerge / MonarchRT-style compression.
 `num_merge_tokens: C > 1` runs C-seed hard-route or select-route compression.
 For optimized hard C4, the supported direct backend is the documented
-`bestlogit_simplemerge_ieee` path. Earlier representative-key/value, shared/global,
+`hard_c4` path. The old long backend string is accepted only as a compatibility
+alias. Earlier representative-key/value, shared/global,
 no-bias, stripe, key-outer, and merge-weight reconstruction variants were
 removed from the callable backend parser after negative experiments.
 

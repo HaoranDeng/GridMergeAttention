@@ -129,21 +129,12 @@ def hard_route_attention(
     direct_backend = parse_direct_route_backend(hard_route_backend)
     validate_block_seed_mode(seed_mode, "multi-token merging")
 
-    if direct_backend.inline_local_seed and seed_mode != "local_with_ith":
-        raise ValueError("inline-local-seed hard-route backend requires seed_mode='local_with_ith'.")
+    if direct_backend.supported and seed_mode != "local_with_ith":
+        raise ValueError("hard_route_backend='hard_c4' requires seed_mode='local_with_ith'.")
+    if direct_backend.supported and int(num_merge_tokens) != 4:
+        raise ValueError("hard_route_backend='hard_c4' requires num_merge_tokens=4.")
     if num_merge_tokens > k.size(3):
         raise ValueError("num_merge_tokens cannot exceed key columns per block.")
-
-    seed_rows = None
-    if not (direct_backend.supported and direct_backend.inline_local_seed):
-        seed_rows = _build_seed_rows(
-            q,
-            k,
-            query_outer_offset,
-            num_merge_tokens,
-            seed,
-            seed_mode,
-        )
 
     if direct_backend.supported:
         # Optimized C4 path: Triton merge writes token-major compressed KV
@@ -151,7 +142,6 @@ def hard_route_attention(
         q = q.contiguous()
         key, value, bias, _ = merge_kv_direct_c4(
             q,
-            seed_rows,
             k,
             v,
             direct_backend,
@@ -181,6 +171,14 @@ def hard_route_attention(
     else:
         # Readable path: gather seed queries, merge KV, then run full
         # compressed attention over all merged tokens.
+        seed_rows = _build_seed_rows(
+            q,
+            k,
+            query_outer_offset,
+            num_merge_tokens,
+            seed,
+            seed_mode,
+        )
         seed_queries = gather_seed_queries(q, seed_rows)
         backend = (hard_route_backend or "sdpa").lower()
         if backend == "sdpa":

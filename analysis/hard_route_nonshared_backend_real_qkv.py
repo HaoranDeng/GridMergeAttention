@@ -8,17 +8,17 @@ from pathlib import Path
 import torch
 from omegaconf import OmegaConf
 
-from attention.hard_route_backend import parse_direct_route_backend
+from attention.hard_route_backend import (
+    DIRECT_ROUTING_BACKEND,
+    HARD_C4_BACKEND,
+    parse_direct_route_backend,
+)
 from generate import load_generator_checkpoint, load_prompts
 from pipeline import TokenMergingWanPipeline
 from utils.misc import set_seed
 
 
-DIRECT_MERGE_BACKEND = (
-    "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
-    "_bestlogit_simplemerge_ieee_tokenmajor_inline_local_seed"
-)
-DIRECT_ROUTING_BACKEND = "triton_direct_m32_n32_w1_s1_exp2_tokenmajor"
+DIRECT_MERGE_BACKEND = HARD_C4_BACKEND
 CHUNK_VARIANT_RE = re.compile(r"^(?P<base>.+)_chunk(?P<chunk>\d+)$")
 
 

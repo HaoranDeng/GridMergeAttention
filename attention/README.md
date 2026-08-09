@@ -119,7 +119,7 @@ seed:
 ```yaml
 seed_mode: local_with_ith
 num_merge_tokens: 4
-hard_route_backend: triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_bestlogit_simplemerge_ieee_tokenmajor_inline_local_seed
+hard_route_backend: hard_c4
 hard_route_routing_backend: triton_direct_m32_n32_w1_s1_exp2_tokenmajor
 ```
 
@@ -128,13 +128,14 @@ This path is non-shared and grid-local: each
 KV tokens. The second step is full compressed attention, not sparse or
 windowed attention.
 
-The `bestlogit_simplemerge_ieee` suffix is now the only supported direct C4 backend.
+`hard_c4` is now the documented direct C4 backend. The old long
+`bestlogit_simplemerge_ieee` string is accepted only as a compatibility alias.
 It uses the exact hard assignment, entropy routing bias, and full compressed
 attention semantics, while keeping the Python backend parser free of failed
 experiment suffixes.
 
 For new optimization work, treat the PyTorch file as the readable reference and
-the `bestlogit_simplemerge_ieee` C4 direct-route backend as the current optimized
+the `hard_c4` direct-route backend as the current optimized
 baseline.
 Older suffixes for representative keys/values, compact or merge-weight
 reconstruction, seed-key approximations, key-outer grouping, global/shared

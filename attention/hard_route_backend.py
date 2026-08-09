@@ -11,11 +11,8 @@ paths are documented in docs/negative_results.md and are intentionally not
 accepted by the parser here.
 """
 
-import re
 from dataclasses import dataclass
 from functools import lru_cache
-
-import torch
 
 from .hard_route_triton import (
     triton_direct_route_biased_attention,
@@ -23,13 +20,12 @@ from .hard_route_triton import (
 )
 
 
-_SUPPORTED_MERGE_RE = re.compile(
-    r"^triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
-    r"_bestlogit_simplemerge_ieee_tokenmajor_inline_local_seed$"
+HARD_C4_BACKEND = "hard_c4"
+LEGACY_HARD_C4_BACKEND = (
+    "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
+    "_bestlogit_simplemerge_ieee_tokenmajor_inline_local_seed"
 )
-_SUPPORTED_ROUTING_BACKEND = re.compile(
-    r"^triton_direct_m32_n32_w1_s1_exp2_tokenmajor$"
-)
+DIRECT_ROUTING_BACKEND = "triton_direct_m32_n32_w1_s1_exp2_tokenmajor"
 
 
 @dataclass(frozen=True)
@@ -37,23 +33,16 @@ class DirectRouteMergeConfig:
     """Parsed options for the single supported direct-route C4 backend."""
 
     supported: bool
-    inline_local_seed: bool = False
     block_j_target: int = 32
     merge_num_warps: int = 2
     merge_num_stages: int = 1
-    logit_input_precision: str = "tf32"
-    use_assigned_logit: bool = False
-    use_simple_merge: bool = False
-
-
-def uses_inline_local_seed_backend(backend):
-    return str(backend or "").lower().endswith("_inline_local_seed")
+    logit_input_precision: str = "ieee"
 
 
 @lru_cache(maxsize=16)
 def parse_direct_route_attention_backend(backend):
     """Return the only supported full compressed-attention tile config."""
-    if _SUPPORTED_ROUTING_BACKEND.fullmatch(backend or "") is None:
+    if (backend or "").lower() != DIRECT_ROUTING_BACKEND:
         return None
     return 32, 32, 1, 1
 
@@ -65,39 +54,24 @@ def parse_direct_route_backend(backend):
     Unsupported historical experiment suffixes deliberately return
     supported=False instead of exposing half-dead code paths.
     """
-    supported = _SUPPORTED_MERGE_RE.fullmatch((backend or "").lower()) is not None
-    return DirectRouteMergeConfig(
-        supported=supported,
-        inline_local_seed=supported,
-        logit_input_precision="ieee" if supported else "tf32",
-        use_assigned_logit=supported,
-        use_simple_merge=supported,
-    )
+    backend = (backend or "").lower()
+    return DirectRouteMergeConfig(supported=backend in {HARD_C4_BACKEND, LEGACY_HARD_C4_BACKEND})
 
 
-def merge_kv_direct_c4(q, seed_rows, key, value, config, scale, assume_contiguous=False):
+def merge_kv_direct_c4(q, key, value, config, scale, assume_contiguous=False):
     if not config.supported:
-        raise ValueError("unsupported hard-route C4 backend; use the documented bestlogit_simplemerge path.")
+        raise ValueError("unsupported hard-route C4 backend; use hard_route_backend='hard_c4'.")
 
     return triton_hard_route_merge_c4_direct_route(
         q,
-        seed_rows,
         key,
         value,
         scale=scale,
         block_j_target=config.block_j_target,
         num_warps=config.merge_num_warps,
-        bias_dtype=torch.float16,
-        merged_key_dtype=torch.float16,
-        merged_value_dtype=torch.float16,
-        use_exp2=True,
-        force_seed_keys=True,
         num_stages=config.merge_num_stages,
         logit_input_precision=config.logit_input_precision,
-        inline_local_seed=config.inline_local_seed,
-        use_assigned_logit=config.use_assigned_logit,
-        use_simple_merge=config.use_simple_merge,
-        assume_contiguous=assume_contiguous and config.inline_local_seed,
+        assume_contiguous=assume_contiguous,
     )
 
 
@@ -134,9 +108,11 @@ def direct_compressed_attention(
 
 __all__ = [
     "DirectRouteMergeConfig",
+    "DIRECT_ROUTING_BACKEND",
+    "HARD_C4_BACKEND",
+    "LEGACY_HARD_C4_BACKEND",
     "direct_compressed_attention",
     "merge_kv_direct_c4",
     "parse_direct_route_attention_backend",
     "parse_direct_route_backend",
-    "uses_inline_local_seed_backend",
 ]
