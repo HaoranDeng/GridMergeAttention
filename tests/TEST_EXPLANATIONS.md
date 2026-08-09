@@ -1,6 +1,6 @@
 # Detailed Test Explanations
 
-This suite is an executable specification for the claim:
+Most of this suite is an executable specification for the claim:
 
 > Token Merging is applied inside Self-Forcing's causal, block-wise inference.
 
@@ -9,6 +9,11 @@ must select the causal pipeline, process temporal blocks, maintain the correct
 KV prefix, commit clean context, and call Token Merging from causal
 self-attention. The tests verify these requirements separately and then verify
 their integration with the real checkpoint.
+
+Section 11 adds a second, pre-implementation specification for HunyuanVideo:
+with the approximate Token-Merging core controlled to exact dense SDPA, our
+future Hunyuan processor and pipeline integration must reproduce untouched
+Diffusers Hunyuan latent output from the same real checkpoint.
 
 Before the causal implementation was added, the fast suite was intentionally
 red and each failure identified a missing contract. The implemented suite now
@@ -514,6 +519,89 @@ Merging is introduced. Without that baseline, a difference could come from
 RoPE offsets, timestep modulation, cache indexing, or the Self-Forcing schedule
 rather than Token Merging.
 
+## 11. Hunyuan pipeline differential test against Diffusers
+
+Files:
+
+- `test_hunyuan_pipeline_reference_parity.py`
+- `hunyuan_pipeline_parity_runner.py`
+
+This test answers the pre-acceleration question:
+
+> If Token Merging's approximate math is temporarily replaced with exact dense
+> joint attention, does our Hunyuan integration execute the same model and
+> denoising pipeline as untouched Diffusers Hunyuan?
+
+The comparison runs in two fresh subprocesses using the same visible CUDA GPU,
+real Hunyuan checkpoint, `SVG` Conda environment, and Diffusers 0.34.0. The
+reference subprocess leaves
+`HunyuanVideoAttnProcessor2_0` untouched. The current subprocess installs the
+production Hunyuan Token-Merging processor and monkeypatches only
+`hunyuan_token_merging_attn` in that subprocess with exact SDPA. No test-only
+branch is added to the production pipeline.
+
+`SVG` here is only the name of the available Conda environment. The runner
+imports installed PyTorch and Diffusers plus this repository; it does not
+import Sparse-VideoGen or any `svg.*` package.
+
+### Why the test uses the real checkpoint but latent output
+
+Both subprocesses load the real BF16 `HunyuanVideoTransformer3DModel` weights
+and execute every dual-stream and single-stream layer. The request uses a small
+latent grid to control activation memory, but model weights and transformer
+computation are not replaced or reduced.
+
+Precomputed embeddings remove two large text encoders from the comparison, and
+`output_type="latent"` removes the VAE. This mirrors the earlier Self-Forcing
+parity test: it focuses on the generator/pipeline boundary and prevents text
+tokenization, VAE rounding, or MP4 encoding from concealing the first divergent
+denoising step.
+
+### Controlled inputs and expected structure
+
+The parent process creates and saves exact tensors once:
+
+- initial latents `[1, 16, 2, 8, 8]`;
+- text embeddings `[1, 8, 4096]`;
+- pooled text embedding `[1, 768]`;
+- text mask `[1, 1, 1, 1, 1, 1, 1, 0]`.
+
+A five-frame, 64x64 request becomes two latent frames and an 8x8 latent spatial
+grid. With the original model's 2x2 spatial patches, this produces 32 video
+tokens. The attention sequence has 40 keys: 32 video tokens followed by eight
+text tokens, of which exactly 39 are valid. For the standard 20 dual-stream and
+40 single-stream layers, the trace requires:
+
+```text
+2 denoising steps
+x (20 dual-stream blocks + 40 single-stream blocks)
+= 120 calls to the controlled dense Hunyuan attention core
+```
+
+The exact call count is derived from the loaded model configuration rather than
+hardcoded. Both subprocesses compare model configuration, parameter count,
+sampled checkpoint values, scheduler timesteps, per-step latents, and final
+latents. Checking every denoising step locates divergence earlier than a
+final-output-only assertion. Peak CUDA allocation is also recorded for
+diagnostics, although it is not a parity threshold.
+
+### What passing proves and does not prove
+
+Passing proves that the Hunyuan pipeline and attention wrapper preserve dense
+Hunyuan semantics around the Token-Merging core. In particular, it covers the
+video/text boundary, mask propagation, both transformer block types, pipeline
+arguments, and scheduler updates.
+
+It does not prove that approximate Token Merging is mathematically correct,
+faster, memory-efficient, or high quality. Separate tests must validate the
+Hunyuan joint Token-Merging equations and then run the real checkpoint with the
+actual approximate core enabled for dispatch, memory, generation, and video
+quality evidence.
+
+The test is opt-in until the production Hunyuan modules exist. This allows it
+to serve as an executable specification written before implementation without
+breaking the existing Wan/Self-Forcing suite.
+
 ## Supporting files
 
 ### `_support.py`
@@ -534,6 +622,13 @@ This is an internal subprocess entry point, not a separately discovered test.
 It selects exactly one repository, installs fixed test dependencies, strictly
 loads the checkpoint, runs dense causal inference, and saves latents plus
 schedule/cache metadata for the parent differential test.
+
+### `hunyuan_pipeline_parity_runner.py`
+
+This is the corresponding subprocess entry point for Hunyuan. It loads one
+side of the real-checkpoint comparison, records every dual/single-stream
+attention call on the current side, captures per-step latents, and saves only
+small comparison artifacts after the GPU model run.
 
 ## What passing the complete suite means
 
@@ -562,3 +657,17 @@ causal pipeline routing
 Passing these tests supports the correctness claim. Video quality, latency, and
 memory improvement remain separate empirical questions and should be evaluated
 with VBench and runtime/memory profiling.
+
+For Hunyuan, the analogous evidence will be:
+
+```text
+real checkpoint loaded in both subprocesses
++ identical prompt embeddings, mask, initial latents, and scheduler timesteps
++ custom processor installed in every dual- and single-stream block
++ exact dense joint-attention probe called at every layer and denoising step
++ per-step and final latent parity with untouched Diffusers
+```
+
+That establishes the non-approximate baseline. Hunyuan Token-Merging equation
+tests and a real run with the approximate core enabled will still be required
+before claiming acceleration correctness or quality.

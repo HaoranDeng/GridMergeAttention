@@ -1,13 +1,15 @@
-# Self-Forcing Token-Merging Tests
+# Video Token-Merging Tests
 
 For a test-by-test explanation of what each assertion proves and why it is
 needed, see [`TEST_EXPLANATIONS.md`](TEST_EXPLANATIONS.md).
 
-These tests are designed to prove two separate properties:
+These tests are designed to prove three separate properties:
 
 1. generation follows Self-Forcing's causal, block-wise, KV-cached inference;
 2. the causal self-attention calls GridMerge with current-block Q and a growing
-   visible K/V prefix.
+   visible K/V prefix;
+3. before approximate attention is enabled, the Hunyuan processor/pipeline
+   integration can reproduce untouched Diffusers Hunyuan latent output.
 
 They use Python's built-in `unittest` because the `etm` environment currently
 does not include `pytest`.
@@ -60,6 +62,10 @@ The individual test files document the behavior they require:
 - `test_self_forcing_e2e.py` is the opt-in real-checkpoint GPU test.
 - `test_self_forcing_reference_parity.py` is the opt-in dense causal
   differential test against MonarchRT.
+- `test_hunyuan_pipeline_reference_parity.py` is the opt-in differential
+  specification for the Hunyuan pipeline. It compares an untouched Diffusers
+  Hunyuan run with our installed Hunyuan processor using a test-only exact
+  dense attention core.
 
 ## Real-checkpoint GPU test
 
@@ -165,3 +171,55 @@ at a time:
   /tmp/self_forcing_reference_parity/monarchrt_latents.pt \
   --prefix-frames 3 --atol 5e-2
 ```
+
+## Hunyuan pipeline parity with Diffusers
+
+This test was added before the Hunyuan production implementation. It defines
+the interface and numerical baseline that implementation must satisfy:
+
+```text
+pipeline.token_merging_hunyuan.install_hunyuan_token_merging_attention
+attention.hunyuan_token_merging.hunyuan_token_merging_attn
+```
+
+The reference subprocess uses Diffusers' untouched Hunyuan attention. The
+current subprocess installs our processor, then monkeypatches only its
+low-level Token-Merging function to exact joint SDPA inside the test process.
+That makes the two outputs directly comparable without adding a dense or skip
+path to production code.
+
+Both subprocesses load the same real Hunyuan transformer checkpoint in BF16 on
+the same visible GPU. They receive fixed prompt embeddings, one padded text
+token, fixed initial latents, and two denoising steps, then compare both
+per-step and final latent output. Text encoding, VAE decoding, and MP4 encoding
+are excluded so the test isolates the generator and denoising pipeline, just
+like the Self-Forcing/MonarchRT parity test.
+
+The existing `SVG` Conda environment is used only because it already contains
+PyTorch and Diffusers 0.34.0 with `HunyuanVideoPipeline`. The test does not
+import the Sparse-VideoGen repository or any `svg.*` module. `etm` remains the
+test orchestrator, but its Diffusers 0.31.0 cannot execute HunyuanVideo.
+
+After the Hunyuan implementation has been added, run:
+
+```bash
+CUDA_VISIBLE_DEVICES=3 \
+RUN_HUNYUAN_PIPELINE_PARITY=1 \
+HUNYUAN_PYTHON=/home/zrlu/miniforge3/envs/SVG/bin/python \
+HUNYUAN_MODEL=/path/to/local/HunyuanVideo \
+HUNYUAN_REVISION=refs/pr/18 \
+HUNYUAN_LOCAL_FILES_ONLY=1 \
+HUNYUAN_PARITY_ARTIFACT_DIR=/xuanwu-tank/east/zrl/hunyuan_pipeline_parity \
+/home/zrlu/miniforge3/envs/etm/bin/python \
+-m unittest tests.test_hunyuan_pipeline_reference_parity -v
+```
+
+`HUNYUAN_MODEL` may instead be a Hugging Face model ID. In that case omit
+`HUNYUAN_LOCAL_FILES_ONLY=1`; downloads use `HF_HOME`, which defaults in this
+test to `/xuanwu-tank/east/zrl/huggingface_cache`. The test deliberately does
+not initiate a multi-gigabyte model download unless a remote ID is explicitly
+provided.
+
+Before the production modules exist, enabling the test intentionally reports
+the missing implementation contract. With the environment flag omitted, it is
+skipped during normal test discovery.
