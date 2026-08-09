@@ -296,10 +296,8 @@ def gather_seed_queries_transpose(q, seed_cols):
 
 def soft_merge_weights(merge_logits, dtype):
     """Softmax all keys for each seed and keep the corresponding log-probs."""
-    merge_logits = merge_logits.float()
-    merge_logits = merge_logits - merge_logits.amax(dim=-1, keepdim=True)
-    merge_weights = torch.softmax(merge_logits, dim=-1).to(dtype)
-    merge_logprob = merge_logits - torch.logsumexp(merge_logits, dim=-1, keepdim=True)
+    merge_logprob = torch.log_softmax(merge_logits.float(), dim=-1)
+    merge_weights = merge_logprob.exp().to(dtype)
     return merge_weights, merge_logprob
 
 
@@ -310,9 +308,8 @@ def masked_soft_merge_weights(merge_logits, valid, dtype):
     has_valid = valid.any(dim=-1, keepdim=True)
     merge_logits = torch.where(has_valid, merge_logits, torch.zeros_like(merge_logits))
 
-    merge_weights = torch.softmax(merge_logits, dim=-1) * valid.to(merge_logits.dtype)
-    merge_logprob = merge_logits - torch.logsumexp(merge_logits, dim=-1, keepdim=True)
-    merge_logprob = merge_logprob.masked_fill(~valid, 0.0)
+    merge_logprob = torch.log_softmax(merge_logits, dim=-1).masked_fill(~valid, 0.0)
+    merge_weights = merge_logprob.exp().masked_fill(~valid, 0.0)
     merge_logprob = torch.where(has_valid, merge_logprob, torch.zeros_like(merge_logprob))
     return merge_weights.to(dtype), merge_logprob
 
