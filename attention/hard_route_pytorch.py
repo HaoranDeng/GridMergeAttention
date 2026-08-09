@@ -14,6 +14,7 @@ from einops import rearrange
 
 
 FLOAT_NEG_INF = torch.finfo(torch.float32).min
+C4_SEED_ROW_STRIDE = 7
 
 # Shape letters used below:
 #   B: batch, H: attention head, D: head dim
@@ -27,25 +28,17 @@ _SEED_ROWS_CACHE = {}
 
 
 def local_c4_seed_rows(query_outer, key_outer, key_rows, query_columns, query_rows):
-    """Choose the four local-with-ith seed query rows used by hard C4.
+    """Choose the four spread seed query rows used by hard C4.
 
-    For key row k, seed 0 is query row k. The other seeds are nearby query
-    rows in the same order as the Triton kernel.
+    For key row k, use rows:
+      k, k + 7, k + 14, k + 21  (mod query_rows)
     """
     device = query_outer.device
     key_row = torch.arange(key_rows, device=device).view(1, 1, key_rows, 1)
     seed0 = key_row
-    seed1 = torch.where(key_row > 0, key_row - 1, torch.ones_like(key_row))
-    seed2 = torch.where(
-        key_row == 0,
-        torch.full_like(key_row, 2),
-        torch.where(key_row == query_rows - 1, torch.full_like(key_row, query_rows - 3), key_row + 1),
-    )
-    seed3 = torch.where(
-        key_row <= 1,
-        torch.full_like(key_row, 3),
-        torch.where(key_row >= query_rows - 2, torch.full_like(key_row, query_rows - 4), key_row - 2),
-    )
+    seed1 = (key_row + C4_SEED_ROW_STRIDE) % query_rows
+    seed2 = (key_row + 2 * C4_SEED_ROW_STRIDE) % query_rows
+    seed3 = (key_row + 3 * C4_SEED_ROW_STRIDE) % query_rows
     seed_rows = torch.stack((seed0, seed1, seed2, seed3), dim=-1).long()
     return seed_rows.expand(query_outer.numel(), key_outer.numel(), key_rows, query_columns, 4)
 
@@ -215,6 +208,7 @@ __all__ = [
     "assign_keys_to_seeds",
     "assigned_key_log_softmax",
     "biased_sdpa",
+    "C4_SEED_ROW_STRIDE",
     "cached_local_c4_seed_rows",
     "gather_seed_queries",
     "hard_route_attention_pytorch",

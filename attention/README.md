@@ -37,8 +37,8 @@ One hard C4 GridMerge block fixes
 
 For each `30q x 52k` block:
 
-1. Pick four local-with-ith seed queries. Seed 0 is the index-matched query row;
-   the other three are nearby query rows.
+1. Pick four spread seed queries for key row `k`:
+   `k, k+7, k+14, k+21 (mod 30)`.
 2. Assign each of the 52 keys to the seed with the largest seed-query/key dot
    product.
 3. Softmax-merge K and V inside each seed cluster.
