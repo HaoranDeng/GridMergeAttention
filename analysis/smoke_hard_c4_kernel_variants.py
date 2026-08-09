@@ -25,7 +25,6 @@ def run_variant(q, k, v, variant):
             v,
             scale,
             hard_route_routing_backend=variant["hard_route_routing_backend"],
-            force_nonempty=backend == HARD_C4_BACKEND,
         )
     return hard_route_attention_pytorch(
         q,
@@ -33,7 +32,6 @@ def run_variant(q, k, v, variant):
         v,
         scale,
         query_outer_offset=0,
-        force_nonempty=backend == "sdpa",
     )
 
 

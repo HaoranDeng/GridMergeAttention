@@ -11,7 +11,6 @@ from omegaconf import OmegaConf
 from attention.hard_route_triton import (
     DIRECT_ROUTING_BACKEND,
     HARD_C4_BACKEND,
-    HARD_C4_NO_FORCE_BACKEND,
     MERGE_BLOCK_J,
     is_hard_c4_backend,
 )
@@ -127,17 +126,8 @@ def exact_variants():
             "hard_route_routing_backend": "sdpa",
             "seed_mode": "local_with_ith",
         },
-        "hard_c4_no_force_pytorch": {
-            "hard_route_backend": "sdpa_no_force",
-            "hard_route_routing_backend": "sdpa",
-            "seed_mode": "local_with_ith",
-        },
         "hard_c4": exact_backend(
             DIRECT_MERGE_BACKEND,
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_no_force": exact_backend(
-            HARD_C4_NO_FORCE_BACKEND,
             seed_mode="local_with_ith",
         ),
     }

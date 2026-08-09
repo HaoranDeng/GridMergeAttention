@@ -581,6 +581,12 @@ The best accepted direction so far is still:
   measured at 22.344 ms/call versus 22.456 ms/call for the previous default and
   22.351 ms/call for `bf16x3`, with identical dense rel-L2 `0.094166` and MSE
   `0.00259676`,
+- no-force empty-seed handling as the default C4 assignment rule. Instead of
+  forcing key `c` to seed `c`, empty seed clusters are left empty and masked in
+  the full compressed-attention stage. Slurm job `367165` measured this at
+  22.222 ms/call versus 22.890 ms/call for the old force-nonempty C4 path and
+  22.757 ms/call for dense, while improving dense rel-L2 from `0.09759` to
+  `0.09296` and MSE from `0.002715` to `0.002463`,
 - token-major intermediate compressed-KV layout, which preserves the same
   full-attention math but makes merge stores more contiguous,
 - standard K/V block layout for the current token-major `m32_n32` path, avoiding

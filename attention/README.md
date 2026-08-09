@@ -41,7 +41,9 @@ For each `30q x 52k` block:
    the other three are nearby query rows.
 2. Assign each of the 52 keys to the seed with the largest seed-query/key dot
    product.
-3. Softmax-merge K and V inside each seed cluster.
+3. Softmax-merge K and V inside each seed cluster. Empty seed clusters are
+   kept as compressed tokens but masked by the routing bias in the second
+   attention stage.
 4. Compute the entropy routing bias.
 5. Run full compressed attention from all 30 queries to all compressed KV
    tokens.
