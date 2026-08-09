@@ -13,7 +13,7 @@ from attention.hard_route_backend import (  # noqa: E402
 
 SUPPORTED_MERGE_BACKEND = (
     "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
-    "_bestlogit_simplemerge_tokenmajor_inline_local_seed"
+    "_bestlogit_simplemerge_ieee_tokenmajor_inline_local_seed"
 )
 SUPPORTED_ROUTING_BACKEND = "triton_direct_m32_n32_w1_s1_exp2_tokenmajor"
 
@@ -39,7 +39,11 @@ REMOVED_MERGE_BACKENDS = [
     "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
     "_f2_bestlogit_tokenmajor_inline_local_seed",
     "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
+    "_bestlogit_simplemerge_tokenmajor_inline_local_seed",
+    "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
     "_bestlogit_simplemerge_bf16kv_tokenmajor_inline_local_seed",
+    "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
+    "_bestlogit_simplemerge_bf16x3_tokenmajor_inline_local_seed",
 ]
 
 REMOVED_ROUTING_BACKENDS = [
@@ -58,6 +62,7 @@ def main():
     assert config.block_j_target == 32
     assert config.merge_num_warps == 2
     assert config.merge_num_stages == 1
+    assert config.logit_input_precision == "ieee"
 
     assert parse_direct_route_attention_backend(SUPPORTED_ROUTING_BACKEND) == (32, 32, 1, 1)
 

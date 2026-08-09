@@ -386,7 +386,7 @@ def parse_args():
     )
     parser.add_argument(
         "--hard_route_backend",
-        default="triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_bestlogit_simplemerge_tokenmajor_inline_local_seed",
+        default="triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot_bestlogit_simplemerge_ieee_tokenmajor_inline_local_seed",
     )
     parser.add_argument(
         "--hard_route_routing_backend",

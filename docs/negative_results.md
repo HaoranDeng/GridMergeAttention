@@ -561,6 +561,10 @@ The best accepted direction so far is still:
   exactly while removing generic merge-kernel branches and improving real-QKV
   attention time from about 23.40 ms/call to about 23.04 ms/call in job
   `366959`,
+- `ieee` logit precision for the simplemerge dot products, which job `366993`
+  measured at 22.344 ms/call versus 22.456 ms/call for the previous default and
+  22.351 ms/call for `bf16x3`, with identical dense rel-L2 `0.094166` and MSE
+  `0.00259676`,
 - token-major intermediate compressed-KV layout, which preserves the same
   full-attention math but makes merge stores more contiguous,
 - standard K/V block layout for the current token-major `m32_n32` path, avoiding

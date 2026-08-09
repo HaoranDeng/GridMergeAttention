@@ -5147,7 +5147,7 @@ def triton_hard_route_merge_c4_direct_route(
         and int(block_j_target) == 32
         and int(num_warps) == 2
         and (num_stages is None or int(num_stages) == 1)
-        and logit_input_precision == "tf32"
+        and logit_input_precision in {"tf32", "ieee"}
         and int(block_l_target or 0) == 0
         and bias_dtype == torch.float16
         and (merged_key_dtype is None or merged_key_dtype == torch.float16)

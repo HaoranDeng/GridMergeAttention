@@ -23,9 +23,9 @@ from .hard_route_triton import (
 )
 
 
-_SUPPORTED_MERGE_BACKEND = re.compile(
+_SUPPORTED_MERGE_RE = re.compile(
     r"^triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
-    r"_bestlogit_simplemerge_tokenmajor_inline_local_seed$"
+    r"_bestlogit_simplemerge_ieee_tokenmajor_inline_local_seed$"
 )
 _SUPPORTED_ROUTING_BACKEND = re.compile(
     r"^triton_direct_m32_n32_w1_s1_exp2_tokenmajor$"
@@ -65,10 +65,11 @@ def parse_direct_route_backend(backend):
     Unsupported historical experiment suffixes deliberately return
     supported=False instead of exposing half-dead code paths.
     """
-    supported = _SUPPORTED_MERGE_BACKEND.fullmatch((backend or "").lower()) is not None
+    supported = _SUPPORTED_MERGE_RE.fullmatch((backend or "").lower()) is not None
     return DirectRouteMergeConfig(
         supported=supported,
         inline_local_seed=supported,
+        logit_input_precision="ieee" if supported else "tf32",
         use_assigned_logit=supported,
         use_simple_merge=supported,
     )

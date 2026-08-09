@@ -16,7 +16,7 @@ from utils.misc import set_seed
 
 DIRECT_MERGE_BACKEND = (
     "triton_c4_direct_route_j32_w2_exp2merge_forcekeys_fp16kvbias_s1_fastdot"
-    "_bestlogit_simplemerge_tokenmajor_inline_local_seed"
+    "_bestlogit_simplemerge_ieee_tokenmajor_inline_local_seed"
 )
 DIRECT_ROUTING_BACKEND = "triton_direct_m32_n32_w1_s1_exp2_tokenmajor"
 CHUNK_VARIANT_RE = re.compile(r"^(?P<base>.+)_chunk(?P<chunk>\d+)$")
