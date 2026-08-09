@@ -118,8 +118,6 @@ def hard_route_merge_kv_pytorch(seed_queries, key, value, scale):
       merged_key/value: [B, A, F, J, K, C, H, D]
       routing_bias:     [B, H, A, F, K, J, C]
     """
-    if seed_queries.size(5) != 4:
-        raise ValueError("hard C4 PyTorch reference expects exactly four seed queries.")
     seed_key_logits = torch.einsum("bafkjchd,bfklhd->bhafkjcl", seed_queries, key).float()
     seed_key_logits = seed_key_logits * float(scale)
 

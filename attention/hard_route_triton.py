@@ -332,13 +332,6 @@ def triton_direct_route_biased_attention(
     key/value: [compressed_tokens, B*heads*A*query_columns, dim]
     bias:      [compressed_tokens, B*heads*A*query_columns]
     """
-    if triton is None:
-        raise RuntimeError("hard_route_routing_backend='triton_direct_*' requires Triton.")
-    if not query.is_cuda:
-        raise RuntimeError("hard_route_routing_backend='triton_direct_*' requires CUDA/ROCm tensors.")
-    if query.dtype not in (torch.float16, torch.bfloat16):
-        raise RuntimeError("hard_route_routing_backend='triton_direct_*' requires fp16 or bf16 tensors.")
-
     if not assume_contiguous:
         query = query.contiguous()
         key = key.contiguous()
@@ -346,27 +339,11 @@ def triton_direct_route_biased_attention(
         bias = bias.contiguous()
 
     batch, query_outer, query_rows, query_columns, heads, dim = query.shape
-    key_len, groups, key_dim = key.shape
-    expected_groups = batch * heads * query_outer * query_columns
-    if groups != expected_groups:
-        raise ValueError(
-            "direct-route attention expects route-layout KV with "
-            f"{expected_groups} groups, got {groups}."
-        )
-    if key_dim != dim or value.shape != key.shape or bias.shape != (key_len, groups):
-        raise ValueError("query/key/value/bias shapes are inconsistent for direct-route attention.")
-
+    key_len, groups, _ = key.shape
     block_d = triton.next_power_of_2(dim)
-    if block_d > 128:
-        raise ValueError(f"Triton hard-route attention supports head dim <= 128, got {dim}.")
 
     if out is None:
         out = _cached_empty("direct_route_attention_out", query.shape, query.device, query.dtype)
-    else:
-        if out.shape != query.shape or out.device != query.device or out.dtype != query.dtype:
-            raise ValueError("direct-route attention output tensor has inconsistent shape/device/dtype.")
-        if not out.is_contiguous():
-            raise ValueError("direct-route attention output tensor must be contiguous.")
     grid = (groups, triton.cdiv(query_rows, block_m))
     meta = {"num_warps": int(num_warps)}
     if num_stages is not None:
@@ -419,49 +396,20 @@ def triton_hard_route_merge_c4_direct_route(
       key/value: [F * key_rows * 4, B * H * A * query_columns, D]
       bias:      [F * key_rows * 4, B * H * A * query_columns]
     """
-    if triton is None:
-        raise RuntimeError("hard_route_backend='triton_c4_direct_route' requires Triton.")
-    if not query.is_cuda:
-        raise RuntimeError("hard_route_backend='triton_c4_direct_route' requires CUDA/ROCm tensors.")
-    if query.dtype not in (torch.float16, torch.bfloat16):
-        raise RuntimeError("hard_route_backend='triton_c4_direct_route' requires fp16 or bf16 tensors.")
-    if int(block_j_target) != 32 or int(num_warps) != 2 or int(num_stages) != 1:
-        raise ValueError("hard C4 direct merge only supports j32_w2_s1.")
-    if logit_input_precision != "ieee":
-        raise ValueError("hard C4 direct merge uses the measured-best ieee logit precision.")
-
     if not assume_contiguous:
         query = query.contiguous()
         key = key.contiguous()
         value = value.contiguous()
 
     batch, query_outer, query_rows, query_columns, heads, dim = query.shape
-    key_batch, key_outer, key_rows, key_columns, key_heads, key_dim = key.shape
-    if value.shape != key.shape:
-        raise ValueError("key/value shapes must match for hard C4 direct merge.")
-    if key_batch != batch or key_heads != heads or key_dim != dim:
-        raise ValueError("query/key/value batch, head, or dim shapes are inconsistent.")
-    if query_rows < 4:
-        raise ValueError("hard C4 local-with-ith seeds require at least 4 query rows.")
-    if key_columns < 4:
-        raise ValueError("hard C4 direct merge requires at least 4 key columns.")
+    _, key_outer, key_rows, key_columns, _, _ = key.shape
 
     block_j = min(32, triton.next_power_of_2(query_columns))
     block_l = triton.next_power_of_2(key_columns)
     block_d = triton.next_power_of_2(dim)
-    if block_l > 128:
-        raise ValueError(f"Triton hard-route merge supports at most 128 key tokens per block, got {key_columns}.")
-    if block_d > 128:
-        raise ValueError(f"Triton hard-route merge supports head dim <= 128, got {dim}.")
 
     route_groups = batch * heads * query_outer * query_columns
     route_tokens = key_outer * key_rows * 4
-    output_elements = route_tokens * route_groups * dim
-    if output_elements > torch.iinfo(torch.int32).max:
-        raise ValueError(
-            "hard C4 direct merge output is too large for one launch. "
-            "Reduce query_outer_chunk; for default 480p C=4 use query_outer_chunk<=10."
-        )
 
     merged_key = _cached_empty(
         "hard_route_c4_direct_route_key_token_major",
@@ -537,12 +485,6 @@ def direct_compressed_attention(
     output=None,
     assume_contiguous=False,
 ):
-    if not is_direct_route_attention_backend(backend):
-        raise ValueError(
-            f"hard_route_backend='hard_c4' requires "
-            f"hard_route_routing_backend={DIRECT_ROUTING_BACKEND!r}."
-        )
-
     return triton_direct_route_biased_attention(
         q,
         key,

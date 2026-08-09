@@ -73,7 +73,7 @@ def token_merging_attn(
                 hard_route_routing_backend=hard_route_routing_backend,
                 output=out_slice,
             )
-        elif backend == "sdpa":
+        else:
             chunk = hard_route_attention_pytorch(
                 q_chunk,
                 k_blocks,
@@ -81,8 +81,6 @@ def token_merging_attn(
                 sm_scale,
                 query_outer_offset=start,
             )
-        else:
-            raise ValueError(f"unsupported hard_route_backend={hard_route_backend!r}.")
 
         if chunk is not out_slice:
             out_slice.copy_(chunk)
