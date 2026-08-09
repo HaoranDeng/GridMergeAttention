@@ -7,12 +7,12 @@ from pathlib import Path
 import torch
 from omegaconf import OmegaConf
 
-from attention.common import blocks_to_video, video_to_blocks
-from attention.hard_route_backend import (
+from attention.hard_route_triton import (
     direct_compressed_attention,
     is_hard_c4_backend,
     merge_kv_direct_c4,
 )
+from attention.token_merging import blocks_to_video, video_to_blocks
 from analysis.hard_route_nonshared_backend_real_qkv import (
     estimate_direct_intermediate_bytes,
     exact_variants,

@@ -9,6 +9,8 @@ The Triton kernels should match these tensor equations.
 """
 
 import torch
+import torch.nn.functional as F
+from einops import rearrange
 
 
 FLOAT_NEG_INF = torch.finfo(torch.float32).min
@@ -19,6 +21,88 @@ FLOAT_NEG_INF = torch.finfo(torch.float32).min
 #   I: query rows, J: query columns
 #   K: key rows, L: key columns
 #   C: merged tokens / seed queries per block. Hard C4 keeps C=4.
+
+
+_SEED_ROWS_CACHE = {}
+
+
+def local_c4_seed_rows(query_outer, key_outer, key_rows, query_columns, query_rows):
+    """Choose the four local-with-ith seed query rows used by hard C4.
+
+    For key row k, seed 0 is query row k. The other seeds are nearby query
+    rows in the same order as the Triton kernel.
+    """
+    device = query_outer.device
+    key_row = torch.arange(key_rows, device=device).view(1, 1, key_rows, 1)
+    seed0 = key_row
+    seed1 = torch.where(key_row > 0, key_row - 1, torch.ones_like(key_row))
+    seed2 = torch.where(
+        key_row == 0,
+        torch.full_like(key_row, 2),
+        torch.where(key_row == query_rows - 1, torch.full_like(key_row, query_rows - 3), key_row + 1),
+    )
+    seed3 = torch.where(
+        key_row <= 1,
+        torch.full_like(key_row, 3),
+        torch.where(key_row >= query_rows - 2, torch.full_like(key_row, query_rows - 4), key_row - 2),
+    )
+    seed_rows = torch.stack((seed0, seed1, seed2, seed3), dim=-1).long()
+    return seed_rows.expand(query_outer.numel(), key_outer.numel(), key_rows, query_columns, 4)
+
+
+def cached_local_c4_seed_rows(
+    device,
+    query_outer_offset,
+    query_outer_count,
+    key_outer_count,
+    key_rows,
+    query_columns,
+    query_rows,
+):
+    cache_key = (
+        str(device),
+        int(query_outer_offset),
+        int(query_outer_count),
+        int(key_outer_count),
+        int(key_rows),
+        int(query_columns),
+        int(query_rows),
+    )
+    seed_rows = _SEED_ROWS_CACHE.get(cache_key)
+    if seed_rows is not None:
+        return seed_rows
+
+    query_outer = torch.arange(
+        query_outer_offset,
+        query_outer_offset + query_outer_count,
+        device=device,
+    )
+    key_outer = torch.arange(key_outer_count, device=device)
+    seed_rows = local_c4_seed_rows(query_outer, key_outer, key_rows, query_columns, query_rows)
+    _SEED_ROWS_CACHE[cache_key] = seed_rows
+    return seed_rows
+
+
+def gather_seed_queries(query, seed_rows):
+    """Gather seed queries for every (query outer, key outer, key row, query column) block."""
+    query_outer = torch.arange(query.size(1), device=query.device).view(-1, 1, 1, 1, 1)
+    query_col = torch.arange(query.size(3), device=query.device).view(1, 1, 1, -1, 1)
+    return query[:, query_outer, seed_rows, query_col]
+
+
+def biased_sdpa(query, key, value, bias, scale=1.0):
+    """Full compressed attention with additive entropy/routing bias."""
+    query_for_attn = query.to(key.dtype) if query.dtype != key.dtype else query
+    out = F.scaled_dot_product_attention(
+        query_for_attn.unsqueeze(1),
+        key.unsqueeze(1),
+        value.unsqueeze(1),
+        attn_mask=(-bias.float()).to(query_for_attn.dtype).unsqueeze(1).unsqueeze(2),
+        dropout_p=0.0,
+        is_causal=False,
+        scale=scale,
+    )
+    return out.squeeze(1).to(query.dtype)
 
 
 def assign_keys_to_seeds(seed_key_logits):
@@ -87,6 +171,42 @@ def hard_route_merge_kv_pytorch(seed_queries, key, value, scale):
     return merged_key, merged_value, routing_bias
 
 
+def hard_route_attention_pytorch(q, k, v, scale, query_outer_offset=0):
+    """Readable end-to-end hard C4 attention reference.
+
+    q:   [B, A, I, J, H, D]
+    k/v: [B, F, K, L, H, D]
+
+    A fixed (a, f, j, k) block has I query rows x L key columns. This PyTorch
+    path computes the same C4 merge and full compressed attention as Triton.
+    """
+    seed_rows = cached_local_c4_seed_rows(
+        q.device,
+        query_outer_offset,
+        q.size(1),
+        k.size(1),
+        k.size(2),
+        q.size(3),
+        q.size(2),
+    )
+    seed_queries = gather_seed_queries(q, seed_rows)
+    merged_keys, merged_values, routing_bias = hard_route_merge_kv_pytorch(seed_queries, k, v, scale)
+
+    query = rearrange(q, "b a i j h d -> (b h a j) i d")
+    key = rearrange(merged_keys, "b a f j k c h d -> (b h a j) (f k c) d")
+    value = rearrange(merged_values, "b a f j k c h d -> (b h a j) (f k c) d")
+    bias = rearrange(routing_bias, "b h a f k j c -> (b h a j) (f k c)")
+    out = biased_sdpa(query, key, value, bias, scale=scale)
+    return rearrange(
+        out,
+        "(b h a j) i d -> b a i j h d",
+        b=q.size(0),
+        h=q.size(4),
+        a=q.size(1),
+        j=q.size(3),
+    )
+
+
 # Legacy analysis scripts import this older name.
 assigned_key_log_softmax = masked_cluster_log_softmax
 
@@ -94,7 +214,12 @@ assigned_key_log_softmax = masked_cluster_log_softmax
 __all__ = [
     "assign_keys_to_seeds",
     "assigned_key_log_softmax",
+    "biased_sdpa",
+    "cached_local_c4_seed_rows",
+    "gather_seed_queries",
+    "hard_route_attention_pytorch",
     "hard_route_merge_kv_pytorch",
     "hard_route_merge_weights",
+    "local_c4_seed_rows",
     "masked_cluster_log_softmax",
 ]

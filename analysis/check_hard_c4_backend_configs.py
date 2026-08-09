@@ -5,7 +5,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from attention.hard_route_backend import (  # noqa: E402
+from attention.hard_route_triton import (  # noqa: E402
     DIRECT_ROUTING_BACKEND,
     HARD_C4_BACKEND,
     MERGE_BLOCK_J,

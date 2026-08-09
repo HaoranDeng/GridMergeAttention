@@ -8,6 +8,26 @@ except Exception:  # pragma: no cover - exercised only when Triton is missing.
     tl = None
 
 
+HARD_C4_BACKEND = "hard_c4"
+DIRECT_ROUTING_BACKEND = "triton_direct_m32_n32_w1_s1_exp2_tokenmajor"
+MERGE_BLOCK_J = 32
+MERGE_NUM_WARPS = 2
+MERGE_NUM_STAGES = 1
+MERGE_LOGIT_INPUT_PRECISION = "ieee"
+ROUTING_BLOCK_M = 32
+ROUTING_BLOCK_N = 32
+ROUTING_NUM_WARPS = 1
+ROUTING_NUM_STAGES = 1
+
+
+def is_hard_c4_backend(backend):
+    return (backend or "").lower() == HARD_C4_BACKEND
+
+
+def is_direct_route_attention_backend(backend):
+    return (backend or "").lower() == DIRECT_ROUTING_BACKEND
+
+
 if triton is not None:
     _WORKSPACE_CACHE = {}
 
@@ -501,7 +521,98 @@ def triton_hard_route_merge_c4_direct_route(
     return merged_key, merged_value, routing_bias, None
 
 
+def merge_kv_direct_c4(q, key, value, scale, assume_contiguous=False):
+    return triton_hard_route_merge_c4_direct_route(
+        q,
+        key,
+        value,
+        scale=scale,
+        block_j_target=MERGE_BLOCK_J,
+        num_warps=MERGE_NUM_WARPS,
+        num_stages=MERGE_NUM_STAGES,
+        logit_input_precision=MERGE_LOGIT_INPUT_PRECISION,
+        assume_contiguous=assume_contiguous,
+    )
+
+
+def direct_compressed_attention(
+    q,
+    key,
+    value,
+    bias,
+    backend,
+    scale,
+    output=None,
+    assume_contiguous=False,
+):
+    if not is_direct_route_attention_backend(backend):
+        raise ValueError(
+            f"hard_route_backend='hard_c4' requires "
+            f"hard_route_routing_backend={DIRECT_ROUTING_BACKEND!r}."
+        )
+
+    return triton_direct_route_biased_attention(
+        q,
+        key,
+        value,
+        bias,
+        block_m=ROUTING_BLOCK_M,
+        block_n=ROUTING_BLOCK_N,
+        scale=scale,
+        num_warps=ROUTING_NUM_WARPS,
+        num_stages=ROUTING_NUM_STAGES,
+        use_exp2=True,
+        out=output,
+        assume_contiguous=assume_contiguous,
+    )
+
+
+def hard_route_attention_triton(
+    q,
+    k,
+    v,
+    scale,
+    hard_route_routing_backend=DIRECT_ROUTING_BACKEND,
+    output=None,
+):
+    """Optimized hard C4 attention: Triton merge followed by full compressed attention."""
+    q = q.contiguous()
+    key, value, bias, _ = merge_kv_direct_c4(
+        q,
+        k,
+        v,
+        scale,
+        assume_contiguous=True,
+    )
+    output = output if output is not None and output.is_contiguous() else None
+    return direct_compressed_attention(
+        q,
+        key,
+        value,
+        bias,
+        hard_route_routing_backend,
+        scale,
+        output=output,
+        assume_contiguous=True,
+    )
+
+
 __all__ = [
+    "DIRECT_ROUTING_BACKEND",
+    "HARD_C4_BACKEND",
+    "MERGE_BLOCK_J",
+    "MERGE_LOGIT_INPUT_PRECISION",
+    "MERGE_NUM_STAGES",
+    "MERGE_NUM_WARPS",
+    "ROUTING_BLOCK_M",
+    "ROUTING_BLOCK_N",
+    "ROUTING_NUM_STAGES",
+    "ROUTING_NUM_WARPS",
+    "direct_compressed_attention",
+    "hard_route_attention_triton",
+    "is_direct_route_attention_backend",
+    "is_hard_c4_backend",
+    "merge_kv_direct_c4",
     "triton_direct_route_biased_attention",
     "triton_hard_route_merge_c4_direct_route",
 ]

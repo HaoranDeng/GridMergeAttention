@@ -6,12 +6,9 @@ GridMergeAttention path.
 ## Files
 
 - `core.py`: dense PyTorch scaled dot-product attention wrapper.
-- `token_merging.py`: Wan token reshaping plus hard C4 dispatch.
-- `common.py`: block reshaping, local C4 seed selection, and biased SDPA.
-- `hard_route.py`: hard C4 end-to-end control flow.
-- `hard_route_pytorch.py`: readable PyTorch hard C4 reference.
-- `hard_route_backend.py`: constants and dispatch for the optimized hard C4 path.
-- `hard_route_triton.py`: Triton C4 merge and full compressed-attention kernels.
+- `token_merging.py`: Wan token reshaping plus PyTorch/Triton dispatch.
+- `hard_route_pytorch.py`: complete readable PyTorch hard C4 reference.
+- `hard_route_triton.py`: complete optimized Triton hard C4 implementation.
 
 ## Shapes
 

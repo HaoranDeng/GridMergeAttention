@@ -8,7 +8,7 @@ from pathlib import Path
 import torch
 from omegaconf import OmegaConf
 
-from attention.hard_route_backend import (
+from attention.hard_route_triton import (
     DIRECT_ROUTING_BACKEND,
     HARD_C4_BACKEND,
     MERGE_BLOCK_J,
