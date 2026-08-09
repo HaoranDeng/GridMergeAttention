@@ -18,6 +18,22 @@ check before launching another speed/quality sweep.
 
 ## Failed or Rejected Directions
 
+### Spread C4 Seed Rows
+
+- Result: worse dense-vs-hard output error with no useful speed gain.
+- Change tested: replace local-with-ith C4 seed rows with spread rows
+  `k, k+7, k+14, k+21 (mod 30)` for each key row `k`, while preserving hard
+  assignment, entropy routing bias, and full compressed attention.
+- Evidence: Slurm job `367149` on real Wan QKV measured spread-seed hard C4 at
+  about 23.79 ms/call with rel-L2 `0.13442` and MSE `0.005189` versus dense.
+  The preceding local-seed cleanup benchmark `367140` measured about
+  23.92 ms/call with rel-L2 `0.09724` and MSE `0.002716` versus dense.
+- Why not repeat directly: the spread seeds make the four representatives more
+  globally distributed across the 30 query rows, but they lose the row-local
+  alignment that kept each key row close to its matched query neighborhood.
+- Rule: keep local-with-ith seed rows for the main hard C4 path. Treat spread
+  seed rows only as an explicit low-quality ablation.
+
 ### No-Bias Routing
 
 - Result: bad video quality; rejected by visual inspection.
