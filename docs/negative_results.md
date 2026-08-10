@@ -34,6 +34,42 @@ check before launching another speed/quality sweep.
 - Rule: keep local-with-ith seed rows for the main hard C4 path. Treat spread
   seed rows only as an explicit low-quality ablation.
 
+### Random-With-Ith C4 Seed Rows
+
+- Result: worse dense-vs-hard output error than local-with-ith.
+- Change tested: keep the index-matched seed row `k`, but choose the other
+  three C4 seed rows by deterministic random sampling instead of local rows
+  near `k`.
+- Evidence: Slurm jobs `368147`, `368154`, and `368155` measured all 90
+  self-attention calls for one Wan denoise trajectory on MI300X. Averaged over
+  random seeds 0, 1, and 2, local-with-ith had rel-L2 `0.09011` and MSE
+  `0.002514` versus dense, while random-with-ith had rel-L2 `0.11982` and MSE
+  `0.004446`. Fully random was much worse, with rel-L2 `0.22024` and MSE
+  `0.01502`.
+- Why not repeat directly: preserving the matched row is not enough. The other
+  three randomly sampled rows often lose the row-local positional alignment
+  that makes the merged K/V useful for the 30-query by 52-key tile.
+- Rule: keep local-with-ith seed rows for the main hard C4 path. Use
+  random-with-ith or fully random only as explicit ablations.
+
+### Fixed Geometry Four-Seed Variants
+
+- Result: no fixed geometry variant beat local-with-ith.
+- Change tested: keep the same hard C4 assignment, entropy routing bias, KV
+  merge, and full compressed attention, but change only the four seed query
+  rows. Tested nearest-right, nearest alternating, ring stride-5, ring
+  stride-7, ring quarter, and ring symmetric-7 choices.
+- Evidence: Slurm job `368295` measured the first 12 real Wan self-attention
+  calls on MI300X. Local-with-ith had rel-L2 `0.13721` and MSE `0.002850`.
+  The closest fixed alternatives were nearest-right with rel-L2 `0.13767` and
+  nearest-alternating with rel-L2 `0.13772`; all ring/stride variants were
+  worse, with rel-L2 around `0.147-0.151`.
+- Why not repeat directly: spreading the non-matched seeds or changing the
+  local tie direction does not improve the block-local query/key alignment.
+- Rule: do not retry purely fixed geometric four-row seed patterns unless a
+  new pattern is motivated by a different analysis. For higher precision, use
+  content-adaptive seed selection instead of another fixed offset sweep.
+
 ### No-Bias Routing
 
 - Result: bad video quality; rejected by visual inspection.
@@ -574,6 +610,11 @@ The best accepted direction so far is still:
 - non-shared grid-local hard-route C4 compression,
 - full compressed attention in the second stage,
 - local-with-ith seed selection for lower error than random-with-ith,
+- adaptive greedy-cover-with-ith seed selection is the best precision-only
+  seed strategy found so far, but is not the default fast path because it is
+  much slower. Slurm job `368297` measured greedy-cover-with-ith at rel-L2
+  `0.07632` and MSE `0.001804` versus local-with-ith at rel-L2 `0.09011` and
+  MSE `0.002514` over all 90 self-attention calls,
 - inline local seed-row computation to avoid reading the seed table in the C4
   merge kernel,
 - assigned-logit reuse (`bestlogit`) inside the C4 merge kernel, which keeps

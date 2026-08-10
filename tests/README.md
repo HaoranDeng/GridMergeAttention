@@ -45,7 +45,8 @@ The individual test files document the behavior they require:
   unequal temporal lengths, and exclusion of unused future cache entries.
 - `test_wan_hard_c4_compatibility.py` checks that the merged dispatcher still
   exactly matches main's maintained PyTorch hard-C4 path, preserves its new
-  fused-backend dispatch, and rejects the Wan C2/C6 paths removed upstream.
+  fused-backend default, canonical name, and legacy alias, and rejects the Wan
+  C2/C6 paths removed upstream.
 - `test_causal_model_contract.py` checks checkpoint-compatible state-dict
   schemas, propagation of Token-Merging configuration, causal model selection,
   and preservation of per-frame timesteps.

@@ -6,12 +6,16 @@ from collections import defaultdict
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 from einops import rearrange
 from omegaconf import OmegaConf
 
 from generate import load_generator_checkpoint, load_prompts
 from pipeline import TokenMergingWanPipeline
 from utils.misc import set_seed
+
+
+HASH_MOD = 2147483647
 
 
 class Stats:
@@ -163,6 +167,97 @@ def soft_merge(logits, dtype):
     return logprob.exp().to(dtype), logprob
 
 
+def hashed_candidate_scores(base, num_choices):
+    candidate = torch.arange(num_choices, device=base.device).view(*((1,) * base.ndim), num_choices)
+    scores = (base.unsqueeze(-1).remainder(HASH_MOD) + candidate * 374761393).remainder(HASH_MOD)
+    scores = (scores * (scores + 1274126177)).remainder(HASH_MOD)
+    scores = (scores * (scores + 60493)).remainder(HASH_MOD)
+    return scores * num_choices + candidate, candidate
+
+
+def seed_indices_from_base(base, num_choices, num_seeds, include_seed=None):
+    scores, candidate = hashed_candidate_scores(base, num_choices)
+    if include_seed is not None:
+        scores = scores.masked_fill(candidate == include_seed.unsqueeze(-1), -1)
+        random_seeds = scores.topk(num_seeds - 1, dim=-1).indices.long()
+        return torch.cat((include_seed.unsqueeze(-1).long(), random_seeds), dim=-1)
+    return scores.topk(num_seeds, dim=-1).indices.long()
+
+
+def random_seed_columns(query_outer, key_outer, query_rows, key_columns, query_columns, num_seeds, seed):
+    query_row = torch.arange(query_rows, device=query_outer.device).view(1, 1, query_rows, 1)
+    key_col = torch.arange(key_columns, device=query_outer.device).view(1, 1, 1, key_columns)
+    base = (
+        query_outer.view(-1, 1, 1, 1) * 73856093
+        + key_outer.view(1, -1, 1, 1) * 19349663
+        + query_row * 83492791
+        + key_col * 2654435761
+        + int(seed)
+    )
+    ith_seed = key_col.expand(query_outer.numel(), key_outer.numel(), query_rows, key_columns)
+    return seed_indices_from_base(base, query_columns, num_seeds, include_seed=ith_seed)
+
+
+def gather_seed_queries_transpose(q, seed_cols):
+    query_outer = torch.arange(q.size(1), device=q.device).view(-1, 1, 1, 1, 1)
+    query_row = torch.arange(q.size(2), device=q.device).view(1, 1, -1, 1, 1)
+    return q[:, query_outer, query_row, seed_cols]
+
+
+def biased_sdpa(query, key, value, bias, scale):
+    out = F.scaled_dot_product_attention(
+        query.unsqueeze(1),
+        key.unsqueeze(1),
+        value.unsqueeze(1),
+        attn_mask=(-bias.float()).to(query.dtype).unsqueeze(1).unsqueeze(2),
+        dropout_p=0.0,
+        is_causal=False,
+        scale=scale,
+    )
+    return out.squeeze(1)
+
+
+def hard_route_transpose_c4_blocks(q, k, v, scale, seed=0):
+    """Historical transpose C4 route: fixed (a, f, query-row, key-column) tiles."""
+    query_outer = torch.arange(q.size(1), device=q.device)
+    key_outer = torch.arange(k.size(1), device=q.device)
+    seed_cols = random_seed_columns(
+        query_outer,
+        key_outer,
+        q.size(2),
+        k.size(3),
+        q.size(3),
+        4,
+        seed,
+    )
+    seed_queries = gather_seed_queries_transpose(q, seed_cols)
+
+    seed_logits = torch.einsum("bafilchd,bfklhd->bhafilck", seed_queries, k).float()
+    seed_logits = seed_logits * float(scale)
+    assignments = seed_logits.argmax(dim=-2)
+    assignment_mask = F.one_hot(assignments, num_classes=4).movedim(-1, -2).bool()
+
+    has_seed = assignment_mask.any(dim=-1)
+    key_idx = torch.arange(k.size(2), device=k.device).view(*((1,) * has_seed.ndim), k.size(2))
+    assignment_mask = assignment_mask | ((~has_seed).unsqueeze(-1) & (key_idx == 0))
+
+    masked_logits = seed_logits.masked_fill(~assignment_mask, torch.finfo(seed_logits.dtype).min)
+    merge_logprob = torch.log_softmax(masked_logits, dim=-1)
+    merge_weights = merge_logprob.exp().masked_fill(~assignment_mask, 0).to(k.dtype)
+    merge_logprob = merge_logprob.masked_fill(~assignment_mask, 0)
+
+    merged_k = torch.einsum("bhafilck,bfklhd->bafilchd", merge_weights, k)
+    merged_v = torch.einsum("bhafilck,bfklhe->bafilche", merge_weights, v)
+    routing_bias = (merge_weights.float() * merge_logprob).sum(dim=-1)
+
+    query = rearrange(q, "b a i j h d -> (b h a i) j d")
+    key = rearrange(merged_k, "b a f i l c h d -> (b h a i) (f l c) d")
+    value = rearrange(merged_v, "b a f i l c h d -> (b h a i) (f l c) d")
+    bias = rearrange(routing_bias, "b h a f i l c -> (b h a i) (f l c)")
+    out = biased_sdpa(query, key, value, bias, scale)
+    return rearrange(out, "(b h a i) j d -> b a i j h d", b=q.size(0), h=q.size(4), a=q.size(1), i=q.size(2))
+
+
 def gridmerge_one_blocks(q, k, v, scale, key_valid=None):
     """Original one-token MonarchRT: each 30-query x 52-key tile becomes rank-1."""
     scale_sqrt = float(scale) ** 0.5
@@ -236,6 +331,25 @@ def gridmerge_one_transpose_blocks(q, k, v, scale, key_valid=None):
 
 
 def run_one_token_variant(q, k, v, grid_size, variant, scale, head_chunk):
+    if variant.get("kind") == "transpose_c4":
+        frames, height, width = [int(x) for x in grid_size]
+        chunks = []
+        q_blocks = q.reshape(q.size(0), frames, height, width, q.size(2), q.size(3))
+        k_blocks = k.reshape(k.size(0), frames, height, width, k.size(2), k.size(3))
+        v_blocks = v.reshape(v.size(0), frames, height, width, v.size(2), v.size(3))
+        for start in range(0, q_blocks.size(4), head_chunk):
+            end = min(start + head_chunk, q_blocks.size(4))
+            chunks.append(
+                hard_route_transpose_c4_blocks(
+                    q_blocks[:, :, :, :, start:end],
+                    k_blocks[:, :, :, :, start:end],
+                    v_blocks[:, :, :, :, start:end],
+                    scale,
+                    seed=0,
+                )
+            )
+        return torch.cat(chunks, dim=4).reshape_as(q)
+
     frames, height, width = [int(x) for x in grid_size]
     h_reduce = int(variant["h_reduce"])
     w_reduce = int(variant["w_reduce"])
@@ -300,6 +414,16 @@ def variant_specs(frames, height, width):
             "w_reduce": 1,
             "transpose": True,
             "compressed_tokens_per_query": frames * width,
+        },
+        "transpose_c4": {
+            "h_reduce": 1,
+            "w_reduce": 1,
+            "transpose": True,
+            "kind": "transpose_c4",
+            "num_merge_tokens": 4,
+            "seed_mode": "random_with_ith",
+            "empty_seed_policy": "force_key0",
+            "compressed_tokens_per_query": frames * width * 4,
         },
     }
     for spec in specs.values():
@@ -458,6 +582,9 @@ def main():
                     "sparsity": specs[name]["sparsity"],
                 }
             )
+            for field in ("num_merge_tokens", "seed_mode", "empty_seed_policy"):
+                if field in specs[name]:
+                    variants[name][field] = specs[name][field]
 
     target_density = specs["monarchrt_h2"]["density"]
     transpose_min_density = specs["transpose_c1_closest"]["density"]

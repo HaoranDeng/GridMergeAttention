@@ -65,11 +65,12 @@ File: `test_wan_hard_c4_compatibility.py`
 The merged dispatcher has two deliberately separate branches: causal
 Self-Forcing C1 and upstream Wan C4. A random FP32 test compares the latter
 directly with `hard_route_attention_pytorch`, including frame-by-frame query
-chunking. A mocked test confirms the new fused Triton backend remains
-selectable without requiring a GPU. A final test requires Wan C2/C6 to fail
-explicitly because upstream removed those experimental paths. This proves the
-causal compatibility layer did not silently replace or narrow main's
-maintained hard-C4 implementation.
+chunking. A mocked test confirms the new fused Triton backend remains selected
+by the default, canonical `hard_c4` name, and legacy `hard_c4_fused` alias
+without requiring a GPU. A final test requires Wan C2/C6 to fail explicitly
+because upstream removed those experimental paths. This proves the causal
+compatibility layer did not silently replace or narrow main's maintained
+hard-C4 implementation.
 
 ## 2. Cache-aware Token Merging
 

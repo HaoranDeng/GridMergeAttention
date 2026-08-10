@@ -12,10 +12,8 @@ from ._grid_utils import (
 )
 from .causal_gridmerge import causal_gridmerge_one
 from .hard_route_pytorch import hard_route_attention_pytorch
-from .hard_route_triton import (
+from .hard_fused_triton import (
     HARD_C4_BACKEND,
-    HARD_C4_FUSED_BACKEND,
-    hard_route_attention_triton,
     hard_route_attention_triton_fused,
 )
 
@@ -45,43 +43,36 @@ def _hard_c4_attention(
     query_outer_chunk,
     hard_route_backend,
 ):
-    """Execute main's maintained hard-C4 PyTorch/Triton paths."""
+    """Execute main's maintained PyTorch-reference or fused-Triton C4 path."""
 
     h = int(h)
     w = int(w)
     query_blocks = _hard_c4_video_to_blocks(query, h, w)
     key_blocks = _hard_c4_video_to_blocks(key, h, w)
     value_blocks = _hard_c4_video_to_blocks(value, h, w)
-    backend = (hard_route_backend or "sdpa").lower()
+    backend = (hard_route_backend or HARD_C4_BACKEND).lower()
+    use_reference = backend == "sdpa"
 
     output = torch.empty_like(query_blocks)
     for start in range(0, query_blocks.size(1), query_outer_chunk):
         end = min(start + query_outer_chunk, query_blocks.size(1))
         query_chunk = query_blocks[:, start:end]
         output_slice = output[:, start:end]
-        if backend == HARD_C4_BACKEND:
-            chunk = hard_route_attention_triton(
-                query_chunk,
-                key_blocks,
-                value_blocks,
-                sm_scale,
-                output=output_slice,
-            )
-        elif backend == HARD_C4_FUSED_BACKEND:
-            chunk = hard_route_attention_triton_fused(
-                query_chunk,
-                key_blocks,
-                value_blocks,
-                sm_scale,
-                output=output_slice,
-            )
-        else:
+        if use_reference:
             chunk = hard_route_attention_pytorch(
                 query_chunk,
                 key_blocks,
                 value_blocks,
                 sm_scale,
                 query_outer_offset=start,
+            )
+        else:
+            chunk = hard_route_attention_triton_fused(
+                query_chunk,
+                key_blocks,
+                value_blocks,
+                sm_scale,
+                output=output_slice,
             )
         if chunk is not output_slice:
             output_slice.copy_(chunk)
@@ -177,16 +168,15 @@ def token_merging_attn(
     num_merge_tokens=4,
     seed_mode="local_with_ith",
     seed=0,
-    hard_route_backend="sdpa",
+    hard_route_backend=HARD_C4_BACKEND,
     hard_route_routing_backend=None,
 ):
     """Dispatch the ordinary-Wan C4 and causal Self-Forcing C1 paths.
 
-    Ordinary Wan supports main's hard-C4 backends:
+    Ordinary Wan supports main's maintained hard-C4 implementations:
       - hard_route_backend="sdpa": readable PyTorch reference.
-      - hard_route_backend="hard_c4": optimized Triton path.
-      - hard_route_backend="hard_c4_fused": experimental fused Triton path
-        retained for manual optimization.
+      - hard_route_backend="hard_c4": fused Triton kernel.
+    Other legacy backend strings are treated as the fused Triton path.
 
     Causal Self-Forcing uses one-token GridMerge because its current-block Q is
     shorter than its visible cached K/V prefix.

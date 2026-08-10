@@ -28,7 +28,7 @@ REPO_DIR="${REPO_DIR:-/home1/denghaoran/workspace/training-free-videogen}"
 export WAN_MODEL_ROOT="${WAN_MODEL_ROOT:-${REPO_DIR}/wan_models}"
 CHECKPOINT="${CHECKPOINT:-${REPO_DIR}/checkpoints/self_forcing_dmd.pt}"
 CONFIG="${CONFIG:-configs/token_merging_wan_hard_c4_triton_fewstep.yaml}"
-OUTPUT_DIR="${OUTPUT_DIR:-videos/hard_c4_triton_wan}"
+OUTPUT_DIR="${OUTPUT_DIR:-videos/hard_c4_fused_wan}"
 
 cd "${REPO_DIR}"
 mkdir -p out "${OUTPUT_DIR}"

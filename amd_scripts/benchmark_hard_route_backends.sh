@@ -45,7 +45,7 @@ GPU_ID="${GPU_ID:-0}"
 NAMES=(
   "dense"
   "hard_c4_pytorch"
-  "hard_c4_triton"
+  "hard_c4_fused"
 )
 
 CONFIGS=(
@@ -158,7 +158,7 @@ result_dir = Path(sys.argv[1])
 order = [
     "dense",
     "hard_c4_pytorch",
-    "hard_c4_triton",
+    "hard_c4_fused",
 ]
 rows = {json.loads(path.read_text())["name"]: json.loads(path.read_text()) for path in result_dir.glob("*.json")}
 dense_seconds = rows.get("dense", {}).get("seconds_per_mp4")

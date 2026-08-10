@@ -61,8 +61,8 @@ class WanHardC4CompatibilityTests(unittest.TestCase):
         expected = expected_blocks.reshape_as(query)
         torch.testing.assert_close(actual, expected, rtol=1e-5, atol=1e-6)
 
-    def test_dispatcher_preserves_new_fused_hard_c4_backend(self):
-        """Main's fused C4 selection must survive the causal-C1 dispatcher."""
+    def test_dispatcher_preserves_fused_hard_c4_backend_contract(self):
+        """Default, canonical, and legacy C4 labels must select main's fused kernel."""
 
         query = torch.randn(1, 2 * 6 * 7, 1, 4)
 
@@ -71,26 +71,35 @@ class WanHardC4CompatibilityTests(unittest.TestCase):
             output.fill_(3.25)
             return output
 
-        with mock.patch(
-            "attention.token_merging.hard_route_attention_triton_fused",
-            side_effect=fill_fused_output,
-        ) as fused:
-            actual = token_merging_attn(
-                query,
-                query,
-                query,
-                f_tied=1,
-                h_reduce=1,
-                w_reduce=1,
-                h=6,
-                w=7,
-                query_outer_chunk=1,
-                num_merge_tokens=4,
-                hard_route_backend="hard_c4_fused",
-            )
+        backend_cases = {
+            "default": {},
+            "canonical": {"hard_route_backend": "hard_c4"},
+            "legacy_alias": {"hard_route_backend": "hard_c4_fused"},
+        }
+        for case_name, backend_options in backend_cases.items():
+            with self.subTest(case=case_name):
+                with mock.patch(
+                    "attention.token_merging.hard_route_attention_triton_fused",
+                    side_effect=fill_fused_output,
+                ) as fused:
+                    actual = token_merging_attn(
+                        query,
+                        query,
+                        query,
+                        f_tied=1,
+                        h_reduce=1,
+                        w_reduce=1,
+                        h=6,
+                        w=7,
+                        query_outer_chunk=1,
+                        num_merge_tokens=4,
+                        **backend_options,
+                    )
 
-        self.assertEqual(fused.call_count, 2)
-        torch.testing.assert_close(actual, torch.full_like(actual, 3.25))
+                self.assertEqual(fused.call_count, 2)
+                torch.testing.assert_close(
+                    actual, torch.full_like(actual, 3.25)
+                )
 
     def test_removed_wan_c2_c6_paths_stay_rejected(self):
         """Only causal C1 and upstream hard C4 remain public Wan paths."""

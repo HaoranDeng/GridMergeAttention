@@ -502,13 +502,13 @@ Four regression tests were added for the merge boundary:
 ### 2026-08-09 reconciliation with the simplified `origin/main`
 
 The later upstream merge narrowed ordinary Wan attention to the maintained
-hard-C4 implementations (PyTorch, Triton, and experimental fused Triton) and removed
+hard-C4 implementations (a PyTorch reference and fused Triton kernel) and removed
 the old generic common/GridMerge/select/transposed/shared modules and C2/C6
 Wan configurations. The reconciliation does not restore that removed
 experimental stack:
 
 ```text
-ordinary bidirectional Wan -> upstream hard C4 PyTorch/Triton/fused Triton
+ordinary bidirectional Wan -> upstream hard C4 PyTorch or fused Triton
 causal Self-Forcing        -> isolated one-token causal GridMerge + KV cache
 Hunyuan                    -> independent joint video/text hard C2/C4/C6
 ```
