@@ -12,8 +12,8 @@ the files changed, environment requirements, validation, and current limits.
 - Fast CPU equation/installation/generation/launcher tests: passed.
 - Tiny real-Diffusers transformer parity plus hard C2/C4/C6 block execution:
   both passed in the existing `SVG` Conda environment (`Ran 2 tests in
-  7.558s`, `OK`; runtime varies on the shared filesystem).
-- Complete fast regression suite: 39 tests, all 34 enabled tests passed and 5
+  12.973s`, `OK`; runtime varies on the shared filesystem).
+- Complete fast regression suite: 41 tests, all 36 enabled tests passed and 5
   expensive opt-in tests were skipped as expected.
 - Real-checkpoint dense-probe pipeline parity: passed exactly on an A100 using
   the cached 12.821B-parameter transformer. All 120 attention calls across two
@@ -101,10 +101,12 @@ choose C deterministic seed-query rows
     -> apply one shared softmax
 ```
 
-This is the same hard-assignment/merge equation used by the repository's Wan
-hard-route attention. The Hunyuan-specific part is preserving exact text keys
-inside that same normalization and keeping all text-query attention dense.
-Select routing and transposed layouts are deliberately not enabled.
+This follows the same high-level hard-assignment/merge equation as hard-route
+Wan attention. Hunyuan retains its own deterministic C2/C4/C6 seed behavior;
+upstream Wan is now intentionally restricted to its maintained local-seed C4
+path. The Hunyuan-specific part is preserving exact text keys inside the same
+normalization and keeping all text-query attention dense. Select routing and
+transposed layouts are deliberately not enabled.
 
 ## File-by-file changes
 
@@ -118,7 +120,7 @@ It:
 - validates video/text stream boundaries and the boolean key mask;
 - derives temporal length from the video sequence and runtime spatial grid;
 - reuses the existing GridMerge merge weights, entropy correction, block
-  transforms, and spatial pad/crop helpers;
+  transforms, and private spatial pad/crop helpers;
 - normalizes compressed video keys and exact text keys in one softmax;
 - evaluates exact text-query SDPA over the original joint sequence;
 - supports bounded `query_outer_chunk` execution;
@@ -228,8 +230,9 @@ TMPDIR=/xuanwu-tank/east/zrl/tmp
 
 ### `scripts/generate/launch_hunyuan_hard_configs_multi_gpu.sh` (new)
 
-Mirrors the existing six-config Wan launcher while running only the requested
-hard-route variants. For each of C2, C4, and C6 it:
+Uses the same sequential-config/multi-GPU-sharding pattern requested from the
+former six-config Wan launcher, while running only the Hunyuan hard-route
+variants. For each of C2, C4, and C6 it:
 
 1. starts one independent Hunyuan process per explicitly reserved GPU;
 2. balances unfinished prompt groups across those workers;
@@ -285,9 +288,8 @@ available Conda environment name.
 ### Tests (new and extended)
 
 - `test_hunyuan_token_merging.py` checks the joint equations, shared
-  video/text normalization, prompt masking, exact C2/C4/C6 partitions, parity
-  of the multi-token video core with Wan hard routing, and explicit rejection
-  of unsupported layouts.
+  video/text normalization, prompt masking, exact C2/C4/C6 partitions, and
+  explicit rejection of unsupported layouts.
 - `test_hunyuan_pipeline_integration.py` checks runtime grid derivation and
   C2/C4/C6 option propagation into both main block families without touching
   the text refiner.

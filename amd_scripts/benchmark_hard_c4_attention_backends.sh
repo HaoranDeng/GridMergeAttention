@@ -39,8 +39,9 @@ PROMPT_PATH="${PROMPT_PATH:-${REPO_DIR}/prompts/MovieGenVideoBench_extended.txt}
 OUTPUT_JSON="${OUTPUT_JSON:-${RESULT_DIR}/hard_c4_attention_backends.json}"
 MAX_CALLS="${MAX_CALLS:-30}"
 NUM_PROMPTS="${NUM_PROMPTS:-1}"
-VARIANTS="${VARIANTS:-hard_c4_triton_c4,hard_c4_triton_c4_j16,hard_c4_direct_route_j16_w2,hard_c4_direct_route_j32_w2,hard_c4_triton_c4_route_m128_n32,hard_c4_triton_c4_route_m128_n32_s1,hard_c4_triton_c4_route_m256_n32}"
-QUERY_OUTER_CHUNK="${QUERY_OUTER_CHUNK:-7}"
+VARIANTS="${VARIANTS:-hard_c4}"
+QUERY_OUTER_CHUNK="${QUERY_OUTER_CHUNK:-10}"
+SKIP_VARIANT_ERRORS_JSON="${SKIP_VARIANT_ERRORS_JSON:-}"
 SEED="${SEED:-0}"
 DTYPE="${DTYPE:-bf16}"
 GPU_ID="${GPU_ID:-0}"
@@ -57,8 +58,14 @@ echo "Benchmarking non-shared hard C4 attention backends"
 echo "  max calls: ${MAX_CALLS}"
 echo "  prompts:   ${NUM_PROMPTS}"
 echo "  variants:  ${VARIANTS}"
+echo "  skip variant errors json: ${SKIP_VARIANT_ERRORS_JSON:-<none>}"
 echo "  output:    ${OUTPUT_JSON}"
 echo "  triton cache: ${TRITON_CACHE_DIR}"
+
+smoke_error_args=()
+if [ -n "${SKIP_VARIANT_ERRORS_JSON}" ]; then
+  smoke_error_args+=(--skip_variant_errors_from_json "${SKIP_VARIANT_ERRORS_JSON}")
+fi
 
 HIP_VISIBLE_DEVICES="${GPU_ID}" ROCR_VISIBLE_DEVICES="${GPU_ID}" CUDA_VISIBLE_DEVICES="${GPU_ID}" \
 PYTHONUNBUFFERED=1 \
@@ -73,4 +80,5 @@ python analysis/hard_route_nonshared_backend_real_qkv.py \
   --query_outer_chunk "${QUERY_OUTER_CHUNK}" \
   --variants "${VARIANTS}" \
   --seed "${SEED}" \
+  "${smoke_error_args[@]}" \
   --output_json "${OUTPUT_JSON}"

@@ -43,65 +43,6 @@ def maybe_save_first_attention_qkv(q, k, v, tag):
         raise SystemExit(0)
 
 
-def _normalize_layer_indices_by_step(value):
-    if not value:
-        return None
-    items = value.items() if hasattr(value, "items") else enumerate(value)
-    return {
-        int(step): frozenset(int(layer) for layer in layers)
-        for step, layers in items
-        if layers is not None
-    }
-
-
-def resolve_hard_route_routing_backend_policy(
-    default_backend,
-    policy,
-    layer_idx,
-    num_layers,
-    denoise_idx=0,
-    num_denoise_steps=1,
-    selected_r3_layers_by_step=None,
-):
-    policy = (policy or "").lower()
-    if not policy:
-        return default_backend
-
-    r2 = "triton_grid_outer_exact_r2_m128_n64_s1_exp2"
-    r3 = "triton_grid_outer_exact_r3_m128_n64_s1_exp2"
-    r4 = "triton_grid_outer_exact_r4_m128_n64_s1_exp2"
-    denoise_idx = int(denoise_idx)
-    num_denoise_steps = max(1, int(num_denoise_steps))
-    if policy == "r3_first_half_r4_second_half":
-        return r3 if int(layer_idx) < int(num_layers) // 2 else r4
-    if policy == "r4_first_half_r3_second_half":
-        return r4 if int(layer_idx) < int(num_layers) // 2 else r3
-    if policy == "r3_even_r4_odd":
-        return r3 if int(layer_idx) % 2 == 0 else r4
-    if policy == "r4_even_r3_odd":
-        return r4 if int(layer_idx) % 2 == 0 else r3
-    if policy == "r3_first_step_r4_rest":
-        return r3 if denoise_idx == 0 else r4
-    if policy == "r3_middle_step_r4_rest":
-        return r3 if denoise_idx == num_denoise_steps // 2 else r4
-    if policy == "r3_last_step_r4_rest":
-        return r3 if denoise_idx == num_denoise_steps - 1 else r4
-    if policy == "r3_first_two_steps_r4_rest":
-        return r3 if denoise_idx < min(2, num_denoise_steps) else r4
-    if policy == "r3_last_two_steps_r4_rest":
-        return r3 if denoise_idx >= max(0, num_denoise_steps - 2) else r4
-    if policy == "r2_first_step_r4_rest":
-        return r2 if denoise_idx == 0 else r4
-    if policy == "r2_first_two_steps_r4_rest":
-        return r2 if denoise_idx < min(2, num_denoise_steps) else r4
-    if policy == "selected_r3_layers_r4_rest":
-        if selected_r3_layers_by_step is None:
-            raise ValueError("selected_r3_layers_r4_rest requires hard_route_r3_layer_indices_by_step.")
-        return r3 if int(layer_idx) in selected_r3_layers_by_step.get(denoise_idx, ()) else r4
-
-    raise ValueError(f"unsupported hard_route_routing_backend_policy={policy!r}")
-
-
 def sinusoidal_embedding_1d(dim, position):
     # preprocess
     assert dim % 2 == 0
@@ -299,17 +240,10 @@ class WanSelfAttention(nn.Module):
         self.token_merging_q_init = None
         self.token_merging_query_outer_chunk = None
         self.token_merging_layout = "hard_route"
-        self.token_merging_num_merge_tokens = 1
-        self.token_merging_seed_mode = "random"
+        self.token_merging_num_merge_tokens = 4
+        self.token_merging_seed_mode = "local_with_ith"
         self.token_merging_seed = 0
         self.token_merging_hard_route_backend = "sdpa"
-        self.token_merging_hard_route_routing_backend = "sdpa"
-        self.token_merging_hard_route_routing_backend_policy = None
-        self.token_merging_hard_route_r3_layers_by_step = None
-        self.token_merging_layer_idx = 0
-        self.token_merging_num_layers = 1
-        self.token_merging_denoise_idx = 0
-        self.token_merging_num_denoise_steps = 1
 
         # layers
         self.q = nn.Linear(dim, dim)
@@ -350,15 +284,6 @@ class WanSelfAttention(nn.Module):
             b, s, _, d = q.shape
             if f % self.token_merging_f_tied != 0:
                 raise ValueError("frame count must be divisible by token_merging_f_tied.")
-            hard_route_routing_backend = resolve_hard_route_routing_backend_policy(
-                self.token_merging_hard_route_routing_backend,
-                self.token_merging_hard_route_routing_backend_policy,
-                self.token_merging_layer_idx,
-                self.token_merging_num_layers,
-                self.token_merging_denoise_idx,
-                self.token_merging_num_denoise_steps,
-                self.token_merging_hard_route_r3_layers_by_step,
-            )
             x = token_merging_attn(
                 roped_query,
                 roped_key,
@@ -375,7 +300,6 @@ class WanSelfAttention(nn.Module):
                 seed_mode=self.token_merging_seed_mode,
                 seed=self.token_merging_seed,
                 hard_route_backend=self.token_merging_hard_route_backend,
-                hard_route_routing_backend=hard_route_routing_backend,
             )
         else:
             x = flash_attention(
@@ -861,18 +785,12 @@ class WanModel(ModelMixin, ConfigMixin):
         q_init = args.get("q_init", None)
         query_outer_chunk = args.get("query_outer_chunk", None)
         layout = args.get("layout", "hard_route")
-        num_merge_tokens = args.get("num_merge_tokens", 1)
-        seed_mode = args.get("seed_mode", "random")
+        num_merge_tokens = args.get("num_merge_tokens", 4)
+        seed_mode = args.get("seed_mode", "local_with_ith")
         seed = args.get("seed", 0)
         hard_route_backend = args.get("hard_route_backend", "sdpa")
-        hard_route_routing_backend = args.get("hard_route_routing_backend", "sdpa")
-        hard_route_routing_backend_policy = args.get("hard_route_routing_backend_policy", None)
-        hard_route_r3_layers_by_step = _normalize_layer_indices_by_step(
-            args.get("hard_route_r3_layer_indices_by_step", None)
-        )
 
-        num_layers = len(self.blocks)
-        for idx, block in enumerate(self.blocks):
+        for block in self.blocks:
             block.self_attn.enable_token_merging = enable
             block.self_attn.token_merging_f_tied = f_tied
             block.self_attn.token_merging_h_reduce = h_reduce
@@ -884,18 +802,6 @@ class WanModel(ModelMixin, ConfigMixin):
             block.self_attn.token_merging_seed_mode = seed_mode
             block.self_attn.token_merging_seed = seed
             block.self_attn.token_merging_hard_route_backend = hard_route_backend
-            block.self_attn.token_merging_hard_route_routing_backend = hard_route_routing_backend
-            block.self_attn.token_merging_hard_route_routing_backend_policy = hard_route_routing_backend_policy
-            block.self_attn.token_merging_hard_route_r3_layers_by_step = hard_route_r3_layers_by_step
-            block.self_attn.token_merging_layer_idx = idx
-            block.self_attn.token_merging_num_layers = num_layers
-            block.self_attn.token_merging_denoise_idx = 0
-            block.self_attn.token_merging_num_denoise_steps = 1
-
-    def set_token_merging_denoise_step(self, denoise_idx: int, num_denoise_steps: int):
-        for block in self.blocks:
-            block.self_attn.token_merging_denoise_idx = denoise_idx
-            block.self_attn.token_merging_num_denoise_steps = num_denoise_steps
 
     def _set_gradient_checkpointing(self, module, value=False):
         self.gradient_checkpointing = value

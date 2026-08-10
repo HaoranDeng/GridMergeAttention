@@ -45,9 +45,6 @@ mkdir -p "${OUTPUT_DIR}"
 cd "${REPO_DIR}"
 
 EXTRA_ARGS=()
-if [[ -n "${W_REDUCE:-}" ]]; then
-  EXTRA_ARGS+=(--token_merging_w_reduce "${W_REDUCE}")
-fi
 if [[ -n "${QUERY_OUTER_CHUNK:-}" ]]; then
   EXTRA_ARGS+=(--token_merging_query_outer_chunk "${QUERY_OUTER_CHUNK}")
 fi

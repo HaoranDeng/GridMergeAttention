@@ -34,8 +34,9 @@ Q:   current 2-frame block
 K/V: visible 6-frame prefix
 ```
 
-It calls the low-level `gridmerge_one` implementation and compares its output
-against the independent, slow PyTorch equations in `_support.py`.
+It calls the isolated low-level `causal_gridmerge_one` implementation and
+compares its output against the independent, slow PyTorch equations in
+`_support.py`.
 
 Why this matters:
 
@@ -56,6 +57,19 @@ dispatcher. It must produce the same result as the independent reference.
 The dispatcher now validates that K and V have equal lengths while allowing Q
 to contain fewer complete frames. This test guards that causal requirement
 against regression.
+
+### Upstream hard-C4 compatibility
+
+File: `test_wan_hard_c4_compatibility.py`
+
+The merged dispatcher has two deliberately separate branches: causal
+Self-Forcing C1 and upstream Wan C4. A random FP32 test compares the latter
+directly with `hard_route_attention_pytorch`, including frame-by-frame query
+chunking. A mocked test confirms the new fused Triton backend remains
+selectable without requiring a GPU. A final test requires Wan C2/C6 to fail
+explicitly because upstream removed those experimental paths. This proves the
+causal compatibility layer did not silently replace or narrow main's
+maintained hard-C4 implementation.
 
 ## 2. Cache-aware Token Merging
 
@@ -289,24 +303,22 @@ It also checks uint8 conversion and propagation of preset/CRF/quality to atomic
 video saving. This catches counter, offset, and output-name bugs that source
 inspection cannot detect.
 
-### `test_all_steps_update_policy_and_only_transitions_add_noise`
+### `test_all_steps_run_and_only_transitions_add_noise`
 
 File: `test_bidirectional_pipeline_schedule.py`
 
-Remote main added denoising-step-aware hard-route backend policies. Our branch
-requires every configured few-step model evaluation, including the final
-timestep. A lightweight fake generator verifies the combined behavior:
+The branch requires every configured few-step model evaluation, including the
+final timestep. Upstream's simplified hard-C4 implementation no longer has a
+denoising-step policy hook. A lightweight fake generator verifies:
 
 ```text
-model/policy calls: (0/4, t=1000), (1/4, t=750),
-                    (2/4, t=500),  (3/4, t=250)
+model calls:       t=1000, 750, 500, 250
 scheduler targets:  750, 500, 250
 ```
 
-Thus policy state is set immediately before all four model calls, while
-re-noising occurs only on the three transitions. It catches the merge variant
-that iterated over `timesteps[:-1]` and silently stopped before evaluating the
-last model timestep.
+Thus all four model calls run, while re-noising occurs only on the three
+transitions. It catches the merge variant that iterated over `timesteps[:-1]`
+and silently stopped before evaluating the last model timestep.
 
 ### `test_self_forcing_config_declares_all_causal_requirements`
 
@@ -648,18 +660,6 @@ particular, the C compressed video logits and exact text logits must receive
 the same scale and enter one shared softmax. A video-only hard-route test cannot
 detect a wrong video/text normalization boundary.
 
-### `test_multi_token_video_core_matches_wan_hard_route`
-
-This executes C2, C4, and C6 on random inputs while masking all text keys from
-the video-query result. It compares Hunyuan's approximate video output with the
-repository's established Wan `hard_route` implementation using identical
-geometry, seeds, Q/K/V, and scale.
-
-Why this matters: the Hunyuan implementation intentionally adapts the existing
-hard assignment, within-cluster merge, entropy correction, and deterministic
-seed selection. Agreement proves those mechanics were preserved before the
-Hunyuan-only exact text logits are added.
-
 ### Unsupported-layout and contract tests
 
 The remaining tests require explicit errors for select/transposed Wan layouts,
@@ -887,7 +887,7 @@ For Hunyuan, the currently passing fast/checkpoint-free evidence is:
 
 ```text
 shared video/text softmax and prompt-mask equation tests
-+ hard C2/C4/C6 assignment/merge parity with the Wan core
++ exact-partition hard C2/C4/C6 joint-attention coverage
 + installation in every dual- and single-stream main block
 + text-refiner exclusion
 + runtime-grid, generation-sharding, and hard-only launcher tests

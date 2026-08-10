@@ -221,9 +221,8 @@ The existing bidirectional path had been changed to evaluate the complete
 denoising list but still accessed `index + 1` unconditionally on the final
 iteration. It now re-noises only when another timestep exists. This keeps the
 old noncausal path usable and ensures the final denoising step is evaluated.
-Remote main's `set_token_merging_denoise_step` call is retained before every
-actual model evaluation, so its step-dependent hard-route policies see indices
-`0..N-1` and the correct total `N`.
+The 2026-08-09 upstream hard-C4 simplification removed denoising-step attention
+policies, so there is no longer a policy hook to update before those calls.
 
 ### `tests/` (new)
 
@@ -489,9 +488,7 @@ remaining-sample scan and balanced sharding
 ```
 
 For the ordinary bidirectional pipeline, every configured timestep is still a
-model evaluation. Before each evaluation, the remote policy hook receives the
-current zero-based step and the total number of evaluations. Re-noising occurs
-only between adjacent evaluations.
+model evaluation. Re-noising occurs only between adjacent evaluations.
 
 Four regression tests were added for the merge boundary:
 
@@ -499,8 +496,33 @@ Four regression tests were added for the merge boundary:
 - batching resumed work must preserve the exact missing sample indices;
 - a simulated partial run must batch and save exactly the missing outputs with
   the correct prompt/output ordering and fast-encoding arguments;
-- four configured ordinary-Wan steps must produce four policy/model calls and
-  only three scheduler transitions.
+- four configured ordinary-Wan steps must produce four model calls and only
+  three scheduler transitions.
+
+### 2026-08-09 reconciliation with the simplified `origin/main`
+
+The later upstream merge narrowed ordinary Wan attention to the maintained
+hard-C4 implementations (PyTorch, Triton, and experimental fused Triton) and removed
+the old generic common/GridMerge/select/transposed/shared modules and C2/C6
+Wan configurations. The reconciliation does not restore that removed
+experimental stack:
+
+```text
+ordinary bidirectional Wan -> upstream hard C4 PyTorch/Triton/fused Triton
+causal Self-Forcing        -> isolated one-token causal GridMerge + KV cache
+Hunyuan                    -> independent joint video/text hard C2/C4/C6
+```
+
+General grid/seed utilities needed by the latter two paths now live in the
+private `attention/_grid_utils.py`; the causal one-token primitive lives in
+`attention/causal_gridmerge.py`. `attention/token_merging.py` dispatches only
+upstream Wan C4 or causal C1. A compatibility test compares the C4 dispatcher
+directly with upstream's PyTorch reference, checks that the fused backend is
+still selected, and requires removed Wan C2/C6 paths to remain rejected.
+
+The obsolete Wan six-configuration launchers were removed because every
+configuration they referenced was deleted by upstream. The Hunyuan hard-only
+C2/C4/C6 launcher is independent and remains available.
 
 The complete fast suite after reconciliation passed:
 

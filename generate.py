@@ -11,11 +11,11 @@ from utils.misc import save_video, set_seed
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Generate videos with Wan2.1 + token-merging attention.")
-    parser.add_argument("--config", default="configs/token_merging_wan_fewstep.yaml")
+    parser = argparse.ArgumentParser(description="Generate videos with Wan2.1 + hard C4 GridMergeAttention.")
+    parser.add_argument("--config", default="configs/token_merging_wan_hard_c4_triton_fewstep.yaml")
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--prompt_path", default="prompts/MovieGenVideoBench_extended.txt")
-    parser.add_argument("--output_dir", default="videos/token_merging_wan")
+    parser.add_argument("--output_dir", default="videos/hard_c4_triton_wan")
     parser.add_argument("--num_videos", type=int, default=20)
     parser.add_argument("--num_samples", type=int, default=1)
     parser.add_argument(
@@ -71,7 +71,6 @@ def parse_args():
             "Repeated prompts are generated only once."
         ),
     )
-    parser.add_argument("--token_merging_w_reduce", type=int, default=None)
     parser.add_argument("--token_merging_query_outer_chunk", type=int, default=None)
     return parser.parse_args()
 
@@ -173,8 +172,6 @@ def main():
     dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float16
 
     config = OmegaConf.load(args.config)
-    if args.token_merging_w_reduce is not None:
-        config.token_merging_args.w_reduce = args.token_merging_w_reduce
     if args.token_merging_query_outer_chunk is not None:
         config.token_merging_args.query_outer_chunk = args.token_merging_query_outer_chunk
 

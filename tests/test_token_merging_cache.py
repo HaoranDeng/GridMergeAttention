@@ -11,8 +11,8 @@ import unittest
 
 import torch
 
-from attention.common import blocks_to_video, video_to_blocks
-from attention.gridmerge_one import gridmerge_one
+from attention._grid_utils import blocks_to_video, video_to_blocks
+from attention.causal_gridmerge import causal_gridmerge_one
 from attention.token_merging import token_merging_attn
 from tests._support import gridmerge_one_reference, require_symbol
 
@@ -57,7 +57,7 @@ class GridMergeUnequalLengthTests(unittest.TestCase):
             self.v, 1, 1, 1, self.height, self.width
         )
         actual = blocks_to_video(
-            gridmerge_one(
+            causal_gridmerge_one(
                 q_blocks,
                 k_blocks,
                 v_blocks,

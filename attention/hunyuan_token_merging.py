@@ -16,7 +16,7 @@ import torch
 import torch.nn.functional as F
 from einops import rearrange
 
-from .common import (
+from ._grid_utils import (
     blocks_to_video,
     crop_video_tokens_from_multiples,
     gather_seed_queries,
@@ -28,10 +28,36 @@ from .common import (
     validate_block_seed_mode,
     video_to_blocks,
 )
-from .hard_route import hard_route_merge_weights
 
 
 _LAYOUT_ALIASES = {"query_column_key_row": "hard_route"}
+
+
+def _hard_route_merge_weights(seed_logits, dtype):
+    """Hard-assign keys, preserving the established C2/C4/C6 empty-seed rule."""
+
+    num_seeds = seed_logits.size(-2)
+    num_keys = seed_logits.size(-1)
+    assignments = seed_logits.argmax(dim=-2)
+    assignment_mask = torch.nn.functional.one_hot(
+        assignments, num_classes=num_seeds
+    ).movedim(-1, -2).bool()
+
+    has_seed = assignment_mask.any(dim=-1)
+    key_index = torch.arange(num_keys, device=seed_logits.device)
+    key_index = key_index.view(*((1,) * has_seed.ndim), num_keys)
+    # Match the branch's pre-merge hard-route behavior: an empty cluster shares
+    # key zero so every requested compressed token remains numerically defined.
+    force_mask = (~has_seed).unsqueeze(-1) & (key_index == 0)
+    assignment_mask = assignment_mask | force_mask
+
+    masked_logits = seed_logits.masked_fill(
+        ~assignment_mask, torch.finfo(seed_logits.dtype).min
+    )
+    merge_logprob = torch.log_softmax(masked_logits, dim=-1)
+    merge_weights = merge_logprob.exp().masked_fill(~assignment_mask, 0).to(dtype)
+    merge_logprob = merge_logprob.masked_fill(~assignment_mask, 0)
+    return merge_weights, merge_logprob, assignment_mask.any(dim=-1)
 
 
 def _validate_stream(name, query, key, value):
@@ -224,7 +250,7 @@ def _hard_route_video_query_chunk_attention(
     ).float()
     seed_logits = seed_logits * float(scale)
     merge_weights, merge_logprob, compressed_valid = (
-        hard_route_merge_weights(seed_logits, video_key.dtype)
+        _hard_route_merge_weights(seed_logits, video_key.dtype)
     )
 
     merged_keys = torch.einsum(

@@ -7,11 +7,16 @@ from pathlib import Path
 import torch
 from omegaconf import OmegaConf
 
-from attention.common import blocks_to_video, video_to_blocks
-from attention.hard_route import (
-    _direct_route_merge,
-    _cached_seed_rows,
-    hard_route_direct_compressed_attention,
+from attention.hard_route_triton import (
+    HARD_C4_BACKEND,
+    merge_kv_direct_c4,
+    route_compressed_attention,
+)
+from attention.token_merging import blocks_to_video, video_to_blocks
+from analysis.hard_route_nonshared_backend_real_qkv import (
+    estimate_direct_intermediate_bytes,
+    exact_variants,
+    parse_variant_names,
 )
 from generate import load_generator_checkpoint, load_prompts
 from pipeline import TokenMergingWanPipeline
@@ -95,114 +100,122 @@ def load_pipeline(config_path, checkpoint, dtype, device, use_ema):
     return config, pipeline
 
 
-def make_seed_rows(q_chunk, k_blocks, query_outer_offset, args):
-    return _cached_seed_rows(
-        q_chunk.device,
-        query_outer_offset,
-        q_chunk.size(1),
-        k_blocks.size(1),
-        k_blocks.size(2),
-        q_chunk.size(3),
-        q_chunk.size(2),
-        args.num_merge_tokens,
-        args.seed,
-        True,
-        args.seed_mode == "fast_random_with_ith",
-    )
+def selected_variants(args):
+    if not args.variants:
+        return {
+            "profiled_backend": {
+                "hard_route_backend": args.hard_route_backend,
+            }
+        }
+
+    available = exact_variants()
+    names = parse_variant_names(args.variants)
+    missing = [name for name in names if name not in available]
+    if missing:
+        raise ValueError(f"unknown variants: {', '.join(missing)}")
+    return {name: available[name] for name in names}
 
 
 def install_probe(stats, args):
     import wan.modules.model as wan_model
 
-    state = {"calls_current_prompt": 0, "warmed": False}
+    variants = selected_variants(args)
+    for name, variant in variants.items():
+        if variant["hard_route_backend"] != HARD_C4_BACKEND:
+            raise ValueError(f"{name} must use hard_route_backend='hard_c4'.")
+    state = {
+        "calls_current_prompt": 0,
+        "warmed": False,
+        "dense_calls": 0,
+        "dense_seconds": 0.0,
+        "intermediate_estimates": {},
+    }
 
     def run_dense(q, k, v, self):
         return wan_model.flash_attention(q=q, k=k, v=v, window_size=self.window_size)
 
-    def run_split(q, k, v, grid_size, scale, record):
+    def run_split(q, k, v, grid_size, scale, variant_name, record):
+        variant_stats = stats[variant_name]
         _, height, width = grid_size
         if record:
-            q_blocks, seconds = timed(lambda: video_to_blocks(q, 1, 1, 1, height, width))
-            stats.add_time("video_to_q_blocks", seconds)
-            k_blocks, seconds = timed(lambda: video_to_blocks(k, 1, 1, 1, height, width))
-            stats.add_time("video_to_k_blocks", seconds)
-            v_blocks, seconds = timed(lambda: video_to_blocks(v, 1, 1, 1, height, width))
-            stats.add_time("video_to_v_blocks", seconds)
+            q_blocks, seconds = timed(lambda: video_to_blocks(q, height, width))
+            variant_stats.add_time("video_to_q_blocks", seconds)
+            k_blocks, seconds = timed(lambda: video_to_blocks(k, height, width))
+            variant_stats.add_time("video_to_k_blocks", seconds)
+            v_blocks, seconds = timed(lambda: video_to_blocks(v, height, width))
+            variant_stats.add_time("video_to_v_blocks", seconds)
         else:
-            q_blocks = video_to_blocks(q, 1, 1, 1, height, width)
-            k_blocks = video_to_blocks(k, 1, 1, 1, height, width)
-            v_blocks = video_to_blocks(v, 1, 1, 1, height, width)
+            q_blocks = video_to_blocks(q, height, width)
+            k_blocks = video_to_blocks(k, height, width)
+            v_blocks = video_to_blocks(v, height, width)
 
-        out_blocks = torch.empty_like(v_blocks)
+        k_merge_blocks = k_blocks
+        v_merge_blocks = v_blocks
+
+        out_blocks = torch.empty_like(q_blocks)
         for start in range(0, q_blocks.size(1), args.query_outer_chunk):
             end = min(start + args.query_outer_chunk, q_blocks.size(1))
             q_chunk = q_blocks[:, start:end]
             out_slice = out_blocks[:, start:end]
+            if record and not q_chunk.is_contiguous():
+                q_chunk, seconds = timed(q_chunk.contiguous)
+                variant_stats.add_time("q_chunk_contiguous", seconds)
+            else:
+                q_chunk = q_chunk.contiguous()
 
             if record:
-                seed_rows, seconds = timed(lambda: make_seed_rows(q_chunk, k_blocks, start, args))
-                stats.add_time("seed_rows", seconds)
                 merge_out, seconds = timed(
-                    lambda: _direct_route_merge(
+                    lambda: merge_kv_direct_c4(
                         q_chunk,
-                        seed_rows,
-                        k_blocks,
-                        v_blocks,
-                        args.hard_route_backend,
+                        k_merge_blocks,
+                        v_merge_blocks,
                         scale,
                     )
                 )
-                stats.add_time("direct_merge", seconds)
+                variant_stats.add_time("direct_merge", seconds)
             else:
-                seed_rows = make_seed_rows(q_chunk, k_blocks, start, args)
-                merge_out = _direct_route_merge(
+                merge_out = merge_kv_direct_c4(
                     q_chunk,
-                    seed_rows,
-                    k_blocks,
-                    v_blocks,
-                    args.hard_route_backend,
+                    k_merge_blocks,
+                    v_merge_blocks,
                     scale,
                 )
 
-            if merge_out is None:
-                raise RuntimeError("hard_route_backend must be a direct-route backend.")
-            merged_key, merged_value, routing_bias, _ = merge_out
+            merged_key, merged_value, routing_bias = merge_out
             output = out_slice if out_slice.is_contiguous() else None
 
             if record:
                 routed, seconds = timed(
-                    lambda: hard_route_direct_compressed_attention(
+                    lambda: route_compressed_attention(
                         q_chunk,
                         merged_key,
                         merged_value,
                         routing_bias,
-                        args.hard_route_routing_backend,
                         scale,
-                        output=output,
+                        out=output,
                     )
                 )
-                stats.add_time("direct_routing", seconds)
+                variant_stats.add_time("direct_routing", seconds)
                 if routed is not out_slice:
                     _, seconds = timed(lambda: out_slice.copy_(routed))
-                    stats.add_time("output_copy", seconds)
+                    variant_stats.add_time("output_copy", seconds)
             else:
-                routed = hard_route_direct_compressed_attention(
+                routed = route_compressed_attention(
                     q_chunk,
                     merged_key,
                     merged_value,
                     routing_bias,
-                    args.hard_route_routing_backend,
                     scale,
-                    output=output,
+                    out=output,
                 )
                 if routed is not out_slice:
                     out_slice.copy_(routed)
 
         if record:
-            out, seconds = timed(lambda: blocks_to_video(out_blocks, 1, 1, 1))
-            stats.add_time("blocks_to_video", seconds)
+            out, seconds = timed(lambda: blocks_to_video(out_blocks))
+            variant_stats.add_time("blocks_to_video", seconds)
             return out
-        return blocks_to_video(out_blocks, 1, 1, 1)
+        return blocks_to_video(out_blocks)
 
     def probed_self_attention(self, x, grid_size, rope_cache):
         batch, seq_len, heads, dim = *x.shape[:2], self.num_heads, self.head_dim
@@ -214,29 +227,40 @@ def install_probe(stats, args):
         )
         v = self.v(x).view(batch, seq_len, heads, dim)
         q, k = wan_model.apply_rope_video_tokens(q, k, rope_cache)
+        if not state["intermediate_estimates"]:
+            for name, variant in variants.items():
+                state["intermediate_estimates"][name] = estimate_direct_intermediate_bytes(
+                    q,
+                    grid_size,
+                    args.query_outer_chunk,
+                    variant,
+                )
 
         should_record = args.max_calls <= 0 or state["calls_current_prompt"] < args.max_calls
         state["calls_current_prompt"] += 1
 
         if should_record and not state["warmed"]:
             _ = run_dense(q, k, v, self)
-            _ = run_split(q, k, v, grid_size, dim**-0.5, record=False)
+            for name, variant in variants.items():
+                _ = run_split(q, k, v, grid_size, dim**-0.5, name, record=False)
             sync()
             state["warmed"] = True
 
         if should_record:
-            stats.attention_calls += 1
             dense, seconds = timed(lambda: run_dense(q, k, v, self))
-            stats.add_time("dense", seconds)
-            out = run_split(q, k, v, grid_size, dim**-0.5, record=True)
-            stats.add_error(out, dense)
+            state["dense_calls"] += 1
+            state["dense_seconds"] += float(seconds)
+            for name, variant in variants.items():
+                stats[name].attention_calls += 1
+                out = run_split(q, k, v, grid_size, dim**-0.5, name, record=True)
+                stats[name].add_error(out, dense)
             x = dense
         else:
             x = run_dense(q, k, v, self)
         return self.o(x.flatten(2))
 
     wan_model.WanSelfAttention.forward = probed_self_attention
-    return state
+    return state, variants
 
 
 @torch.inference_mode()
@@ -276,11 +300,16 @@ def parse_args():
     parser.add_argument("--dtype", choices=["bf16", "fp16"], default="bf16")
     parser.add_argument("--use_ema", action="store_true")
     parser.add_argument("--max_calls", type=int, default=20)
-    parser.add_argument("--query_outer_chunk", type=int, default=5)
-    parser.add_argument("--num_merge_tokens", type=int, default=4)
-    parser.add_argument("--seed_mode", default="fast_random_with_ith")
-    parser.add_argument("--hard_route_backend", required=True)
-    parser.add_argument("--hard_route_routing_backend", required=True)
+    parser.add_argument("--query_outer_chunk", type=int, default=10)
+    parser.add_argument(
+        "--variants",
+        default="",
+        help="Comma- or whitespace-separated exact variant names from hard_route_nonshared_backend_real_qkv.py.",
+    )
+    parser.add_argument(
+        "--hard_route_backend",
+        default="hard_c4",
+    )
     parser.add_argument("--output_json", required=True)
     return parser.parse_args()
 
@@ -301,8 +330,8 @@ def main():
     if len(prompts) != args.num_prompts:
         raise ValueError(f"Requested {args.num_prompts} prompts, found {len(prompts)}.")
 
-    stats = ComponentStats()
-    probe_state = install_probe(stats, args)
+    stats = defaultdict(ComponentStats)
+    probe_state, variants = install_probe(stats, args)
 
     sync()
     start = time.perf_counter()
@@ -312,6 +341,20 @@ def main():
         run_denoise_only(pipeline, config, prompt, args.seed + prompt_offset, dtype)
     sync()
 
+    variant_payload = {}
+    for name in sorted(variants):
+        variant_payload[name] = {
+            "config": {
+                key: value
+                for key, value in variants[name].items()
+                if key in {"hard_route_backend", "seed_mode"}
+            },
+            "summary": stats[name].summary(),
+        }
+        estimate = probe_state["intermediate_estimates"].get(name)
+        if estimate is not None:
+            variant_payload[name]["direct_intermediate_estimate"] = estimate
+
     payload = {
         "device": torch.cuda.get_device_name(0),
         "config": args.config,
@@ -320,10 +363,18 @@ def main():
         "num_prompts": args.num_prompts,
         "max_calls_per_prompt": args.max_calls,
         "query_outer_chunk": args.query_outer_chunk,
-        "hard_route_backend": args.hard_route_backend,
-        "hard_route_routing_backend": args.hard_route_routing_backend,
+        "variants_requested": args.variants,
+        "dense": {
+            "calls": probe_state["dense_calls"],
+            "seconds": probe_state["dense_seconds"],
+            "mean_ms": (
+                1000.0 * probe_state["dense_seconds"] / probe_state["dense_calls"]
+                if probe_state["dense_calls"]
+                else 0.0
+            ),
+        },
         "wall_seconds": time.perf_counter() - start,
-        "summary": stats.summary(),
+        "variants": variant_payload,
     }
     output_path = Path(args.output_json)
     output_path.parent.mkdir(parents=True, exist_ok=True)

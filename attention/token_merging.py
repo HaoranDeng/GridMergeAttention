@@ -1,73 +1,164 @@
+"""Maintained Wan hard-C4 attention plus causal one-token GridMerge."""
+
+from __future__ import annotations
+
 import torch
 
-from .common import (
-    blocks_to_video,
+from ._grid_utils import (
+    blocks_to_video as general_blocks_to_video,
     crop_video_tokens_from_multiples,
     pad_video_tokens_to_multiples,
-    video_to_blocks,
+    video_to_blocks as general_video_to_blocks,
 )
-from .gridmerge_one import gridmerge_one
-from .gridmerge_one_transpose import gridmerge_one_transpose
-from .hard_route import hard_route_attention
-from .hard_route_group_shared import hard_route_group_shared_attention
-from .hard_route_shared import hard_route_shared_attention
-from .hard_route_transpose import hard_route_attention_transpose
-from .select_route import select_route_attention
-from .select_route_transpose import select_route_attention_transpose
+from .causal_gridmerge import causal_gridmerge_one
+from .hard_route_pytorch import hard_route_attention_pytorch
+from .hard_route_triton import (
+    HARD_C4_BACKEND,
+    HARD_C4_FUSED_BACKEND,
+    hard_route_attention_triton,
+    hard_route_attention_triton_fused,
+)
 
 
 LAYOUT_HARD_ROUTE = "hard_route"
-LAYOUT_HARD_ROUTE_GROUP_SHARED = "hard_route_group_shared"
-LAYOUT_HARD_ROUTE_SHARED = "hard_route_shared"
-LAYOUT_SELECT_ROUTE = "select_route"
-LAYOUT_HARD_ROUTE_TRANSPOSE = "hard_route_transpose"
-LAYOUT_SELECT_ROUTE_TRANSPOSE = "select_route_transpose"
-
-LOCAL_LAYOUTS = {
-    LAYOUT_HARD_ROUTE,
-    LAYOUT_HARD_ROUTE_GROUP_SHARED,
-    LAYOUT_HARD_ROUTE_SHARED,
-    LAYOUT_SELECT_ROUTE,
-    LAYOUT_HARD_ROUTE_TRANSPOSE,
-    LAYOUT_SELECT_ROUTE_TRANSPOSE,
-}
-SUPPORTED_LAYOUTS = LOCAL_LAYOUTS
-DEFAULT_GRID_LAYOUTS = {LAYOUT_HARD_ROUTE, LAYOUT_SELECT_ROUTE}
-HARD_ROUTE_LAYOUTS = {
-    LAYOUT_HARD_ROUTE,
-    LAYOUT_HARD_ROUTE_GROUP_SHARED,
-    LAYOUT_HARD_ROUTE_SHARED,
-    LAYOUT_HARD_ROUTE_TRANSPOSE,
-}
-
-LAYOUT_ALIASES = {
-    # Backward-compatible names used by older configs.
-    "query_column_key_row": LAYOUT_HARD_ROUTE,
-    "query_column_key_row_select": LAYOUT_SELECT_ROUTE,
-    "query_row_key_column": LAYOUT_HARD_ROUTE_TRANSPOSE,
-    "query_row_key_column_select": LAYOUT_SELECT_ROUTE_TRANSPOSE,
-}
 
 
-def normalize_layout(layout):
-    layout = layout or LAYOUT_HARD_ROUTE
-    return LAYOUT_ALIASES.get(layout, layout)
+def _hard_c4_video_to_blocks(x, height, width):
+    batch, seq_len, heads, dim = x.shape
+    frames = seq_len // (height * width)
+    return x.reshape(batch, frames, height, width, heads, dim)
 
 
-def _local_attention_impl(layout, num_merge_tokens):
-    if num_merge_tokens > 1:
-        return {
-            LAYOUT_HARD_ROUTE: hard_route_attention,
-            LAYOUT_HARD_ROUTE_GROUP_SHARED: hard_route_group_shared_attention,
-            LAYOUT_HARD_ROUTE_SHARED: hard_route_shared_attention,
-            LAYOUT_SELECT_ROUTE: select_route_attention,
-            LAYOUT_HARD_ROUTE_TRANSPOSE: hard_route_attention_transpose,
-            LAYOUT_SELECT_ROUTE_TRANSPOSE: select_route_attention_transpose,
-        }[layout]
+def _hard_c4_blocks_to_video(x):
+    batch, frames, height, width, heads, dim = x.shape
+    return x.reshape(batch, frames * height * width, heads, dim)
 
-    if layout in DEFAULT_GRID_LAYOUTS:
-        return gridmerge_one
-    return gridmerge_one_transpose
+
+def _hard_c4_attention(
+    query,
+    key,
+    value,
+    *,
+    h,
+    w,
+    sm_scale,
+    query_outer_chunk,
+    hard_route_backend,
+):
+    """Execute main's maintained hard-C4 PyTorch/Triton paths."""
+
+    h = int(h)
+    w = int(w)
+    query_blocks = _hard_c4_video_to_blocks(query, h, w)
+    key_blocks = _hard_c4_video_to_blocks(key, h, w)
+    value_blocks = _hard_c4_video_to_blocks(value, h, w)
+    backend = (hard_route_backend or "sdpa").lower()
+
+    output = torch.empty_like(query_blocks)
+    for start in range(0, query_blocks.size(1), query_outer_chunk):
+        end = min(start + query_outer_chunk, query_blocks.size(1))
+        query_chunk = query_blocks[:, start:end]
+        output_slice = output[:, start:end]
+        if backend == HARD_C4_BACKEND:
+            chunk = hard_route_attention_triton(
+                query_chunk,
+                key_blocks,
+                value_blocks,
+                sm_scale,
+                output=output_slice,
+            )
+        elif backend == HARD_C4_FUSED_BACKEND:
+            chunk = hard_route_attention_triton_fused(
+                query_chunk,
+                key_blocks,
+                value_blocks,
+                sm_scale,
+                output=output_slice,
+            )
+        else:
+            chunk = hard_route_attention_pytorch(
+                query_chunk,
+                key_blocks,
+                value_blocks,
+                sm_scale,
+                query_outer_offset=start,
+            )
+        if chunk is not output_slice:
+            output_slice.copy_(chunk)
+    return _hard_c4_blocks_to_video(output)
+
+
+def _causal_one_token_attention(
+    query,
+    key,
+    value,
+    *,
+    f_tied,
+    h_reduce,
+    w_reduce,
+    h,
+    w,
+    sm_scale,
+    q_init,
+    query_outer_chunk,
+):
+    """Execute cache-compatible one-token GridMerge with unequal Q and K/V."""
+
+    if key.size(1) != value.size(1):
+        raise ValueError("causal one-token GridMerge expects K/V lengths to match.")
+    if query.size(0) != key.size(0) or query.shape[2:] != key.shape[2:]:
+        raise ValueError(
+            "causal one-token GridMerge expects Q and K/V batch, head, and "
+            "head-dimension shapes to match."
+        )
+
+    f_tied = int(f_tied)
+    h_reduce = int(h_reduce)
+    w_reduce = int(w_reduce)
+    original_h = int(h)
+    original_w = int(w)
+    query, padded_h, padded_w, _ = pad_video_tokens_to_multiples(
+        query, original_h, original_w, h_reduce, w_reduce
+    )
+    key, _, _, key_valid = pad_video_tokens_to_multiples(
+        key, original_h, original_w, h_reduce, w_reduce
+    )
+    value, _, _, _ = pad_video_tokens_to_multiples(
+        value, original_h, original_w, h_reduce, w_reduce
+    )
+
+    query_blocks = general_video_to_blocks(
+        query, f_tied, h_reduce, w_reduce, padded_h, padded_w
+    )
+    key_blocks = general_video_to_blocks(
+        key, f_tied, h_reduce, w_reduce, padded_h, padded_w
+    )
+    value_blocks = general_video_to_blocks(
+        value, f_tied, h_reduce, w_reduce, padded_h, padded_w
+    )
+    key_valid_blocks = None
+    if key_valid is not None:
+        key_valid_blocks = general_video_to_blocks(
+            key_valid, f_tied, h_reduce, w_reduce, padded_h, padded_w
+        )[..., 0, 0]
+
+    output_blocks = torch.empty_like(query_blocks)
+    for start in range(0, query_blocks.size(1), query_outer_chunk):
+        end = min(start + query_outer_chunk, query_blocks.size(1))
+        output_blocks[:, start:end] = causal_gridmerge_one(
+            query_blocks[:, start:end],
+            key_blocks,
+            value_blocks,
+            sm_scale,
+            q_init,
+            key_valid=key_valid_blocks,
+        )
+    output = general_blocks_to_video(
+        output_blocks, f_tied, h_reduce, w_reduce
+    )
+    return crop_video_tokens_from_multiples(
+        output, original_h, original_w, padded_h, padded_w
+    )
 
 
 def token_merging_attn(
@@ -83,144 +174,56 @@ def token_merging_attn(
     q_init=None,
     query_outer_chunk=None,
     layout=LAYOUT_HARD_ROUTE,
-    num_merge_tokens=1,
-    seed_mode="random",
+    num_merge_tokens=4,
+    seed_mode="local_with_ith",
     seed=0,
     hard_route_backend="sdpa",
-    hard_route_routing_backend="sdpa",
+    hard_route_routing_backend=None,
 ):
-    """Grid-based token-merging attention for Wan video self-attention."""
-    # Incoming q/k/v from Wan self-attention:
-    #   q/k/v: [batch, sequence, head, dim]
-    # Default 480p/81-frame Wan:
-    #   sequence = frame * height * width = 21 * 30 * 52 = 32760.
-    # After video_to_blocks:
-    #   q/k/v: [batch, 21, 30, 52, head, dim]
-    if k.size(1) != v.size(1):
-        raise ValueError("token-merging attention expects k/v lengths to match.")
-    if q.size(0) != k.size(0) or q.shape[2:] != k.shape[2:]:
-        raise ValueError(
-            "token-merging attention expects q and k/v batch, head, and "
-            "head-dimension shapes to match."
-        )
+    """Dispatch the ordinary-Wan C4 and causal Self-Forcing C1 paths.
 
+    Ordinary Wan supports main's PyTorch, Triton, and fused Triton hard-C4
+    backends. Causal Self-Forcing uses one-token GridMerge because its
+    current-block Q is shorter than its visible cached K/V prefix.
+    """
+
+    del seed_mode, seed, hard_route_routing_backend
+    if (layout or LAYOUT_HARD_ROUTE) != LAYOUT_HARD_ROUTE:
+        raise ValueError("the merged Wan implementation supports only hard_route.")
     if sm_scale is None:
         sm_scale = q.size(-1) ** -0.5
     query_outer_chunk = max(1, int(query_outer_chunk or 1))
-    layout = normalize_layout(layout)
-    if layout not in SUPPORTED_LAYOUTS:
-        raise ValueError(
-            "layout must be 'hard_route', 'hard_route_group_shared', "
-            "'hard_route_shared', 'select_route', 'hard_route_transpose', "
-            "or 'select_route_transpose', "
-            f"got {layout!r}."
-        )
-
     num_merge_tokens = int(num_merge_tokens)
-    if num_merge_tokens < 1:
-        raise ValueError(f"num_merge_tokens must be >= 1, got {num_merge_tokens!r}.")
-    if num_merge_tokens > 1 and layout not in LOCAL_LAYOUTS:
+
+    if num_merge_tokens == 1:
+        return _causal_one_token_attention(
+            q,
+            k,
+            v,
+            f_tied=f_tied,
+            h_reduce=h_reduce,
+            w_reduce=w_reduce,
+            h=h,
+            w=w,
+            sm_scale=float(sm_scale),
+            q_init=q_init,
+            query_outer_chunk=query_outer_chunk,
+        )
+    if num_merge_tokens != 4:
         raise ValueError(
-            "multi-token merging is currently implemented only for grid layouts."
+            "Wan supports num_merge_tokens=4 for hard C4 or "
+            "num_merge_tokens=1 for causal Self-Forcing."
         )
-    if layout == LAYOUT_HARD_ROUTE_SHARED and num_merge_tokens == 1:
-        raise ValueError("layout='hard_route_shared' requires num_merge_tokens > 1.")
-    if layout == LAYOUT_HARD_ROUTE_GROUP_SHARED and num_merge_tokens == 1:
-        raise ValueError("layout='hard_route_group_shared' requires num_merge_tokens > 1.")
-
-    original_h = int(h)
-    original_w = int(w)
-    needs_padding = bool(original_h % h_reduce or original_w % w_reduce)
-    if needs_padding and num_merge_tokens > 1:
-        raise ValueError(
-            "non-divisible height/width padding currently supports only "
-            "one-token MonarchRT attention."
-        )
-
-    q, h, w, valid_tokens = pad_video_tokens_to_multiples(q, h, w, h_reduce, w_reduce)
-    k, _, _, _ = pad_video_tokens_to_multiples(k, original_h, original_w, h_reduce, w_reduce)
-    v, _, _, _ = pad_video_tokens_to_multiples(v, original_h, original_w, h_reduce, w_reduce)
-
-    q_blocks = video_to_blocks(q, f_tied, h_reduce, w_reduce, h, w)
-    k_blocks = video_to_blocks(k, f_tied, h_reduce, w_reduce, h, w)
-    v_blocks = video_to_blocks(v, f_tied, h_reduce, w_reduce, h, w)
-    key_valid_blocks = None
-    if valid_tokens is not None:
-        key_valid_blocks = video_to_blocks(valid_tokens, f_tied, h_reduce, w_reduce, h, w)
-        key_valid_blocks = key_valid_blocks[..., 0, 0]
-    attention_impl = _local_attention_impl(layout, num_merge_tokens)
-
-    if layout == LAYOUT_HARD_ROUTE_SHARED:
-        out = attention_impl(
-            q_blocks,
-            k_blocks,
-            v_blocks,
-            sm_scale,
-            num_merge_tokens,
-            seed_mode,
-            seed,
-            0,
-            hard_route_backend,
-            hard_route_routing_backend,
-        )
-        return blocks_to_video(out, f_tied, h_reduce, w_reduce)
-
-    if layout == LAYOUT_HARD_ROUTE_GROUP_SHARED:
-        out = attention_impl(
-            q_blocks,
-            k_blocks,
-            v_blocks,
-            sm_scale,
-            num_merge_tokens,
-            seed_mode,
-            seed,
-            0,
-            query_outer_chunk,
-            hard_route_backend,
-            hard_route_routing_backend,
-        )
-        return blocks_to_video(out, f_tied, h_reduce, w_reduce)
-
-    # The output follows the query sequence, not the visible K/V prefix.  The
-    # two lengths are equal for ordinary Wan attention, but causal
-    # Self-Forcing supplies only the current block as Q and the complete
-    # committed prefix as K/V.
-    out = torch.empty_like(q_blocks)
-    for start in range(0, q_blocks.size(1), query_outer_chunk):
-        end = min(start + query_outer_chunk, q_blocks.size(1))
-        if num_merge_tokens > 1:
-            args = [
-                q_blocks[:, start:end],
-                k_blocks,
-                v_blocks,
-                sm_scale,
-                num_merge_tokens,
-                seed_mode,
-                seed,
-                start,
-            ]
-            if layout in HARD_ROUTE_LAYOUTS:
-                args.append(hard_route_backend)
-                args.append(hard_route_routing_backend)
-            out_slice = out[:, start:end]
-            if layout == LAYOUT_HARD_ROUTE and str(hard_route_routing_backend).startswith("triton_direct_"):
-                chunk = attention_impl(*args, output=out_slice)
-                if chunk is not out_slice:
-                    out_slice.copy_(chunk)
-            else:
-                out_slice.copy_(attention_impl(*args))
-        else:
-            out[:, start:end] = attention_impl(
-                q_blocks[:, start:end],
-                k_blocks,
-                v_blocks,
-                sm_scale,
-                q_init,
-                key_valid=key_valid_blocks,
-            )
-
-    out = blocks_to_video(out, f_tied, h_reduce, w_reduce)
-    return crop_video_tokens_from_multiples(out, original_h, original_w, h, w)
+    return _hard_c4_attention(
+        q,
+        k,
+        v,
+        h=h,
+        w=w,
+        sm_scale=float(sm_scale),
+        query_outer_chunk=query_outer_chunk,
+        hard_route_backend=hard_route_backend,
+    )
 
 
 def token_merging_attn_with_kv_cache(
@@ -246,24 +249,14 @@ def token_merging_attn_with_kv_cache(
     hard_route_backend="sdpa",
     hard_route_routing_backend="sdpa",
 ):
-    """Run one-token GridMerge from current Q over a visible cached K/V prefix.
+    """Overwrite the current cache block and attend only to its visible prefix."""
 
-    The cache stores unmerged, RoPE-applied keys and their corresponding values
-    in ordinary video-token order. ``new_k``/``new_v`` overwrite the current
-    temporal block, while entries after ``end_idx`` remain invisible. Repeated
-    denoising calls at the same ``current_start_frame`` therefore overwrite the
-    same cache slots instead of extending the prefix.
-
-    Only the default one-token, non-transposed GridMerge layout is enabled for
-    causal caching initially. The other experimental layouts need independent
-    unequal-Q/KV validation before they can be claimed as Self-Forcing-safe.
-    """
-
-    layout = normalize_layout(layout)
-    if layout != LAYOUT_HARD_ROUTE or int(num_merge_tokens) != 1:
+    if (layout or LAYOUT_HARD_ROUTE) != LAYOUT_HARD_ROUTE or int(
+        num_merge_tokens
+    ) != 1:
         raise ValueError(
-            "causal cached token merging currently supports only "
-            "layout='hard_route' with num_merge_tokens=1 (gridmerge_one)."
+            "causal cached token merging supports only layout='hard_route' "
+            "with num_merge_tokens=1."
         )
     if k_cache.shape != v_cache.shape:
         raise ValueError("k_cache and v_cache must have identical shapes.")
@@ -271,11 +264,11 @@ def token_merging_attn_with_kv_cache(
         raise ValueError("new_k and new_v must have identical shapes.")
     if q.size(0) != k_cache.size(0) or q.shape[2:] != k_cache.shape[2:]:
         raise ValueError(
-            "q and cached k/v batch, head, and head-dimension shapes must match."
+            "Q and cached K/V batch, head, and head-dimension shapes must match."
         )
     if new_k.size(0) != k_cache.size(0) or new_k.shape[2:] != k_cache.shape[2:]:
         raise ValueError(
-            "new k/v and cached k/v batch, head, and head-dimension shapes must match."
+            "new and cached K/V batch, head, and head-dimension shapes must match."
         )
 
     start_idx = int(start_idx)
@@ -292,7 +285,6 @@ def token_merging_attn_with_kv_cache(
 
     k_cache[:, start_idx:end_idx].copy_(new_k)
     v_cache[:, start_idx:end_idx].copy_(new_v)
-
     return token_merging_attn(
         q,
         k_cache[:, :end_idx],
@@ -315,13 +307,7 @@ def token_merging_attn_with_kv_cache(
 
 
 __all__ = [
+    "LAYOUT_HARD_ROUTE",
     "token_merging_attn",
     "token_merging_attn_with_kv_cache",
-    "normalize_layout",
-    "LAYOUT_HARD_ROUTE",
-    "LAYOUT_HARD_ROUTE_GROUP_SHARED",
-    "LAYOUT_HARD_ROUTE_SHARED",
-    "LAYOUT_SELECT_ROUTE",
-    "LAYOUT_HARD_ROUTE_TRANSPOSE",
-    "LAYOUT_SELECT_ROUTE_TRANSPOSE",
 ]

@@ -43,6 +43,9 @@ The individual test files document the behavior they require:
 
 - `test_token_merging_cache.py` checks the GridMerge equations, cache writes,
   unequal temporal lengths, and exclusion of unused future cache entries.
+- `test_wan_hard_c4_compatibility.py` checks that the merged dispatcher still
+  exactly matches main's maintained PyTorch hard-C4 path, preserves its new
+  fused-backend dispatch, and rejects the Wan C2/C6 paths removed upstream.
 - `test_causal_model_contract.py` checks checkpoint-compatible state-dict
   schemas, propagation of Token-Merging configuration, causal model selection,
   and preservation of per-frame timesteps.
@@ -52,8 +55,8 @@ The individual test files document the behavior they require:
   denoising steps, three re-noising transitions, the clean-context commit, cache
   passing, and cache reallocation when the sample batch size changes.
 - `test_bidirectional_pipeline_schedule.py` checks that the ordinary-Wan path
-  updates remote main's hard-route policy state for every denoising evaluation
-  without dropping the final configured model step.
+  evaluates every configured denoising step without re-noising after the final
+  model call.
 - `test_generation_routing.py` checks that `generate.py` both defines and
   actually uses causal routing, preserves resumed sample indices while prompt
   chunks are batched, contains every causal setting, and uses a safe default
@@ -69,8 +72,8 @@ The individual test files document the behavior they require:
   Hunyuan run with our installed Hunyuan processor using a test-only exact
   dense attention core.
 - `test_hunyuan_token_merging.py` checks the approximate joint video/text
-  equations, mask behavior, exact hard C2/C4/C6 partitions, and agreement with
-  the existing Wan hard-routing core directly on CPU.
+  equations, mask behavior, and exact hard C2/C4/C6 partitions directly on
+  CPU. Hunyuan remains independent of main's Wan-only hard-C4 backend.
 - `test_hunyuan_pipeline_integration.py` checks runtime grid derivation and
   processor installation in both Hunyuan main block families.
 - `test_hunyuan_generation_routing.py` checks CLI geometry propagation,

@@ -27,8 +27,8 @@ conda activate "${CONDA_ENV}"
 REPO_DIR="${REPO_DIR:-/home1/denghaoran/workspace/training-free-videogen}"
 export WAN_MODEL_ROOT="${WAN_MODEL_ROOT:-${REPO_DIR}/wan_models}"
 CHECKPOINT="${CHECKPOINT:-${REPO_DIR}/checkpoints/self_forcing_dmd.pt}"
-CONFIG="${CONFIG:-configs/token_merging_wan_fewstep.yaml}"
-OUTPUT_DIR="${OUTPUT_DIR:-videos/token_merging_wan}"
+CONFIG="${CONFIG:-configs/token_merging_wan_hard_c4_triton_fewstep.yaml}"
+OUTPUT_DIR="${OUTPUT_DIR:-videos/hard_c4_triton_wan}"
 
 cd "${REPO_DIR}"
 mkdir -p out "${OUTPUT_DIR}"
@@ -42,9 +42,6 @@ mkdir -p "${MIOPEN_USER_DB_PATH}" "${MIOPEN_CUSTOM_CACHE_DIR}"
 export PYTHONPATH="${PWD}:${PYTHONPATH:-}"
 
 EXTRA_ARGS=()
-if [ -n "${W_REDUCE:-}" ]; then
-  EXTRA_ARGS+=(--token_merging_w_reduce "${W_REDUCE}")
-fi
 if [ -n "${QUERY_OUTER_CHUNK:-}" ]; then
   EXTRA_ARGS+=(--token_merging_query_outer_chunk "${QUERY_OUTER_CHUNK}")
 fi
