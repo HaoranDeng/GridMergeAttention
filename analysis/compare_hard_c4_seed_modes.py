@@ -112,11 +112,50 @@ def random_seed_rows(query_outer, key_outer, key_rows, query_columns, query_rows
     return scores.topk(4, dim=-1).indices.long()
 
 
+def nearest_seed_rows(query_outer, key_outer, key_rows, query_columns, query_rows, prefer):
+    key_row = torch.arange(key_rows, device=query_outer.device).view(1, 1, key_rows, 1, 1)
+    row = torch.arange(query_rows, device=query_outer.device).view(1, 1, 1, 1, query_rows)
+    relative = row - key_row
+    if prefer == "right":
+        tie = torch.where(relative == 0, 0, torch.where(relative > 0, 1, 2))
+    else:
+        tie = torch.where(relative == 0, 0, torch.where(relative < 0, 1, 2))
+    score = relative.abs() * 10 + tie
+    seed_rows = score.topk(4, dim=-1, largest=False).indices.long()
+    return seed_rows.expand(query_outer.numel(), key_outer.numel(), key_rows, query_columns, 4)
+
+
+def alternating_nearest_seed_rows(query_outer, key_outer, key_rows, query_columns, query_rows):
+    left = nearest_seed_rows(query_outer, key_outer, key_rows, query_columns, query_rows, prefer="left")
+    right = nearest_seed_rows(query_outer, key_outer, key_rows, query_columns, query_rows, prefer="right")
+    key_row = torch.arange(key_rows, device=query_outer.device).view(1, 1, key_rows, 1, 1)
+    return torch.where(key_row.remainder(2) == 0, left, right)
+
+
+def ring_offset_seed_rows(query_outer, key_outer, key_rows, query_columns, query_rows, offsets):
+    key_row = torch.arange(key_rows, device=query_outer.device).view(1, 1, key_rows, 1)
+    rows = [torch.remainder(key_row + int(offset), query_rows) for offset in offsets]
+    seed_rows = torch.stack(rows, dim=-1).long()
+    return seed_rows.expand(query_outer.numel(), key_outer.numel(), key_rows, query_columns, 4)
+
+
 def seed_rows_for_mode(mode, device, query_outer_offset, query_outer_count, key_outer_count, key_rows, query_columns, query_rows, seed):
     query_outer = torch.arange(query_outer_offset, query_outer_offset + query_outer_count, device=device)
     key_outer = torch.arange(key_outer_count, device=device)
     if mode == "local_with_ith":
         return local_c4_seed_rows(query_outer, key_outer, key_rows, query_columns, query_rows)
+    if mode == "nearest_right_with_ith":
+        return nearest_seed_rows(query_outer, key_outer, key_rows, query_columns, query_rows, prefer="right")
+    if mode == "nearest_alternating_with_ith":
+        return alternating_nearest_seed_rows(query_outer, key_outer, key_rows, query_columns, query_rows)
+    if mode == "ring_stride5_with_ith":
+        return ring_offset_seed_rows(query_outer, key_outer, key_rows, query_columns, query_rows, (0, 5, 10, 15))
+    if mode == "ring_stride7_with_ith":
+        return ring_offset_seed_rows(query_outer, key_outer, key_rows, query_columns, query_rows, (0, 7, 14, 21))
+    if mode == "ring_quarter_with_ith":
+        return ring_offset_seed_rows(query_outer, key_outer, key_rows, query_columns, query_rows, (0, 8, 15, 22))
+    if mode == "ring_symmetric7_with_ith":
+        return ring_offset_seed_rows(query_outer, key_outer, key_rows, query_columns, query_rows, (0, -7, 7, 14))
     if mode == "random_with_ith":
         return random_seed_rows(
             query_outer,
