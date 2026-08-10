@@ -10,10 +10,10 @@ KV prefix, commit clean context, and call Token Merging from causal
 self-attention. The tests verify these requirements separately and then verify
 their integration with the real checkpoint.
 
-Section 11 adds a second, pre-implementation specification for HunyuanVideo:
-with the approximate Token-Merging core controlled to exact dense SDPA, our
-future Hunyuan processor and pipeline integration must reproduce untouched
-Diffusers Hunyuan latent output from the same real checkpoint.
+Sections 11-15 cover HunyuanVideo. They separately validate the real-checkpoint
+pipeline boundary, the joint video/text Token-Merging equations, processor
+installation, CLI routing, and a checkpoint-free whole-transformer comparison
+against untouched Diffusers.
 
 Before the causal implementation was added, the fast suite was intentionally
 red and each failure identified a missing contract. The implemented suite now
@@ -598,9 +598,143 @@ Hunyuan joint Token-Merging equations and then run the real checkpoint with the
 actual approximate core enabled for dispatch, memory, generation, and video
 quality evidence.
 
-The test is opt-in until the production Hunyuan modules exist. This allows it
-to serve as an executable specification written before implementation without
-breaking the existing Wan/Self-Forcing suite.
+The test remains opt-in because it loads the full checkpoint twice and requires
+an exclusive high-memory GPU. It served as an executable specification before
+implementation and now serves as a regression test for the production public
+contracts.
+
+## 12. Hunyuan joint Token-Merging equations
+
+File: `test_hunyuan_token_merging.py`
+
+These are small FP32 CPU tests of `hunyuan_token_merging_attn`. They exercise
+the approximation itself rather than replacing it with dense SDPA.
+
+### `test_one_key_groups_match_dense_joint_attention`
+
+The reduction factors are selected so every video merge group contains exactly
+one key. In this limiting case no approximation remains, so both returned
+streams must match an independently constructed dense attention over:
+
+```text
+[all video keys | all valid text keys]
+```
+
+The batch contains different amounts of prompt padding. Exact video output
+proves that compressed-video logits and exact-text logits use one shared
+softmax. If the implementation normalized the two key sets separately and
+added their values, this test would fail even though each partial attention
+looked plausible. Exact text output proves that text queries retain ordinary
+joint Hunyuan semantics.
+
+### `test_masked_text_keys_cannot_affect_either_output_stream`
+
+The test changes only padded text K/V entries to values with magnitude one
+million. Neither video-query nor text-query output may change by one bit.
+
+Why this matters: Hunyuan constructs a joint key mask after its text refiner.
+Losing or shifting that mask when splitting the sequence would let padding
+affect every later transformer block.
+
+### Unsupported-layout and contract tests
+
+The remaining tests require explicit errors for transposed/multi-token Wan
+layouts, malformed video geometry, and non-boolean masks. A clear early error
+is safer than silently treating text tokens as part of a video grid or treating
+an additive attention bias as a boolean validity mask.
+
+## 13. Hunyuan processor installation and runtime grid
+
+File: `test_hunyuan_pipeline_integration.py`
+
+This test uses tiny structural stand-ins, not a neural model, to isolate the
+installer's responsibilities.
+
+### Runtime grid derivation
+
+It proves that a 480x720, 129-frame request becomes a `33 x 30 x 45` post-VAE,
+post-patch video-token grid:
+
+```text
+latent frames = 1 + (129 - 1) / 4 = 33
+grid height   = 480 / VAE factor 8 / patch 2 = 30
+grid width    = 720 / VAE factor 8 / patch 2 = 45
+```
+
+This protects against hard-coded token counts copied from Wan or from one
+Hunyuan resolution.
+
+### Processor coverage
+
+The installer must replace attention in both `transformer_blocks` (dual
+stream) and `single_transformer_blocks` (single stream), preserve per-family
+layer indices, and record diagnostic metadata. A sentinel attention inside the
+text refiner must remain unchanged because it has no video grid.
+
+Invalid pixel geometry and unknown configuration keys must fail during setup,
+before model denoising consumes substantial time or GPU memory.
+
+## 14. Tiny Diffusers Hunyuan whole-transformer parity
+
+File: `test_hunyuan_diffusers_tiny_parity.py`
+
+This opt-in test constructs two byte-identical small
+`HunyuanVideoTransformer3DModel` instances from Diffusers 0.34.0. The reference
+keeps upstream attention processors. The current model installs the production
+processor and production Token-Merging core with one video key per group, so
+the core is mathematically exact without any monkeypatch.
+
+Both models execute:
+
+- a real Hunyuan text refiner;
+- two real dual-stream blocks;
+- two real single-stream blocks;
+- QK RMS normalization and video-only RoPE;
+- prompt padding and the joint attention mask;
+- timestep, pooled-text, and guidance conditioning;
+- the final transformer projection.
+
+The final predicted latent tensor must match tightly. This bridges the gap
+between isolated equation tests and the expensive real-checkpoint pipeline
+test: it catches projection, stream-boundary, RoPE, output-projection, and
+block-installation errors using actual Diffusers code, but needs neither model
+downloads nor a GPU.
+
+Run it in the existing Hunyuan-capable environment:
+
+```bash
+RUN_HUNYUAN_TINY_PARITY=1 \
+PYTHONPATH=/xuanwu-tank/east/zrl/training-free-videogen \
+/home/zrlu/miniforge3/envs/SVG/bin/python -m unittest \
+  tests.test_hunyuan_diffusers_tiny_parity -v
+```
+
+## 15. Hunyuan generation entry-point routing
+
+File: `test_hunyuan_generation_routing.py`
+
+This CPU-only test invokes `generate_hunyuan.main()` with a temporary YAML
+configuration, two prompts, two requested samples per prompt, and a fake
+pipeline. One output is pre-created to simulate a resumed run.
+
+It verifies that:
+
+- pixel/frame geometry is copied into `token_merging_args` before processor
+  installation;
+- a command-line reduction override reaches the loader;
+- the configured model/offload options are preserved;
+- only the three missing samples are generated;
+- their seeds remain tied to original `(prompt, sample)` indices rather than
+  being renumbered after resume;
+- the Diffusers call requests NumPy frames with the configured generation
+  arguments;
+- videos are written through partial files and atomically renamed, leaving no
+  partial artifact behind;
+- the already completed video is never overwritten.
+
+This does not test neural generation. It protects the operational code around
+the model so a correct attention implementation is not undermined by wrong
+geometry, non-reproducible resume behavior, or incomplete output files.
 
 ## Supporting files
 
@@ -658,7 +792,17 @@ Passing these tests supports the correctness claim. Video quality, latency, and
 memory improvement remain separate empirical questions and should be evaluated
 with VBench and runtime/memory profiling.
 
-For Hunyuan, the analogous evidence will be:
+For Hunyuan, the currently passing fast/checkpoint-free evidence is:
+
+```text
+shared video/text softmax and prompt-mask equation tests
++ installation in every dual- and single-stream main block
++ text-refiner exclusion
++ runtime-grid and generation-routing tests
++ whole-transformer parity against tiny untouched Diffusers Hunyuan
+```
+
+The remaining real-checkpoint evidence is:
 
 ```text
 real checkpoint loaded in both subprocesses
@@ -668,6 +812,7 @@ real checkpoint loaded in both subprocesses
 + per-step and final latent parity with untouched Diffusers
 ```
 
-That establishes the non-approximate baseline. Hunyuan Token-Merging equation
-tests and a real run with the approximate core enabled will still be required
-before claiming acceleration correctness or quality.
+That final differential test will establish the full-checkpoint non-approximate
+pipeline baseline. A real run with the approximate core enabled, followed by
+memory/runtime and video-quality measurement, is still required before
+claiming practical acceleration or preserved quality.

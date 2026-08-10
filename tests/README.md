@@ -8,8 +8,9 @@ These tests are designed to prove three separate properties:
 1. generation follows Self-Forcing's causal, block-wise, KV-cached inference;
 2. the causal self-attention calls GridMerge with current-block Q and a growing
    visible K/V prefix;
-3. before approximate attention is enabled, the Hunyuan processor/pipeline
-   integration can reproduce untouched Diffusers Hunyuan latent output.
+3. Hunyuan's joint video/text Token-Merging equations preserve masks and one
+   shared normalization, and the processor/pipeline integration can reproduce
+   untouched Diffusers Hunyuan when the attention core is exact.
 
 They use Python's built-in `unittest` because the `etm` environment currently
 does not include `pytest`.
@@ -63,9 +64,18 @@ The individual test files document the behavior they require:
 - `test_self_forcing_reference_parity.py` is the opt-in dense causal
   differential test against MonarchRT.
 - `test_hunyuan_pipeline_reference_parity.py` is the opt-in differential
-  specification for the Hunyuan pipeline. It compares an untouched Diffusers
+  test for the Hunyuan pipeline. It compares an untouched Diffusers
   Hunyuan run with our installed Hunyuan processor using a test-only exact
   dense attention core.
+- `test_hunyuan_token_merging.py` checks the approximate joint video/text
+  equations and mask behavior directly on CPU.
+- `test_hunyuan_pipeline_integration.py` checks runtime grid derivation and
+  processor installation in both Hunyuan main block families.
+- `test_hunyuan_generation_routing.py` checks CLI geometry propagation,
+  deterministic samples, resume behavior, and atomic output routing with a
+  fake pipeline.
+- `test_hunyuan_diffusers_tiny_parity.py` is the opt-in, checkpoint-free parity
+  test against a tiny real Diffusers 0.34 Hunyuan transformer.
 
 ## Real-checkpoint GPU test
 
@@ -174,8 +184,9 @@ at a time:
 
 ## Hunyuan pipeline parity with Diffusers
 
-This test was added before the Hunyuan production implementation. It defines
-the interface and numerical baseline that implementation must satisfy:
+This test was added before the Hunyuan production implementation. The finished
+implementation now satisfies its public interface and uses it as a numerical
+regression baseline:
 
 ```text
 pipeline.token_merging_hunyuan.install_hunyuan_token_merging_attention
@@ -200,7 +211,16 @@ PyTorch and Diffusers 0.34.0 with `HunyuanVideoPipeline`. The test does not
 import the Sparse-VideoGen repository or any `svg.*` module. `etm` remains the
 test orchestrator, but its Diffusers 0.31.0 cannot execute HunyuanVideo.
 
-After the Hunyuan implementation has been added, run:
+First run the checkpoint-free whole-transformer parity test on CPU:
+
+```bash
+RUN_HUNYUAN_TINY_PARITY=1 \
+PYTHONPATH=/xuanwu-tank/east/zrl/training-free-videogen \
+/home/zrlu/miniforge3/envs/SVG/bin/python \
+-m unittest tests.test_hunyuan_diffusers_tiny_parity -v
+```
+
+Then, on a GPU with the real model available, run:
 
 ```bash
 CUDA_VISIBLE_DEVICES=3 \
@@ -220,6 +240,5 @@ test to `/xuanwu-tank/east/zrl/huggingface_cache`. The test deliberately does
 not initiate a multi-gigabyte model download unless a remote ID is explicitly
 provided.
 
-Before the production modules exist, enabling the test intentionally reports
-the missing implementation contract. With the environment flag omitted, it is
-skipped during normal test discovery.
+With their environment flags omitted, both Hunyuan parity tests are skipped
+during normal test discovery.

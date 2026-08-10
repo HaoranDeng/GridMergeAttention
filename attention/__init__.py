@@ -16,6 +16,7 @@ from .hard_route_triton import (
     triton_hard_route_shared_merge_c4,
     triton_hard_route_shared_merge_c4_route_layout,
 )
+from .hunyuan_token_merging import hunyuan_token_merging_attn
 from .select_route import select_route_attention
 from .select_route_transpose import select_route_attention_transpose
 from .token_merging import token_merging_attn, token_merging_attn_with_kv_cache
@@ -38,6 +39,7 @@ __all__ = [
     "triton_hard_route_merge_c4_direct_route",
     "triton_hard_route_shared_merge_c4",
     "triton_hard_route_shared_merge_c4_route_layout",
+    "hunyuan_token_merging_attn",
     "select_route_attention",
     "select_route_attention_transpose",
     "token_merging_attn",

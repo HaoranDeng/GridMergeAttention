@@ -1,8 +1,9 @@
-"""Real-checkpoint differential test for the future Hunyuan pipeline.
+"""Real-checkpoint differential test for the Hunyuan pipeline.
 
-The test is written before the production integration. Once that code exists,
-enable this test to compare its dense-probe output against untouched Diffusers
-Hunyuan at every denoising step. The parent can run in ``etm``; both model
+The test was written before the production integration and now binds to its
+public installer/core contracts. Enable it to compare dense-probe output
+against untouched Diffusers Hunyuan at every denoising step. The parent can run
+in ``etm``; both model
 subprocesses use a Hunyuan-capable environment such as the existing ``SVG``
 Conda environment, which has Diffusers 0.34.0.
 """
@@ -27,7 +28,7 @@ DEFAULT_TEMP_ROOT = Path("/xuanwu-tank/east/zrl")
 
 @unittest.skipUnless(
     RUN_PARITY,
-    "set RUN_HUNYUAN_PIPELINE_PARITY=1 after implementing the Hunyuan pipeline",
+    "set RUN_HUNYUAN_PIPELINE_PARITY=1 for real-checkpoint Hunyuan parity",
 )
 class HunyuanPipelineReferenceParityTests(unittest.TestCase):
     def test_real_checkpoint_dense_probe_matches_diffusers(self) -> None:

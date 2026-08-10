@@ -1,0 +1,10 @@
+# Install these into a CUDA-enabled environment that already has the desired
+# PyTorch build. PyTorch is intentionally not pinned here because its wheel must
+# match the cluster's CUDA/toolchain.
+diffusers==0.34.0
+transformers>=4.49.2
+accelerate>=1.7.0
+einops>=0.6.0
+imageio
+imageio-ffmpeg
+PyYAML
