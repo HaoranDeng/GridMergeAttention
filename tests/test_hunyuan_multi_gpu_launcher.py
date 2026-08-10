@@ -42,6 +42,9 @@ class HunyuanMultiGpuLauncherTests(unittest.TestCase):
         self.assertIn("--num_prompt_shards", source)
         self.assertIn("--vbench_filenames", source)
         self.assertIn("--skip_existing", source)
+        self.assertIn("--timing_output", source)
+        self.assertIn("summarize_hunyuan_timings.py", source)
+        self.assertIn("timing_summary.json", source)
         self.assertNotIn("--checkpoint", source)
         self.assertNotIn("--use_ema", source)
 

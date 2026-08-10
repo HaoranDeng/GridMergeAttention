@@ -10,7 +10,7 @@ KV prefix, commit clean context, and call Token Merging from causal
 self-attention. The tests verify these requirements separately and then verify
 their integration with the real checkpoint.
 
-Sections 11-16 cover HunyuanVideo. They separately validate the real-checkpoint
+Sections 11-17 cover HunyuanVideo. They separately validate the real-checkpoint
 pipeline boundary, the joint video/text Token-Merging equations, processor
 installation, CLI routing, and a checkpoint-free whole-transformer comparison
 against untouched Diffusers.
@@ -796,6 +796,37 @@ Why this matters: attention tests can pass while a batch launcher points at the
 wrong config or writes colliding filenames. This test protects the exact
 hard-only experiment requested here without reserving a GPU or loading weights.
 
+## 17. Hunyuan per-video timing aggregation
+
+Files:
+
+- `test_hunyuan_generation_routing.py`
+- `test_hunyuan_timing_summary.py`
+
+The generation-routing test verifies that each newly generated video records
+two nonnegative durations: the Diffusers `pipe(...)` call and MP4 export. It
+requires an atomic worker JSON report containing the exact generated/skipped
+counts, per-video samples, totals, and the arithmetic mean. Existing videos are
+not included in the denominator on a resumed run.
+
+The summary test supplies two workers with unequal workloads: one generates
+two videos in 20 seconds of pipeline time, while the other generates one in 8
+seconds. The required average is therefore the weighted value:
+
+```text
+(20 + 8) / (2 + 1) = 9.333... seconds/video
+```
+
+It must not average the two worker means, which would incorrectly give 9.0.
+The constructed workers overlap over a 22-second global work window, so the
+effective multi-GPU result is independently checked as `22 / 3` seconds/video.
+Process wall time including model loading is checked separately.
+
+Why this matters: per-call latency and multi-GPU throughput answer different
+questions. Reporting both prevents parallelism from being mistaken for a
+faster individual generation and prevents model loading or MP4 encoding from
+being silently included in the neural generation metric.
+
 ## Supporting files
 
 ### `_support.py`
@@ -860,6 +891,7 @@ shared video/text softmax and prompt-mask equation tests
 + installation in every dual- and single-stream main block
 + text-refiner exclusion
 + runtime-grid, generation-sharding, and hard-only launcher tests
++ per-video latency and multi-GPU timing aggregation
 + whole-transformer parity against tiny untouched Diffusers Hunyuan
 ```
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -49,6 +50,7 @@ class HunyuanGenerationRoutingTests(unittest.TestCase):
             config_path = root / "config.yaml"
             prompt_path = root / "prompts.txt"
             output_dir = root / "videos"
+            timing_path = root / "timing.json"
             output_dir.mkdir()
             config_path.write_text(
                 yaml.safe_dump(
@@ -115,6 +117,8 @@ class HunyuanGenerationRoutingTests(unittest.TestCase):
                 "--skip_existing",
                 "--token_merging_w_reduce",
                 "3",
+                "--timing_output",
+                str(timing_path),
             ]
             with (
                 mock.patch.object(sys, "argv", argv),
@@ -151,6 +155,22 @@ class HunyuanGenerationRoutingTests(unittest.TestCase):
             for filename in ("000-01.mp4", "001-00.mp4", "001-01.mp4"):
                 self.assertEqual((output_dir / filename).read_bytes(), b"video")
             self.assertEqual(list(output_dir.glob(".*.partial.mp4")), [])
+
+            timing = json.loads(timing_path.read_text(encoding="utf-8"))
+            self.assertEqual(timing["schema_version"], 1)
+            self.assertEqual(timing["generated_videos"], 3)
+            self.assertEqual(timing["skipped_existing_videos"], 1)
+            self.assertEqual(len(timing["samples"]), 3)
+            self.assertGreaterEqual(
+                timing["pipeline_generation_seconds_total"], 0.0
+            )
+            self.assertAlmostEqual(
+                timing["pipeline_generation_seconds_mean"],
+                timing["pipeline_generation_seconds_total"] / 3,
+            )
+            self.assertGreaterEqual(timing["video_export_seconds_total"], 0.0)
+            self.assertGreaterEqual(timing["model_load_seconds"], 0.0)
+            self.assertFalse((root / ".timing.json.partial").exists())
 
     def test_vbench_prompts_are_deduplicated_and_sharded(self):
         """Each prompt stays on one worker and uses VBench-compatible filenames."""

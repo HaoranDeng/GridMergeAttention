@@ -52,7 +52,11 @@ RUN_NAMES=(
   "hard_c6"
 )
 
-required_files=("${REPO_DIR}/generate_hunyuan.py" "${PROMPT_PATH}")
+required_files=(
+  "${REPO_DIR}/generate_hunyuan.py"
+  "${REPO_DIR}/scripts/generate/summarize_hunyuan_timings.py"
+  "${PROMPT_PATH}"
+)
 for config in "${CONFIGS[@]}"; do
   required_files+=("${REPO_DIR}/${config}")
 done
@@ -118,10 +122,13 @@ for config_idx in "${!CONFIGS[@]}"; do
   echo "  output: ${output_dir}"
 
   pids=()
+  timing_paths=()
   for shard_id in "${!GPU_ID_LIST[@]}"; do
     gpu_id="${GPU_ID_LIST[$shard_id]}"
     log_path="${LOG_DIR}/${run_name}.gpu_${gpu_id}.log"
-    echo "  shard ${shard_id}/${num_shards} -> GPU ${gpu_id}, log ${log_path}"
+    timing_path="${LOG_DIR}/${run_name}.gpu_${gpu_id}.timing.json"
+    timing_paths+=("${timing_path}")
+    echo "  shard ${shard_id}/${num_shards} -> GPU ${gpu_id}, log ${log_path}, timing ${timing_path}"
 
     CUDA_VISIBLE_DEVICES="${gpu_id}" PYTHONUNBUFFERED=1 \
       "${PYTHON_BIN}" generate_hunyuan.py \
@@ -137,6 +144,7 @@ for config_idx in "${!CONFIGS[@]}"; do
         --seed "${SEED}" \
         --fps "${FPS}" \
         --vbench_filenames \
+        --timing_output "${timing_path}" \
         "${local_file_args[@]}" \
         "$@" >"${log_path}" 2>&1 &
     pids+=("$!")
@@ -159,6 +167,12 @@ for config_idx in "${!CONFIGS[@]}"; do
     echo "Not starting the next config because ${run_name} had a failed worker." >&2
     exit 1
   fi
+
+  timing_summary_path="${OUTPUT_ROOT}/${run_name}.timing_summary.json"
+  "${PYTHON_BIN}" scripts/generate/summarize_hunyuan_timings.py \
+    --label "${run_name}" \
+    --output "${timing_summary_path}" \
+    "${timing_paths[@]}"
   echo "Finished ${run_name}; moving to the next hard-route config."
 done
 

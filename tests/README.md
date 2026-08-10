@@ -79,6 +79,9 @@ The individual test files document the behavior they require:
 - `test_hunyuan_multi_gpu_launcher.py` checks that the Hunyuan experiment
   launcher contains only hard C2/C4/C6, shards prompts across explicit GPUs,
   and rejects a launch with no reserved GPU list.
+- `test_hunyuan_timing_summary.py` checks weighted per-video pipeline latency,
+  effective parallel multi-GPU throughput, model-load-inclusive wall time, and
+  atomic timing-summary output.
 - `test_hunyuan_diffusers_tiny_parity.py` is the opt-in, checkpoint-free parity
   and hard C2/C4/C6 execution test against a tiny real Diffusers 0.34 Hunyuan
   transformer.
