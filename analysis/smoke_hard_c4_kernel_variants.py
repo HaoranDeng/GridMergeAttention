@@ -146,8 +146,8 @@ def main():
     ref_time = time_variant(q, k, v, variants[ref_name], warmup=args.warmup, repeats=args.repeats)
     results[ref_name] = {
         "shape": list(ref.shape),
-        "max_abs_vs_bestlogit": 0.0,
-        "rel_l2_vs_bestlogit": 0.0,
+        "max_abs_vs_reference": 0.0,
+        "rel_l2_vs_reference": 0.0,
         "mean_ms": ref_time,
     }
     write_payload(args.output_json, payload)
@@ -170,8 +170,8 @@ def main():
             )
             results[name] = {
                 "shape": list(out.shape),
-                "max_abs_vs_bestlogit": float(diff.max().item()),
-                "rel_l2_vs_bestlogit": rel_l2(out, ref),
+                "max_abs_vs_reference": float(diff.max().item()),
+                "rel_l2_vs_reference": rel_l2(out, ref),
                 "mean_ms": mean_ms,
             }
         except Exception as exc:
