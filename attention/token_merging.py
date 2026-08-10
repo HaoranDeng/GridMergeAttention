@@ -45,10 +45,10 @@ def token_merging_attn(
 ):
     """Hard C4 GridMerge attention for Wan video self-attention.
 
-    The two maintained paths are:
+    Available backends:
       - hard_route_backend="sdpa": readable PyTorch reference.
       - hard_route_backend="hard_c4": optimized Triton path.
-      - hard_route_backend="hard_c4_fused": experimental fused Triton path.
+      - hard_route_backend="hard_c4_fused": experimental fused Triton path kept for manual optimization.
     """
     del f_tied, h_reduce, w_reduce, q_init, layout, num_merge_tokens, seed_mode, seed
 
