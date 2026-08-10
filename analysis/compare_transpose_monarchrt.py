@@ -333,6 +333,7 @@ def install_probe(stats, args):
         )
         v = self.v(x).view(batch, seq_len, heads, dim)
         q, k = wan_model.apply_rope_video_tokens(q, k, rope_cache)
+        scale = dim ** -0.5
 
         state["grid_size"] = [int(value) for value in grid_size]
         specs = variant_specs(*state["grid_size"])
@@ -343,7 +344,7 @@ def install_probe(stats, args):
         if should_record and not state["warmed"]:
             _ = run_dense(q, k, v, self)
             for spec in specs.values():
-                _ = run_one_token_variant(q, k, v, grid_size, spec, self.scale, args.head_chunk)
+                _ = run_one_token_variant(q, k, v, grid_size, spec, scale, args.head_chunk)
             sync()
             state["warmed"] = True
 
@@ -353,7 +354,7 @@ def install_probe(stats, args):
             for name, spec in specs.items():
                 out, seconds = timed(
                     lambda spec=spec: run_one_token_variant(
-                        q, k, v, grid_size, spec, self.scale, args.head_chunk
+                        q, k, v, grid_size, spec, scale, args.head_chunk
                     )
                 )
                 stats[name].add_time(seconds)
