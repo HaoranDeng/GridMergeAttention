@@ -5,11 +5,10 @@ from pathlib import Path
 import torch
 
 from attention.hard_route_pytorch import hard_route_attention_pytorch
+from attention.hard_fused_triton import HARD_C4_FUSED_BACKEND, hard_route_attention_triton_fused
 from attention.hard_route_triton import (
     HARD_C4_BACKEND,
-    HARD_C4_FUSED_BACKEND,
     hard_route_attention_triton,
-    hard_route_attention_triton_fused,
 )
 from analysis.hard_route_nonshared_backend_real_qkv import exact_variants
 

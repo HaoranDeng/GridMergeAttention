@@ -1,11 +1,10 @@
 import torch
 
 from .hard_route_pytorch import hard_route_attention_pytorch
+from .hard_fused_triton import HARD_C4_FUSED_BACKEND, hard_route_attention_triton_fused
 from .hard_route_triton import (
     HARD_C4_BACKEND,
-    HARD_C4_FUSED_BACKEND,
     hard_route_attention_triton,
-    hard_route_attention_triton_fused,
 )
 
 

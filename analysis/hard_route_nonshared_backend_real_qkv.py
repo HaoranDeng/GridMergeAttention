@@ -8,11 +8,8 @@ from pathlib import Path
 import torch
 from omegaconf import OmegaConf
 
-from attention.hard_route_triton import (
-    HARD_C4_BACKEND,
-    HARD_C4_FUSED_BACKEND,
-    MERGE_BLOCK_J,
-)
+from attention.hard_fused_triton import HARD_C4_FUSED_BACKEND
+from attention.hard_route_triton import HARD_C4_BACKEND, MERGE_BLOCK_J
 from generate import load_generator_checkpoint, load_prompts
 from pipeline import TokenMergingWanPipeline
 from utils.misc import set_seed
