@@ -68,101 +68,102 @@ if triton is not None:
         acc = tl.zeros((BLOCK_M, BLOCK_D), tl.float32)
         seed_ids = tl.arange(0, 4)
 
-        for key_outer in range(0, K_OUTER):
-            for key_row in range(0, K_ROWS):
-                keys = k_offsets
-                k_base = (
-                    k_ptr
-                    + (((batch * K_OUTER + key_outer) * K_ROWS + key_row) * K_COLS * HEADS + head) * D_HEAD
-                )
-                k = tl.load(
-                    k_base + keys[:, None] * HEADS * D_HEAD + dims[None, :],
-                    mask=k_mask[:, None] & d_mask[None, :],
-                    other=0.0,
-                )
-                v_base = (
-                    v_ptr
-                    + (((batch * K_OUTER + key_outer) * K_ROWS + key_row) * K_COLS * HEADS + head) * D_HEAD
-                )
-                v = tl.load(
-                    v_base + keys[:, None] * HEADS * D_HEAD + dims[None, :],
-                    mask=k_mask[:, None] & d_mask[None, :],
-                    other=0.0,
-                )
+        for key_block in range(0, K_OUTER * K_ROWS):
+            key_outer = key_block // K_ROWS
+            key_row = key_block - key_outer * K_ROWS
+            keys = k_offsets
+            k_base = (
+                k_ptr
+                + (((batch * K_OUTER + key_outer) * K_ROWS + key_row) * K_COLS * HEADS + head) * D_HEAD
+            )
+            k = tl.load(
+                k_base + keys[:, None] * HEADS * D_HEAD + dims[None, :],
+                mask=k_mask[:, None] & d_mask[None, :],
+                other=0.0,
+            )
+            v_base = (
+                v_ptr
+                + (((batch * K_OUTER + key_outer) * K_ROWS + key_row) * K_COLS * HEADS + head) * D_HEAD
+            )
+            v = tl.load(
+                v_base + keys[:, None] * HEADS * D_HEAD + dims[None, :],
+                mask=k_mask[:, None] & d_mask[None, :],
+                other=0.0,
+            )
 
-                seed_row_1 = tl.where(key_row > 0, key_row - 1, 1)
-                seed_row_2 = tl.where(
-                    key_row == 0,
-                    2,
-                    tl.where(key_row == Q_ROWS - 1, Q_ROWS - 3, key_row + 1),
-                )
-                seed_row_3 = tl.where(
-                    key_row <= 1,
-                    3,
-                    tl.where(key_row >= Q_ROWS - 2, Q_ROWS - 4, key_row - 2),
-                )
-                seed_rows = tl.where(
-                    seed_ids == 0,
-                    key_row,
-                    tl.where(seed_ids == 1, seed_row_1, tl.where(seed_ids == 2, seed_row_2, seed_row_3)),
-                )
+            seed_row_1 = tl.where(key_row > 0, key_row - 1, 1)
+            seed_row_2 = tl.where(
+                key_row == 0,
+                2,
+                tl.where(key_row == Q_ROWS - 1, Q_ROWS - 3, key_row + 1),
+            )
+            seed_row_3 = tl.where(
+                key_row <= 1,
+                3,
+                tl.where(key_row >= Q_ROWS - 2, Q_ROWS - 4, key_row - 2),
+            )
+            seed_rows = tl.where(
+                seed_ids == 0,
+                key_row,
+                tl.where(seed_ids == 1, seed_row_1, tl.where(seed_ids == 2, seed_row_2, seed_row_3)),
+            )
 
-                seed_q = tl.load(
-                    q_ptr
-                    + q_base
-                    + (((seed_rows[:, None] * Q_COLS + q_col) * HEADS + head) * D_HEAD + dims[None, :]),
-                    mask=d_mask[None, :],
-                    other=0.0,
-                )
-                seed_scores = tl.dot(seed_q, tl.trans(k), input_precision=INPUT_PRECISION) * SCALE
-                seed_scores = tl.where(k_mask[None, :], seed_scores, -float("inf"))
+            seed_q = tl.load(
+                q_ptr
+                + q_base
+                + (((seed_rows[:, None] * Q_COLS + q_col) * HEADS + head) * D_HEAD + dims[None, :]),
+                mask=d_mask[None, :],
+                other=0.0,
+            )
+            seed_scores = tl.dot(seed_q, tl.trans(k), input_precision=INPUT_PRECISION) * SCALE
+            seed_scores = tl.where(k_mask[None, :], seed_scores, -float("inf"))
 
-                seed_score_0 = tl.sum(tl.where(seed_ids[:, None] == 0, seed_scores, 0.0), axis=0)
-                seed_score_1 = tl.sum(tl.where(seed_ids[:, None] == 1, seed_scores, 0.0), axis=0)
-                seed_score_2 = tl.sum(tl.where(seed_ids[:, None] == 2, seed_scores, 0.0), axis=0)
-                seed_score_3 = tl.sum(tl.where(seed_ids[:, None] == 3, seed_scores, 0.0), axis=0)
+            seed_score_0 = tl.sum(tl.where(seed_ids[:, None] == 0, seed_scores, 0.0), axis=0)
+            seed_score_1 = tl.sum(tl.where(seed_ids[:, None] == 1, seed_scores, 0.0), axis=0)
+            seed_score_2 = tl.sum(tl.where(seed_ids[:, None] == 2, seed_scores, 0.0), axis=0)
+            seed_score_3 = tl.sum(tl.where(seed_ids[:, None] == 3, seed_scores, 0.0), axis=0)
 
-                best_seed_score = seed_score_0
-                route_id = tl.zeros((BLOCK_N,), tl.int32)
-                take = seed_score_1 > best_seed_score
-                best_seed_score = tl.where(take, seed_score_1, best_seed_score)
-                route_id = tl.where(take, 1, route_id)
-                take = seed_score_2 > best_seed_score
-                best_seed_score = tl.where(take, seed_score_2, best_seed_score)
-                route_id = tl.where(take, 2, route_id)
-                take = seed_score_3 > best_seed_score
-                best_seed_score = tl.where(take, seed_score_3, best_seed_score)
-                route_id = tl.where(take, 3, route_id)
+            best_seed_score = seed_score_0
+            route_id = tl.zeros((BLOCK_N,), tl.int32)
+            take = seed_score_1 > best_seed_score
+            best_seed_score = tl.where(take, seed_score_1, best_seed_score)
+            route_id = tl.where(take, 1, route_id)
+            take = seed_score_2 > best_seed_score
+            best_seed_score = tl.where(take, seed_score_2, best_seed_score)
+            route_id = tl.where(take, 2, route_id)
+            take = seed_score_3 > best_seed_score
+            best_seed_score = tl.where(take, seed_score_3, best_seed_score)
+            route_id = tl.where(take, 3, route_id)
 
-                route_mask = k_mask[None, :] & (route_id[None, :] == seed_ids[:, None])
-                route_max = tl.max(tl.where(route_mask, best_seed_score[None, :], -float("inf")), axis=1)
-                route_has_key = route_max > -float("inf")
-                safe_route_max = tl.where(route_has_key, route_max, 0.0)
-                route_probs = tl.where(
-                    route_mask,
-                    tl.exp2((best_seed_score[None, :] - safe_route_max[:, None]) * 1.4426950408889634),
-                    0.0,
-                )
-                route_sum = tl.sum(route_probs, axis=1)
-                safe_route_sum = tl.where(route_has_key, route_sum, 1.0)
-                merge_weights = route_probs / safe_route_sum[:, None]
-                log_route_sum = safe_route_max + tl.log2(safe_route_sum) * 0.6931471805599453
+            route_mask = k_mask[None, :] & (route_id[None, :] == seed_ids[:, None])
+            route_max = tl.max(tl.where(route_mask, best_seed_score[None, :], -float("inf")), axis=1)
+            route_has_key = route_max > -float("inf")
+            safe_route_max = tl.where(route_has_key, route_max, 0.0)
+            route_probs = tl.where(
+                route_mask,
+                tl.exp2((best_seed_score[None, :] - safe_route_max[:, None]) * 1.4426950408889634),
+                0.0,
+            )
+            route_sum = tl.sum(route_probs, axis=1)
+            safe_route_sum = tl.where(route_has_key, route_sum, 1.0)
+            merge_weights = route_probs / safe_route_sum[:, None]
+            log_route_sum = safe_route_max + tl.log2(safe_route_sum) * 0.6931471805599453
 
-                merged_k = tl.dot(merge_weights.to(k.dtype), k).to(tl.float16)
-                merged_v = tl.dot(merge_weights.to(v.dtype), v).to(tl.float16)
-                expected_score = tl.sum(tl.where(route_mask, merge_weights * best_seed_score[None, :], 0.0), axis=1)
-                route_bias = tl.where(route_has_key, expected_score - log_route_sum, float("inf"))
+            merged_k = tl.dot(merge_weights.to(k.dtype), k).to(tl.float16)
+            merged_v = tl.dot(merge_weights.to(v.dtype), v).to(tl.float16)
+            expected_score = tl.sum(tl.where(route_mask, merge_weights * best_seed_score[None, :], 0.0), axis=1)
+            route_bias = tl.where(route_has_key, expected_score - log_route_sum, float("inf"))
 
-                scores = tl.dot(q, tl.trans(merged_k), input_precision=INPUT_PRECISION) * SCALE - route_bias[None, :]
-                scores = tl.where(q_mask[:, None] & route_has_key[None, :], scores, -float("inf"))
+            scores = tl.dot(q, tl.trans(merged_k), input_precision=INPUT_PRECISION) * SCALE - route_bias[None, :]
+            scores = tl.where(q_mask[:, None] & route_has_key[None, :], scores, -float("inf"))
 
-                next_row_max = tl.maximum(row_max, tl.max(scores, axis=1))
-                probs = tl.exp2((scores - next_row_max[:, None]) * 1.4426950408889634)
-                old_scale = tl.exp2((row_max - next_row_max) * 1.4426950408889634)
+            next_row_max = tl.maximum(row_max, tl.max(scores, axis=1))
+            probs = tl.exp2((scores - next_row_max[:, None]) * 1.4426950408889634)
+            old_scale = tl.exp2((row_max - next_row_max) * 1.4426950408889634)
 
-                acc = acc * old_scale[:, None] + tl.dot(probs.to(merged_v.dtype), merged_v)
-                row_sum = row_sum * old_scale + tl.sum(probs, axis=1)
-                row_max = next_row_max
+            acc = acc * old_scale[:, None] + tl.dot(probs.to(merged_v.dtype), merged_v)
+            row_sum = row_sum * old_scale + tl.sum(probs, axis=1)
+            row_max = next_row_max
 
         out = acc / row_sum[:, None]
         out_base = out_ptr + batch * Q_OUTER * Q_ROWS * Q_COLS * HEADS * D_HEAD
