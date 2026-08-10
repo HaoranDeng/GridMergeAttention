@@ -5,7 +5,12 @@ from pathlib import Path
 import torch
 
 from attention.hard_route_pytorch import hard_route_attention_pytorch
-from attention.hard_route_triton import HARD_C4_BACKEND, hard_route_attention_triton
+from attention.hard_route_triton import (
+    HARD_C4_BACKEND,
+    HARD_C4_FUSED_BACKEND,
+    hard_route_attention_triton,
+    hard_route_attention_triton_fused,
+)
 from analysis.hard_route_nonshared_backend_real_qkv import exact_variants
 
 
@@ -20,6 +25,13 @@ def run_variant(q, k, v, variant):
     backend = variant["hard_route_backend"]
     if backend == HARD_C4_BACKEND:
         return hard_route_attention_triton(
+            q,
+            k,
+            v,
+            scale,
+        )
+    if backend == HARD_C4_FUSED_BACKEND:
+        return hard_route_attention_triton_fused(
             q,
             k,
             v,

@@ -1,7 +1,12 @@
 import torch
 
 from .hard_route_pytorch import hard_route_attention_pytorch
-from .hard_route_triton import HARD_C4_BACKEND, hard_route_attention_triton
+from .hard_route_triton import (
+    HARD_C4_BACKEND,
+    HARD_C4_FUSED_BACKEND,
+    hard_route_attention_triton,
+    hard_route_attention_triton_fused,
+)
 
 
 LAYOUT_HARD_ROUTE = "hard_route"
@@ -43,6 +48,7 @@ def token_merging_attn(
     The two maintained paths are:
       - hard_route_backend="sdpa": readable PyTorch reference.
       - hard_route_backend="hard_c4": optimized Triton path.
+      - hard_route_backend="hard_c4_fused": experimental fused Triton path.
     """
     del f_tied, h_reduce, w_reduce, q_init, layout, num_merge_tokens, seed_mode, seed
 
@@ -65,6 +71,14 @@ def token_merging_attn(
 
         if backend == HARD_C4_BACKEND:
             chunk = hard_route_attention_triton(
+                q_chunk,
+                k_blocks,
+                v_blocks,
+                sm_scale,
+                output=out_slice,
+            )
+        elif backend == HARD_C4_FUSED_BACKEND:
+            chunk = hard_route_attention_triton_fused(
                 q_chunk,
                 k_blocks,
                 v_blocks,
