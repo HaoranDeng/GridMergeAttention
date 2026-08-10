@@ -9,16 +9,23 @@ except Exception:  # pragma: no cover - exercised only when Triton is missing.
 
 
 HARD_C4_FUSED_BACKEND = "hard_c4_fused"
-FUSED_BLOCK_Q_ROWS = 32
-FUSED_NUM_WARPS = 4
-FUSED_NUM_STAGES = 1
-FUSED_LOGIT_INPUT_PRECISION = "ieee"
+HARD_FUSED_BLOCK_M = 32
+HARD_FUSED_BLOCK_N = 64
+HARD_FUSED_NUM_WARPS = 4
+HARD_FUSED_NUM_STAGES = 1
+HARD_FUSED_INPUT_PRECISION = "ieee"
+
+# Backward-compatible names used by profiling scripts.
+FUSED_BLOCK_Q_ROWS = HARD_FUSED_BLOCK_M
+FUSED_LOGIT_INPUT_PRECISION = HARD_FUSED_INPUT_PRECISION
+FUSED_NUM_STAGES = HARD_FUSED_NUM_STAGES
+FUSED_NUM_WARPS = HARD_FUSED_NUM_WARPS
 
 
 if triton is not None:
 
     @triton.jit
-    def _hard_c4_fused_kernel(
+    def _hard_c4_fused_forward_kernel(
         q_ptr,
         k_ptr,
         v_ptr,
@@ -31,55 +38,63 @@ if triton is not None:
         HEADS: tl.constexpr,
         K_COLS: tl.constexpr,
         D_HEAD: tl.constexpr,
-        BLOCK_Q: tl.constexpr,
-        BLOCK_K: tl.constexpr,
+        BLOCK_M: tl.constexpr,
+        BLOCK_N: tl.constexpr,
         BLOCK_D: tl.constexpr,
         SCALE: tl.constexpr,
-        LOGIT_INPUT_PRECISION: tl.constexpr,
+        INPUT_PRECISION: tl.constexpr,
     ):
-        """FlashAttention-style streaming over video key grids.
-
-        This is the hard-C4 analogue of a dense flash attention forward kernel:
-        each program owns one (batch, head, query outer, query column) and
-        streams through a logical [K_ROWS, K_COLS] key grid, normally 30 x 52
-        for Wan 480p tokens. It never materializes 30 x 52 x D in one program:
-        one key row [K_COLS, D] is loaded, compressed, and immediately folded
-        into the online softmax accumulator.
-        """
         group = tl.program_id(0)
-        query_col = tl.program_id(1)
+        q_col = tl.program_id(1)
 
-        query_outer = group % Q_OUTER
+        q_outer = group % Q_OUTER
         tmp = group // Q_OUTER
         head = tmp % HEADS
         batch = tmp // HEADS
 
-        query_rows = tl.arange(0, BLOCK_Q)
-        key_cols = tl.arange(0, BLOCK_K)
+        q_offsets = tl.arange(0, BLOCK_M)
+        k_offsets = tl.arange(0, BLOCK_N)
         dims = tl.arange(0, BLOCK_D)
-        query_valid = query_rows < Q_ROWS
-        key_col_valid = key_cols < K_COLS
-        dim_valid = dims < D_HEAD
+        q_mask = q_offsets < Q_ROWS
+        k_mask = k_offsets < K_COLS
+        d_mask = dims < D_HEAD
 
-        q_base = (batch * Q_OUTER + query_outer) * Q_ROWS * Q_COLS * HEADS * D_HEAD
-        query = tl.load(
+        q_base = (batch * Q_OUTER + q_outer) * Q_ROWS * Q_COLS * HEADS * D_HEAD
+        q = tl.load(
             q_ptr
             + q_base
-            + (((query_rows[:, None] * Q_COLS + query_col) * HEADS + head) * D_HEAD + dims[None, :]),
-            mask=query_valid[:, None] & dim_valid[None, :],
+            + (((q_offsets[:, None] * Q_COLS + q_col) * HEADS + head) * D_HEAD + dims[None, :]),
+            mask=q_mask[:, None] & d_mask[None, :],
             other=0.0,
-        )
-        query_for_dot = query.to(tl.float16)
+        ).to(tl.float16)
 
-        softmax_max = tl.full((BLOCK_Q,), -float("inf"), tl.float32)
-        softmax_sum = tl.zeros((BLOCK_Q,), tl.float32)
-        output_acc = tl.zeros((BLOCK_Q, BLOCK_D), tl.float32)
+        row_max = tl.full((BLOCK_M,), -float("inf"), tl.float32)
+        row_sum = tl.zeros((BLOCK_M,), tl.float32)
+        acc = tl.zeros((BLOCK_M, BLOCK_D), tl.float32)
+        seed_ids = tl.arange(0, 4)
 
         for key_outer in range(0, K_OUTER):
-            # The [K_ROWS, K_COLS] key grid is logical; each iteration only
-            # loads one key row [K_COLS, D].
             for key_row in range(0, K_ROWS):
-                seed_ids = tl.arange(0, 4)
+                keys = k_offsets
+                k_base = (
+                    k_ptr
+                    + (((batch * K_OUTER + key_outer) * K_ROWS + key_row) * K_COLS * HEADS + head) * D_HEAD
+                )
+                k = tl.load(
+                    k_base + keys[:, None] * HEADS * D_HEAD + dims[None, :],
+                    mask=k_mask[:, None] & d_mask[None, :],
+                    other=0.0,
+                )
+                v_base = (
+                    v_ptr
+                    + (((batch * K_OUTER + key_outer) * K_ROWS + key_row) * K_COLS * HEADS + head) * D_HEAD
+                )
+                v = tl.load(
+                    v_base + keys[:, None] * HEADS * D_HEAD + dims[None, :],
+                    mask=k_mask[:, None] & d_mask[None, :],
+                    other=0.0,
+                )
+
                 seed_row_1 = tl.where(key_row > 0, key_row - 1, 1)
                 seed_row_2 = tl.where(
                     key_row == 0,
@@ -97,134 +112,123 @@ if triton is not None:
                     tl.where(seed_ids == 1, seed_row_1, tl.where(seed_ids == 2, seed_row_2, seed_row_3)),
                 )
 
-                key_base = (
-                    k_ptr
-                    + (((batch * K_OUTER + key_outer) * K_ROWS + key_row) * K_COLS * HEADS + head) * D_HEAD
-                )
-                key = tl.load(
-                    key_base + key_cols[:, None] * HEADS * D_HEAD + dims[None, :],
-                    mask=key_col_valid[:, None] & dim_valid[None, :],
-                    other=0.0,
-                )
-                value_base = (
-                    v_ptr
-                    + (((batch * K_OUTER + key_outer) * K_ROWS + key_row) * K_COLS * HEADS + head) * D_HEAD
-                )
-                value = tl.load(
-                    value_base + key_cols[:, None] * HEADS * D_HEAD + dims[None, :],
-                    mask=key_col_valid[:, None] & dim_valid[None, :],
-                    other=0.0,
-                )
-
-                seed_queries = tl.load(
+                seed_q = tl.load(
                     q_ptr
                     + q_base
-                    + (((seed_rows[:, None] * Q_COLS + query_col) * HEADS + head) * D_HEAD + dims[None, :]),
-                    mask=dim_valid[None, :],
+                    + (((seed_rows[:, None] * Q_COLS + q_col) * HEADS + head) * D_HEAD + dims[None, :]),
+                    mask=d_mask[None, :],
                     other=0.0,
                 )
-                seed_logits = tl.dot(
-                    seed_queries,
-                    tl.trans(key),
-                    input_precision=LOGIT_INPUT_PRECISION,
-                ) * SCALE
-                seed_logits = tl.where(key_col_valid[None, :], seed_logits, -float("inf"))
+                seed_scores = tl.dot(seed_q, tl.trans(k), input_precision=INPUT_PRECISION) * SCALE
+                seed_scores = tl.where(k_mask[None, :], seed_scores, -float("inf"))
 
-                logits_0 = tl.sum(tl.where(seed_ids[:, None] == 0, seed_logits, 0.0), axis=0)
-                logits_1 = tl.sum(tl.where(seed_ids[:, None] == 1, seed_logits, 0.0), axis=0)
-                logits_2 = tl.sum(tl.where(seed_ids[:, None] == 2, seed_logits, 0.0), axis=0)
-                logits_3 = tl.sum(tl.where(seed_ids[:, None] == 3, seed_logits, 0.0), axis=0)
+                seed_score_0 = tl.sum(tl.where(seed_ids[:, None] == 0, seed_scores, 0.0), axis=0)
+                seed_score_1 = tl.sum(tl.where(seed_ids[:, None] == 1, seed_scores, 0.0), axis=0)
+                seed_score_2 = tl.sum(tl.where(seed_ids[:, None] == 2, seed_scores, 0.0), axis=0)
+                seed_score_3 = tl.sum(tl.where(seed_ids[:, None] == 3, seed_scores, 0.0), axis=0)
 
-                best_logits = logits_0
-                assigned_seed = tl.zeros((BLOCK_K,), tl.int32)
-                take = logits_1 > best_logits
-                best_logits = tl.where(take, logits_1, best_logits)
-                assigned_seed = tl.where(take, 1, assigned_seed)
-                take = logits_2 > best_logits
-                best_logits = tl.where(take, logits_2, best_logits)
-                assigned_seed = tl.where(take, 2, assigned_seed)
-                take = logits_3 > best_logits
-                best_logits = tl.where(take, logits_3, best_logits)
-                assigned_seed = tl.where(take, 3, assigned_seed)
+                best_seed_score = seed_score_0
+                route_id = tl.zeros((BLOCK_N,), tl.int32)
+                take = seed_score_1 > best_seed_score
+                best_seed_score = tl.where(take, seed_score_1, best_seed_score)
+                route_id = tl.where(take, 1, route_id)
+                take = seed_score_2 > best_seed_score
+                best_seed_score = tl.where(take, seed_score_2, best_seed_score)
+                route_id = tl.where(take, 2, route_id)
+                take = seed_score_3 > best_seed_score
+                best_seed_score = tl.where(take, seed_score_3, best_seed_score)
+                route_id = tl.where(take, 3, route_id)
 
-                routed = key_col_valid[None, :] & (assigned_seed[None, :] == seed_ids[:, None])
-                route_max = tl.max(tl.where(routed, best_logits[None, :], -float("inf")), axis=1)
+                route_mask = k_mask[None, :] & (route_id[None, :] == seed_ids[:, None])
+                route_max = tl.max(tl.where(route_mask, best_seed_score[None, :], -float("inf")), axis=1)
                 route_has_key = route_max > -float("inf")
                 safe_route_max = tl.where(route_has_key, route_max, 0.0)
-                route_prob = tl.where(
-                    routed,
-                    tl.exp2((best_logits[None, :] - safe_route_max[:, None]) * 1.4426950408889634),
+                route_probs = tl.where(
+                    route_mask,
+                    tl.exp2((best_seed_score[None, :] - safe_route_max[:, None]) * 1.4426950408889634),
                     0.0,
                 )
-                route_sum = tl.sum(route_prob, axis=1)
+                route_sum = tl.sum(route_probs, axis=1)
                 safe_route_sum = tl.where(route_has_key, route_sum, 1.0)
-                merge_weight = route_prob / safe_route_sum[:, None]
+                merge_weights = route_probs / safe_route_sum[:, None]
                 log_route_sum = safe_route_max + tl.log2(safe_route_sum) * 0.6931471805599453
 
-                merged_key = tl.dot(merge_weight.to(key.dtype), key).to(tl.float16)
-                merged_value = tl.dot(merge_weight.to(value.dtype), value).to(tl.float16)
-                expected_logit = tl.sum(tl.where(routed, merge_weight * best_logits[None, :], 0.0), axis=1)
-                routing_bias = tl.where(route_has_key, expected_logit - log_route_sum, float("inf"))
+                merged_k = tl.dot(merge_weights.to(k.dtype), k).to(tl.float16)
+                merged_v = tl.dot(merge_weights.to(v.dtype), v).to(tl.float16)
+                expected_score = tl.sum(tl.where(route_mask, merge_weights * best_seed_score[None, :], 0.0), axis=1)
+                route_bias = tl.where(route_has_key, expected_score - log_route_sum, float("inf"))
 
-                scores = tl.dot(query_for_dot, tl.trans(merged_key)) * SCALE - routing_bias[None, :]
-                scores = tl.where(query_valid[:, None] & route_has_key[None, :], scores, -float("inf"))
+                scores = tl.dot(q, tl.trans(merged_k), input_precision=INPUT_PRECISION) * SCALE - route_bias[None, :]
+                scores = tl.where(q_mask[:, None] & route_has_key[None, :], scores, -float("inf"))
 
-                next_max = tl.maximum(softmax_max, tl.max(scores, axis=1))
-                prob = tl.exp2((scores - next_max[:, None]) * 1.4426950408889634)
-                old_scale = tl.exp2((softmax_max - next_max) * 1.4426950408889634)
-                output_acc = output_acc * old_scale[:, None] + tl.dot(prob.to(merged_value.dtype), merged_value)
-                softmax_sum = softmax_sum * old_scale + tl.sum(prob, axis=1)
-                softmax_max = next_max
+                next_row_max = tl.maximum(row_max, tl.max(scores, axis=1))
+                probs = tl.exp2((scores - next_row_max[:, None]) * 1.4426950408889634)
+                old_scale = tl.exp2((row_max - next_row_max) * 1.4426950408889634)
 
-        output = output_acc / softmax_sum[:, None]
+                acc = acc * old_scale[:, None] + tl.dot(probs.to(merged_v.dtype), merged_v)
+                row_sum = row_sum * old_scale + tl.sum(probs, axis=1)
+                row_max = next_row_max
+
+        out = acc / row_sum[:, None]
         out_base = out_ptr + batch * Q_OUTER * Q_ROWS * Q_COLS * HEADS * D_HEAD
         tl.store(
             out_base
-            + (((query_outer * Q_ROWS + query_rows[:, None]) * Q_COLS + query_col) * HEADS + head) * D_HEAD
+            + (((q_outer * Q_ROWS + q_offsets[:, None]) * Q_COLS + q_col) * HEADS + head) * D_HEAD
             + dims[None, :],
-            output,
-            mask=query_valid[:, None] & dim_valid[None, :],
+            out,
+            mask=q_mask[:, None] & d_mask[None, :],
         )
 
 
-def hard_route_attention_triton_fused(q, k, v, scale, output=None):
-    """Experimental fused hard C4 attention, kept separate for manual tuning."""
+def hard_route_attention_triton_fused(q, k, v, scale=None, output=None):
+    """Experimental hard-C4 kernel written in the same layout as flash_attention_triton."""
+    if triton is None:
+        raise RuntimeError("Triton is required for hard_route_attention_triton_fused.")
+
     q = q.contiguous()
-    batch, query_outer, query_rows, query_columns, heads, dim = q.shape
-    _, key_outer, key_rows, key_columns, _, _ = k.shape
+    k = k.contiguous()
+    v = v.contiguous()
+    batch, q_outer, q_rows, q_cols, heads, dim = q.shape
+    _, k_outer, k_rows, k_cols, _, _ = k.shape
+    if scale is None:
+        scale = dim**-0.5
 
     output = output if output is not None and output.is_contiguous() else torch.empty_like(q)
-    grid = (batch * heads * query_outer, query_columns)
-
-    _hard_c4_fused_kernel[grid](
+    grid = (batch * heads * q_outer, q_cols)
+    _hard_c4_fused_forward_kernel[grid](
         q,
         k,
         v,
         output,
-        Q_OUTER=query_outer,
-        K_OUTER=key_outer,
-        Q_ROWS=query_rows,
-        K_ROWS=key_rows,
-        Q_COLS=query_columns,
+        Q_OUTER=q_outer,
+        K_OUTER=k_outer,
+        Q_ROWS=q_rows,
+        K_ROWS=k_rows,
+        Q_COLS=q_cols,
         HEADS=heads,
-        K_COLS=key_columns,
+        K_COLS=k_cols,
         D_HEAD=dim,
-        BLOCK_Q=FUSED_BLOCK_Q_ROWS,
-        BLOCK_K=triton.next_power_of_2(key_columns),
+        BLOCK_M=HARD_FUSED_BLOCK_M,
+        BLOCK_N=triton.next_power_of_2(k_cols),
         BLOCK_D=triton.next_power_of_2(dim),
         SCALE=float(scale),
-        LOGIT_INPUT_PRECISION=FUSED_LOGIT_INPUT_PRECISION,
-        num_warps=FUSED_NUM_WARPS,
-        num_stages=FUSED_NUM_STAGES,
+        INPUT_PRECISION=HARD_FUSED_INPUT_PRECISION,
+        num_warps=HARD_FUSED_NUM_WARPS,
+        num_stages=HARD_FUSED_NUM_STAGES,
     )
     return output
 
 
 __all__ = [
-    "HARD_C4_FUSED_BACKEND",
     "FUSED_BLOCK_Q_ROWS",
     "FUSED_LOGIT_INPUT_PRECISION",
     "FUSED_NUM_STAGES",
     "FUSED_NUM_WARPS",
+    "HARD_C4_FUSED_BACKEND",
+    "HARD_FUSED_BLOCK_M",
+    "HARD_FUSED_BLOCK_N",
+    "HARD_FUSED_INPUT_PRECISION",
+    "HARD_FUSED_NUM_STAGES",
+    "HARD_FUSED_NUM_WARPS",
     "hard_route_attention_triton_fused",
 ]
