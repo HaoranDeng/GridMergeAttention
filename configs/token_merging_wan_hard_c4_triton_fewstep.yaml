@@ -23,6 +23,6 @@ token_merging_args:
   num_merge_tokens: 4
   seed_mode: local_with_ith
   seed: 0
-  # Non-shared hard-route keeps query-dependent KV compression for each
-  # attention grid and still runs full compressed attention after merging.
+  # Fused hard-route keeps query-dependent KV compression for each attention
+  # grid and still runs full compressed attention after merging.
   hard_route_backend: hard_c4

@@ -42,7 +42,7 @@ SEED="${SEED:-0}"
 FPS="${FPS:-16}"
 BASELINE_LABEL="${BASELINE_LABEL:-dense}"
 BASELINE_CONFIG="${BASELINE_CONFIG:-configs/dense_wan_fewstep.yaml}"
-CANDIDATE_LABEL="${CANDIDATE_LABEL:-hard_c4_triton}"
+CANDIDATE_LABEL="${CANDIDATE_LABEL:-hard_c4_fused}"
 CANDIDATE_CONFIG="${CANDIDATE_CONFIG:-configs/token_merging_wan_hard_c4_triton_fewstep.yaml}"
 
 cd "${REPO_DIR}"

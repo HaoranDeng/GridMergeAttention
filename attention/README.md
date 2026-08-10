@@ -8,7 +8,7 @@ GridMergeAttention path.
 - `core.py`: dense PyTorch scaled dot-product attention wrapper.
 - `token_merging.py`: Wan token reshaping plus PyTorch/Triton dispatch.
 - `hard_route_pytorch.py`: complete readable PyTorch hard C4 reference.
-- `hard_route_triton.py`: complete optimized Triton hard C4 implementation.
+- `hard_fused_triton.py`: fused Triton hard C4 implementation.
 
 ## Shapes
 
@@ -51,8 +51,10 @@ For each `30q x 52k` block:
 The two maintained implementations are:
 
 - `hard_route_backend: sdpa`: readable PyTorch reference.
-- `hard_route_backend: hard_c4`: optimized Triton path.
+- `hard_route_backend: hard_c4`: fused Triton path.
 
 The Triton path preserves the same hard assignment, entropy routing bias, and
-full compressed-attention semantics. It does not use global/shared compression,
-no-bias routing, or sparse/windowed second-stage attention.
+full compressed-attention semantics. It fuses the hard C4 compression and
+second-stage online softmax into one kernel, without writing merged K/V/bias
+to global memory. It does not use global/shared compression, no-bias routing,
+or sparse/windowed second-stage attention.

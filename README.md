@@ -5,7 +5,7 @@ GridMergeAttention path. The repository keeps:
 
 - dense attention for baseline comparison,
 - hard C4 PyTorch reference implementation,
-- hard C4 Triton implementation for speed.
+- fused hard C4 Triton implementation for speed.
 
 Large Wan model weights and checkpoints are not stored here.
 
@@ -41,7 +41,7 @@ token_merging_args:
   hard_route_backend: sdpa
 ```
 
-The Triton config is the current best speed/quality path:
+The Triton config uses the fused hard C4 kernel:
 
 ```yaml
 token_merging_args:
@@ -76,7 +76,7 @@ python generate.py \
   --config configs/token_merging_wan_hard_c4_triton_fewstep.yaml \
   --checkpoint /path/to/self_forcing_dmd.pt \
   --prompt_path prompts/MovieGenVideoBench_extended.txt \
-  --output_dir videos/gridmerge_hard_c4 \
+  --output_dir videos/gridmerge_hard_c4_fused \
   --num_videos 20 \
   --use_ema
 ```

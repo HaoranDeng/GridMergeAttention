@@ -8,6 +8,7 @@ except Exception:  # pragma: no cover - exercised only when Triton is missing.
     tl = None
 
 
+HARD_C4_BACKEND = "hard_c4"
 HARD_C4_FUSED_BACKEND = "hard_c4_fused"
 HARD_FUSED_BLOCK_M = 32
 HARD_FUSED_BLOCK_N = 64
@@ -224,6 +225,7 @@ __all__ = [
     "FUSED_LOGIT_INPUT_PRECISION",
     "FUSED_NUM_STAGES",
     "FUSED_NUM_WARPS",
+    "HARD_C4_BACKEND",
     "HARD_C4_FUSED_BACKEND",
     "HARD_FUSED_BLOCK_M",
     "HARD_FUSED_BLOCK_N",

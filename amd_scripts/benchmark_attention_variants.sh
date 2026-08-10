@@ -41,7 +41,7 @@ GPU_ID="${GPU_ID:-0}"
 NAMES=(
   "dense"
   "hard_c4_pytorch"
-  "hard_c4_triton"
+  "hard_c4_fused"
 )
 
 CONFIGS=(

@@ -8,7 +8,7 @@ WAN_MODEL_DIR="${WAN_MODEL_DIR:-${REPO_DIR}/wan_models/Wan2.1-T2V-1.3B}"
 CHECKPOINT="${CHECKPOINT:-${REPO_DIR}/checkpoints/self_forcing_dmd.pt}"
 CONFIG="${CONFIG:-${REPO_DIR}/configs/token_merging_wan_hard_c4_triton_fewstep.yaml}"
 PROMPT_PATH="${PROMPT_PATH:-${REPO_DIR}/prompts/vbench_all_dimension.txt}"
-OUTPUT_DIR="${OUTPUT_DIR:-${REPO_DIR}/videos/hard_c4_triton_self_forcing}"
+OUTPUT_DIR="${OUTPUT_DIR:-${REPO_DIR}/videos/hard_c4_fused_self_forcing}"
 # generate.py interprets a negative limit as "use every prompt in the file".
 NUM_VIDEOS="${NUM_VIDEOS:--1}"
 NUM_SAMPLES="${NUM_SAMPLES:-5}"

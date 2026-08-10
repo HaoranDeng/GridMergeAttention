@@ -1,10 +1,9 @@
 import torch
 
 from .hard_route_pytorch import hard_route_attention_pytorch
-from .hard_fused_triton import HARD_C4_FUSED_BACKEND, hard_route_attention_triton_fused
-from .hard_route_triton import (
+from .hard_fused_triton import (
     HARD_C4_BACKEND,
-    hard_route_attention_triton,
+    hard_route_attention_triton_fused,
 )
 
 
@@ -40,14 +39,14 @@ def token_merging_attn(
     num_merge_tokens=4,
     seed_mode="local_with_ith",
     seed=0,
-    hard_route_backend="sdpa",
+    hard_route_backend=HARD_C4_BACKEND,
 ):
     """Hard C4 GridMerge attention for Wan video self-attention.
 
-    Available backends:
+    Maintained implementations:
       - hard_route_backend="sdpa": readable PyTorch reference.
-      - hard_route_backend="hard_c4": optimized Triton path.
-      - hard_route_backend="hard_c4_fused": experimental fused Triton path kept for manual optimization.
+      - hard_route_backend="hard_c4": fused Triton kernel.
+    Other legacy backend strings are treated as the fused Triton path.
     """
     del f_tied, h_reduce, w_reduce, q_init, layout, num_merge_tokens, seed_mode, seed
 
@@ -61,36 +60,30 @@ def token_merging_attn(
     k_blocks = video_to_blocks(k, h, w)
     v_blocks = video_to_blocks(v, h, w)
 
-    backend = (hard_route_backend or "sdpa").lower()
+    backend = (hard_route_backend or HARD_C4_BACKEND).lower()
+    use_reference = backend == "sdpa"
+
     out = torch.empty_like(q_blocks)
     for start in range(0, q_blocks.size(1), query_outer_chunk):
         end = min(start + query_outer_chunk, q_blocks.size(1))
         q_chunk = q_blocks[:, start:end]
         out_slice = out[:, start:end]
 
-        if backend == HARD_C4_BACKEND:
-            chunk = hard_route_attention_triton(
-                q_chunk,
-                k_blocks,
-                v_blocks,
-                sm_scale,
-                output=out_slice,
-            )
-        elif backend == HARD_C4_FUSED_BACKEND:
-            chunk = hard_route_attention_triton_fused(
-                q_chunk,
-                k_blocks,
-                v_blocks,
-                sm_scale,
-                output=out_slice,
-            )
-        else:
+        if use_reference:
             chunk = hard_route_attention_pytorch(
                 q_chunk,
                 k_blocks,
                 v_blocks,
                 sm_scale,
                 query_outer_offset=start,
+            )
+        else:
+            chunk = hard_route_attention_triton_fused(
+                q_chunk,
+                k_blocks,
+                v_blocks,
+                sm_scale,
+                output=out_slice,
             )
 
         if chunk is not out_slice:

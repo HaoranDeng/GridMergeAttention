@@ -5,12 +5,11 @@ from pathlib import Path
 import torch
 
 from attention.hard_route_pytorch import hard_route_attention_pytorch
-from attention.hard_fused_triton import HARD_C4_FUSED_BACKEND, hard_route_attention_triton_fused
-from attention.hard_route_triton import (
+from attention.hard_fused_triton import (
     HARD_C4_BACKEND,
-    hard_route_attention_triton,
+    HARD_C4_FUSED_BACKEND,
+    hard_route_attention_triton_fused,
 )
-from analysis.hard_route_nonshared_backend_real_qkv import exact_variants
 
 
 def rel_l2(out, ref):
@@ -22,14 +21,7 @@ def rel_l2(out, ref):
 def run_variant(q, k, v, variant):
     scale = q.size(-1) ** -0.5
     backend = variant["hard_route_backend"]
-    if backend == HARD_C4_BACKEND:
-        return hard_route_attention_triton(
-            q,
-            k,
-            v,
-            scale,
-        )
-    if backend == HARD_C4_FUSED_BACKEND:
+    if backend in {HARD_C4_BACKEND, HARD_C4_FUSED_BACKEND}:
         return hard_route_attention_triton_fused(
             q,
             k,
@@ -43,6 +35,20 @@ def run_variant(q, k, v, variant):
         scale,
         query_outer_offset=0,
     )
+
+
+def exact_variants():
+    return {
+        "hard_c4_pytorch": {
+            "hard_route_backend": "sdpa",
+        },
+        "hard_c4": {
+            "hard_route_backend": HARD_C4_BACKEND,
+        },
+        "hard_c4_fused": {
+            "hard_route_backend": HARD_C4_FUSED_BACKEND,
+        },
+    }
 
 
 def time_variant(q, k, v, variant, warmup, repeats):
@@ -112,7 +118,7 @@ def main():
     v = torch.randn(shape_kv, device=device, dtype=dtype)
 
     variants = exact_variants()
-    ref_name = "hard_c4"
+    ref_name = "hard_c4_pytorch"
     names = [ref_name]
     selected_names = parse_variant_names(args.variants)
     if selected_names:
