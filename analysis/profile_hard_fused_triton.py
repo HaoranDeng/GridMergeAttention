@@ -12,10 +12,11 @@ except Exception:  # pragma: no cover - exercised only when Triton is missing.
     tl = None
 
 from attention.hard_fused_triton import (
-    FUSED_BLOCK_Q_ROWS,
-    FUSED_LOGIT_INPUT_PRECISION,
-    FUSED_NUM_STAGES,
-    FUSED_NUM_WARPS,
+    HARD_BLOCK_M,
+    HARD_BLOCK_N,
+    HARD_INPUT_PRECISION,
+    HARD_NUM_STAGES,
+    HARD_NUM_WARPS,
     hard_route_attention_triton_fused,
 )
 
@@ -203,6 +204,7 @@ def run_profile_stage(q, k, v, stage):
     batch, query_outer, query_rows, query_columns, heads, dim = q.shape
     _, key_outer, key_rows, key_columns, _, _ = k.shape
     checksum = torch.empty(batch * heads * query_outer * query_columns, device=q.device, dtype=torch.float32)
+    block_n = max(HARD_BLOCK_N, triton.next_power_of_2(key_columns))
     grid = (checksum.numel(),)
     _hard_c4_fused_profile_kernel[grid](
         q,
@@ -217,14 +219,14 @@ def run_profile_stage(q, k, v, stage):
         HEADS=heads,
         K_COLS=key_columns,
         D_HEAD=dim,
-        BLOCK_Q=FUSED_BLOCK_Q_ROWS,
-        BLOCK_K=triton.next_power_of_2(key_columns),
+        BLOCK_Q=HARD_BLOCK_M,
+        BLOCK_K=block_n,
         BLOCK_D=triton.next_power_of_2(dim),
         SCALE=float(dim ** -0.5),
-        LOGIT_INPUT_PRECISION=FUSED_LOGIT_INPUT_PRECISION,
+        LOGIT_INPUT_PRECISION=HARD_INPUT_PRECISION,
         STAGE=int(stage),
-        num_warps=FUSED_NUM_WARPS,
-        num_stages=FUSED_NUM_STAGES,
+        num_warps=HARD_NUM_WARPS,
+        num_stages=HARD_NUM_STAGES,
     )
     return checksum
 

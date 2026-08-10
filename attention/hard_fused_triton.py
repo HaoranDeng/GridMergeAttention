@@ -10,17 +10,11 @@ except Exception:  # pragma: no cover - exercised only when Triton is missing.
 
 HARD_C4_BACKEND = "hard_c4"
 HARD_C4_FUSED_BACKEND = "hard_c4_fused"
-HARD_FUSED_BLOCK_M = 32
-HARD_FUSED_BLOCK_N = 64
-HARD_FUSED_NUM_WARPS = 4
-HARD_FUSED_NUM_STAGES = 1
-HARD_FUSED_INPUT_PRECISION = "ieee"
-
-# Backward-compatible names used by profiling scripts.
-FUSED_BLOCK_Q_ROWS = HARD_FUSED_BLOCK_M
-FUSED_LOGIT_INPUT_PRECISION = HARD_FUSED_INPUT_PRECISION
-FUSED_NUM_STAGES = HARD_FUSED_NUM_STAGES
-FUSED_NUM_WARPS = HARD_FUSED_NUM_WARPS
+HARD_BLOCK_M = 32
+HARD_BLOCK_N = 64
+HARD_NUM_WARPS = 4
+HARD_NUM_STAGES = 1
+HARD_INPUT_PRECISION = "ieee"
 
 
 if triton is not None:
@@ -182,7 +176,12 @@ if triton is not None:
 
 
 def hard_route_attention_triton_fused(q, k, v, scale=None, output=None):
-    """Experimental hard-C4 kernel written in the same layout as flash_attention_triton."""
+    """Forward-only hard C4 FlashAttention-style Triton kernel.
+
+    q: [B, query_outer, query_rows, query_cols, H, D]
+    k: [B, key_outer, key_rows, key_cols, H, D]
+    v: [B, key_outer, key_rows, key_cols, H, D]
+    """
     if triton is None:
         raise RuntimeError("Triton is required for hard_route_attention_triton_fused.")
 
@@ -195,6 +194,7 @@ def hard_route_attention_triton_fused(q, k, v, scale=None, output=None):
         scale = dim**-0.5
 
     output = output if output is not None and output.is_contiguous() else torch.empty_like(q)
+    block_n = max(HARD_BLOCK_N, triton.next_power_of_2(k_cols))
     grid = (batch * heads * q_outer, q_cols)
     _hard_c4_fused_forward_kernel[grid](
         q,
@@ -209,28 +209,24 @@ def hard_route_attention_triton_fused(q, k, v, scale=None, output=None):
         HEADS=heads,
         K_COLS=k_cols,
         D_HEAD=dim,
-        BLOCK_M=HARD_FUSED_BLOCK_M,
-        BLOCK_N=triton.next_power_of_2(k_cols),
+        BLOCK_M=HARD_BLOCK_M,
+        BLOCK_N=block_n,
         BLOCK_D=triton.next_power_of_2(dim),
         SCALE=float(scale),
-        INPUT_PRECISION=HARD_FUSED_INPUT_PRECISION,
-        num_warps=HARD_FUSED_NUM_WARPS,
-        num_stages=HARD_FUSED_NUM_STAGES,
+        INPUT_PRECISION=HARD_INPUT_PRECISION,
+        num_warps=HARD_NUM_WARPS,
+        num_stages=HARD_NUM_STAGES,
     )
     return output
 
 
 __all__ = [
-    "FUSED_BLOCK_Q_ROWS",
-    "FUSED_LOGIT_INPUT_PRECISION",
-    "FUSED_NUM_STAGES",
-    "FUSED_NUM_WARPS",
+    "HARD_BLOCK_M",
+    "HARD_BLOCK_N",
     "HARD_C4_BACKEND",
     "HARD_C4_FUSED_BACKEND",
-    "HARD_FUSED_BLOCK_M",
-    "HARD_FUSED_BLOCK_N",
-    "HARD_FUSED_INPUT_PRECISION",
-    "HARD_FUSED_NUM_STAGES",
-    "HARD_FUSED_NUM_WARPS",
+    "HARD_INPUT_PRECISION",
+    "HARD_NUM_STAGES",
+    "HARD_NUM_WARPS",
     "hard_route_attention_triton_fused",
 ]
