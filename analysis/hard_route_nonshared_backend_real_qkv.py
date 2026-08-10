@@ -10,7 +10,6 @@ from omegaconf import OmegaConf
 
 from attention.hard_route_triton import (
     HARD_C4_BACKEND,
-    HARD_C4_FUSED_BACKEND,
     MERGE_BLOCK_J,
 )
 from generate import load_generator_checkpoint, load_prompts
@@ -39,20 +38,8 @@ def _dtype_bytes(dtype):
 
 def estimate_direct_intermediate_bytes(q, grid_size, query_outer_chunk, variant):
     """Estimate K/V/bias traffic for the supported direct C4 simplemerge path."""
-    if variant["hard_route_backend"] not in {HARD_C4_BACKEND, HARD_C4_FUSED_BACKEND}:
+    if variant["hard_route_backend"] != HARD_C4_BACKEND:
         return None
-    if variant["hard_route_backend"] == HARD_C4_FUSED_BACKEND:
-        return {
-            "route_tokens": int(grid_size[0]) * int(grid_size[1]) * 4,
-            "query_chunks": (int(grid_size[0]) + int(query_outer_chunk) - 1) // int(query_outer_chunk),
-            "max_chunk_intermediate_bytes": 0,
-            "intermediate_write_bytes_per_attention_call": 0,
-            "intermediate_read_bytes_per_attention_call": 0,
-            "writes_merged_key": False,
-            "writes_merged_value": False,
-            "writes_routing_bias": False,
-            "note": "fused path keeps merged K/V/bias inside one Triton kernel",
-        }
 
     batch, _, heads, dim = q.shape
     frames, height, width = grid_size
@@ -135,10 +122,6 @@ def exact_variants():
         },
         "hard_c4": exact_backend(
             DIRECT_MERGE_BACKEND,
-            seed_mode="local_with_ith",
-        ),
-        "hard_c4_fused": exact_backend(
-            HARD_C4_FUSED_BACKEND,
             seed_mode="local_with_ith",
         ),
     }
