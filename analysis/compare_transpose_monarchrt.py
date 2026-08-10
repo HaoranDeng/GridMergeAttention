@@ -81,7 +81,12 @@ def pad_to_multiples(x, frames, height, width, h_reduce, w_reduce):
 
     valid = torch.zeros(batch, frames, padded_h, padded_w, 1, 1, device=x.device, dtype=torch.bool)
     valid[:, :, :height, :width] = True
-    return padded.reshape(batch, frames * padded_h * padded_w, heads, dim), valid, padded_h, padded_w
+    return (
+        padded.reshape(batch, frames * padded_h * padded_w, heads, dim),
+        valid.reshape(batch, frames * padded_h * padded_w, 1, 1),
+        padded_h,
+        padded_w,
+    )
 
 
 def crop_from_padded(x, frames, height, width, padded_h, padded_w):
