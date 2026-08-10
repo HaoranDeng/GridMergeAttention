@@ -35,6 +35,23 @@ def parse_args():
     parser.add_argument("--model_id", default=None)
     parser.add_argument("--local_files_only", action="store_true")
     parser.add_argument("--skip_existing", action="store_true")
+    parser.add_argument(
+        "--prompt_shard_id",
+        type=int,
+        default=0,
+        help="Zero-based prompt shard assigned to this process.",
+    )
+    parser.add_argument(
+        "--num_prompt_shards",
+        type=int,
+        default=1,
+        help="Balance unfinished prompt work across this many workers.",
+    )
+    parser.add_argument(
+        "--vbench_filenames",
+        action="store_true",
+        help="Save outputs as '<prompt>-<sample>.mp4' for VBench evaluation.",
+    )
     parser.add_argument("--token_merging_w_reduce", type=int, default=None)
     parser.add_argument(
         "--token_merging_query_outer_chunk", type=int, default=None
@@ -56,7 +73,15 @@ def load_prompts(path, limit):
     return prompts if limit < 0 else prompts[:limit]
 
 
-def output_path(output_dir, prompt_index, sample_index):
+def output_path(
+    output_dir,
+    prompt_index,
+    prompt,
+    sample_index,
+    vbench_filenames=False,
+):
+    if vbench_filenames:
+        return output_dir / f"{prompt}-{sample_index}.mp4"
     return output_dir / f"{prompt_index:03d}-{sample_index:02d}.mp4"
 
 
@@ -78,6 +103,10 @@ def main():
         raise RuntimeError("HunyuanVideo generation requires a CUDA GPU.")
     if args.num_samples <= 0:
         raise ValueError("--num_samples must be positive.")
+    if args.num_prompt_shards <= 0:
+        raise ValueError("--num_prompt_shards must be positive.")
+    if not 0 <= args.prompt_shard_id < args.num_prompt_shards:
+        raise ValueError("--prompt_shard_id must be in [0, --num_prompt_shards).")
 
     config = load_yaml(args.config)
     model = dict(config.get("model", {}))
@@ -117,11 +146,33 @@ def main():
     destination = Path(args.output_dir)
     destination.mkdir(parents=True, exist_ok=True)
 
-    work = []
+    indexed_prompts = list(enumerate(prompts))
+    if args.vbench_filenames:
+        unique_prompts = []
+        seen_prompts = set()
+        for prompt_index, prompt in indexed_prompts:
+            if prompt in seen_prompts:
+                continue
+            if "/" in prompt or os.sep in prompt:
+                raise ValueError(
+                    f"VBench prompt cannot contain a path separator: {prompt!r}"
+                )
+            seen_prompts.add(prompt)
+            unique_prompts.append((prompt_index, prompt))
+        indexed_prompts = unique_prompts
+
+    all_prompt_work = []
     skipped = 0
-    for prompt_index, prompt in enumerate(prompts):
+    for prompt_index, prompt in indexed_prompts:
+        missing_samples = []
         for sample_index in range(args.num_samples):
-            path = output_path(destination, prompt_index, sample_index)
+            path = output_path(
+                destination,
+                prompt_index,
+                prompt,
+                sample_index,
+                args.vbench_filenames,
+            )
             if (
                 args.skip_existing
                 and path.is_file()
@@ -129,9 +180,50 @@ def main():
             ):
                 skipped += 1
                 continue
-            work.append((prompt_index, prompt, sample_index, path))
+            missing_samples.append(sample_index)
+        if missing_samples:
+            all_prompt_work.append((prompt_index, prompt, missing_samples))
+
+    sharded_prompt_work = [[] for _ in range(args.num_prompt_shards)]
+    shard_work_units = [0] * args.num_prompt_shards
+    for prompt_item in all_prompt_work:
+        target_shard = min(
+            range(args.num_prompt_shards),
+            key=lambda shard_id: (shard_work_units[shard_id], shard_id),
+        )
+        sharded_prompt_work[target_shard].append(prompt_item)
+        shard_work_units[target_shard] += len(prompt_item[2])
+
+    work = []
+    for prompt_index, prompt, sample_indices in sharded_prompt_work[
+        args.prompt_shard_id
+    ]:
+        for sample_index in sample_indices:
+            work.append(
+                (
+                    prompt_index,
+                    prompt,
+                    sample_index,
+                    output_path(
+                        destination,
+                        prompt_index,
+                        prompt,
+                        sample_index,
+                        args.vbench_filenames,
+                    ),
+                )
+            )
+    print(
+        f"Remaining-work shard {args.prompt_shard_id + 1}/"
+        f"{args.num_prompt_shards}: {len(work)} samples assigned; "
+        f"global scan found {len(all_prompt_work)} prompts with pending "
+        f"samples and {skipped} existing videos."
+    )
     if not work:
-        print(f"Nothing to generate; skipped {skipped} existing videos.")
+        print(
+            f"Nothing to generate for prompt shard "
+            f"{args.prompt_shard_id + 1}."
+        )
         return
 
     pipe = load_hunyuan_token_merging_pipeline(

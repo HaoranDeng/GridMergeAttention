@@ -19,12 +19,16 @@ from einops import rearrange
 from .common import (
     blocks_to_video,
     crop_video_tokens_from_multiples,
+    gather_seed_queries,
     masked_soft_merge_weights,
     merge_query_row,
     pad_video_tokens_to_multiples,
+    random_seed_rows,
     scale_qk,
+    validate_block_seed_mode,
     video_to_blocks,
 )
+from .hard_route import hard_route_merge_weights
 
 
 _LAYOUT_ALIASES = {"query_column_key_row": "hard_route"}
@@ -168,6 +172,118 @@ def _video_query_chunk_attention(
     return video_output + text_output
 
 
+def _hard_route_video_query_chunk_attention(
+    query,
+    video_key,
+    video_value,
+    text_key,
+    text_value,
+    text_key_valid,
+    scale,
+    num_merge_tokens,
+    seed_mode,
+    seed,
+    query_outer_offset,
+):
+    """Apply multi-token hard routing to video keys with exact text keys."""
+
+    include_ith = validate_block_seed_mode(
+        seed_mode, "Hunyuan hard-route token merging"
+    )
+    fast_with_include = seed_mode == "fast_random_with_ith"
+    if num_merge_tokens > query.size(2):
+        raise ValueError(
+            "num_merge_tokens cannot exceed query rows per Hunyuan block."
+        )
+    if num_merge_tokens > video_key.size(3):
+        raise ValueError(
+            "num_merge_tokens cannot exceed key columns per Hunyuan block."
+        )
+
+    query_outer = torch.arange(
+        query_outer_offset,
+        query_outer_offset + query.size(1),
+        device=query.device,
+    )
+    key_outer = torch.arange(video_key.size(1), device=query.device)
+    seed_rows = random_seed_rows(
+        query_outer,
+        key_outer,
+        video_key.size(2),
+        query.size(3),
+        query.size(2),
+        num_merge_tokens,
+        seed,
+        include_ith=include_ith,
+        fast_with_include=fast_with_include,
+    )
+    seed_queries = gather_seed_queries(query, seed_rows)
+
+    seed_logits = torch.einsum(
+        "bafkjchd,bfklhd->bhafkjcl", seed_queries, video_key
+    ).float()
+    seed_logits = seed_logits * float(scale)
+    merge_weights, merge_logprob, compressed_valid = (
+        hard_route_merge_weights(seed_logits, video_key.dtype)
+    )
+
+    merged_keys = torch.einsum(
+        "bhafkjcl,bfklhd->bafjkchd", merge_weights, video_key
+    )
+    merged_values = torch.einsum(
+        "bhafkjcl,bfklhe->bafjkche", merge_weights, video_value
+    )
+    routing_bias = (merge_weights * merge_logprob).sum(dim=-1)
+
+    video_logits = torch.einsum(
+        "bafjkchd,baijhd->bhafjkci", merged_keys, query
+    ).float()
+    video_logits = video_logits * float(scale)
+    routing_bias = rearrange(
+        routing_bias, "b h a f k j c -> b h a f j k c 1"
+    )
+    video_logits = video_logits - routing_bias
+    video_logits = rearrange(
+        video_logits, "b h a f j k c i -> b h a j i (f k c)"
+    )
+
+    text_logits = torch.einsum(
+        "baijhd,bthd->bhajit", query, text_key
+    ).float()
+    text_logits = text_logits * float(scale)
+    joint_logits = torch.cat((video_logits, text_logits), dim=-1)
+
+    compressed_valid = rearrange(
+        compressed_valid, "b h a f k j c -> b h a j (f k c)"
+    )
+    text_valid = text_key_valid[:, None, None, None, :].expand(
+        -1,
+        query.size(4),
+        query.size(1),
+        query.size(3),
+        -1,
+    )
+    joint_valid = torch.cat((compressed_valid, text_valid), dim=-1)
+    joint_logits = joint_logits.masked_fill(
+        ~joint_valid.unsqueeze(-2), torch.finfo(torch.float32).min
+    )
+    joint_weights = torch.softmax(joint_logits, dim=-1).to(query.dtype)
+
+    video_key_count = video_logits.shape[-1]
+    video_weights = joint_weights[..., :video_key_count]
+    text_weights = joint_weights[..., video_key_count:]
+    merged_values = rearrange(
+        merged_values, "b a f j k c h e -> b h a j (f k c) e"
+    )
+    video_output = torch.einsum(
+        "bhajir,bhajre->baijhe", video_weights, merged_values
+    )
+    text_output = torch.einsum(
+        "bhajit,bthe->baijhe", text_weights, text_value
+    )
+    return video_output + text_output
+
+
 def hunyuan_token_merging_attn(
     video_q,
     video_k,
@@ -187,12 +303,14 @@ def hunyuan_token_merging_attn(
     query_outer_chunk=1,
     layout="hard_route",
     num_merge_tokens=1,
+    seed_mode="random_with_ith",
+    seed=0,
 ):
     """Run Hunyuan joint attention with GridMerge on video keys only.
 
-    The initial Hunyuan integration intentionally supports only the validated
-    one-token, non-transposed GridMerge layout. Other experimental Wan layouts
-    need their own joint video/text derivation before they can be enabled.
+    Hunyuan supports the non-transposed hard-route family. One-token execution
+    uses GridMerge; C>1 execution uses deterministic seed rows and hard key
+    assignment. Select-route and transposed Wan layouts remain unsupported.
     """
 
     _validate_stream("video", video_q, video_k, video_v)
@@ -206,10 +324,11 @@ def hunyuan_token_merging_attn(
         raise ValueError("all video and text Q/K/V tensors must use one dtype.")
 
     layout = _LAYOUT_ALIASES.get(layout or "hard_route", layout or "hard_route")
-    if layout != "hard_route" or int(num_merge_tokens) != 1:
+    num_merge_tokens = int(num_merge_tokens)
+    if layout != "hard_route" or num_merge_tokens < 1:
         raise ValueError(
-            "Hunyuan joint token merging currently supports only "
-            "layout='hard_route' with num_merge_tokens=1."
+            "Hunyuan joint token merging supports only layout='hard_route' "
+            "with num_merge_tokens >= 1."
         )
 
     f_tied = int(f_tied)
@@ -245,6 +364,19 @@ def hunyuan_token_merging_attn(
     original_video_valid = key_valid[:, :video_length]
     text_key_valid = key_valid[:, video_length:]
 
+    needs_spatial_padding = bool(
+        height % h_reduce or width % w_reduce
+    )
+    if num_merge_tokens > 1 and needs_spatial_padding:
+        raise ValueError(
+            "multi-token Hunyuan hard routing requires height/width divisible "
+            "by h_reduce/w_reduce."
+        )
+    if num_merge_tokens > 1 and not original_video_valid.all():
+        raise ValueError(
+            "multi-token Hunyuan hard routing expects all video keys to be valid."
+        )
+
     # Preserve the original tensors for exact text-query attention. The video
     # path below creates scaled and, when necessary, spatially padded views.
     dense_video_key = video_k
@@ -274,10 +406,10 @@ def hunyuan_token_merging_attn(
         width,
     )
 
-    # Match PyTorch SDPA's scale exactly by multiplying both Q and K by the
-    # square root. This also matches the existing Wan GridMerge implementation.
-    video_q, video_k = scale_qk(video_q, video_k, sm_scale)
-    _, text_k = scale_qk(text_q, text_k, sm_scale)
+    if num_merge_tokens == 1:
+        # One-token GridMerge distributes the SDPA scale across Q and K.
+        video_q, video_k = scale_qk(video_q, video_k, sm_scale)
+        _, text_k = scale_qk(text_q, text_k, sm_scale)
 
     query_blocks = video_to_blocks(
         video_q, f_tied, h_reduce, w_reduce, height, width
@@ -300,16 +432,33 @@ def hunyuan_token_merging_attn(
     output_blocks = torch.empty_like(query_blocks)
     for start in range(0, query_blocks.size(1), query_outer_chunk):
         end = min(start + query_outer_chunk, query_blocks.size(1))
-        output_blocks[:, start:end] = _video_query_chunk_attention(
-            query_blocks[:, start:end],
-            key_blocks,
-            value_blocks,
-            text_k,
-            text_v,
-            valid_blocks,
-            text_key_valid,
-            q_init,
-        )
+        if num_merge_tokens == 1:
+            output_blocks[:, start:end] = _video_query_chunk_attention(
+                query_blocks[:, start:end],
+                key_blocks,
+                value_blocks,
+                text_k,
+                text_v,
+                valid_blocks,
+                text_key_valid,
+                q_init,
+            )
+        else:
+            output_blocks[:, start:end] = (
+                _hard_route_video_query_chunk_attention(
+                    query_blocks[:, start:end],
+                    key_blocks,
+                    value_blocks,
+                    text_k,
+                    text_v,
+                    text_key_valid,
+                    sm_scale,
+                    num_merge_tokens,
+                    seed_mode,
+                    int(seed),
+                    start,
+                )
+            )
 
     video_output = blocks_to_video(
         output_blocks, f_tied, h_reduce, w_reduce

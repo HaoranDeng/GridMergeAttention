@@ -119,6 +119,8 @@ def install_hunyuan_token_merging_attention(pipe, token_merging_args):
         "num_merge_tokens": _positive_int(
             options.pop("num_merge_tokens", 1), "num_merge_tokens"
         ),
+        "seed_mode": options.pop("seed_mode", "random_with_ith"),
+        "seed": int(options.pop("seed", 0)),
     }
     if options:
         raise ValueError(
@@ -128,10 +130,9 @@ def install_hunyuan_token_merging_attention(pipe, token_merging_args):
     normalized_layout = {
         "query_column_key_row": "hard_route"
     }.get(processor_options["layout"], processor_options["layout"])
-    if normalized_layout != "hard_route" or processor_options["num_merge_tokens"] != 1:
+    if normalized_layout != "hard_route":
         raise ValueError(
-            "Hunyuan currently supports only layout='hard_route' with "
-            "num_merge_tokens=1."
+            "Hunyuan currently supports only layout='hard_route'."
         )
     processor_options["layout"] = normalized_layout
     if grid_f % processor_options["f_tied"]:
@@ -139,6 +140,40 @@ def install_hunyuan_token_merging_attention(pipe, token_merging_args):
             f"post-patch frame grid {grid_f} must be divisible by "
             f"f_tied={processor_options['f_tied']}."
         )
+    if processor_options["num_merge_tokens"] > 1:
+        if (
+            grid_h % processor_options["h_reduce"]
+            or grid_w % processor_options["w_reduce"]
+        ):
+            raise ValueError(
+                "multi-token Hunyuan hard routing requires the post-patch "
+                "height/width to be divisible by h_reduce/w_reduce."
+            )
+        rows_per_block = (
+            processor_options["f_tied"]
+            * grid_h
+            // processor_options["h_reduce"]
+        )
+        if processor_options["num_merge_tokens"] > rows_per_block:
+            raise ValueError(
+                f"num_merge_tokens={processor_options['num_merge_tokens']} "
+                f"exceeds {rows_per_block} query rows per block."
+            )
+        columns_per_block = grid_w // processor_options["w_reduce"]
+        if processor_options["num_merge_tokens"] > columns_per_block:
+            raise ValueError(
+                f"num_merge_tokens={processor_options['num_merge_tokens']} "
+                f"exceeds {columns_per_block} key columns per block."
+            )
+        if processor_options["seed_mode"] not in {
+            "random",
+            "random_with_ith",
+            "fast_random_with_ith",
+        }:
+            raise ValueError(
+                "multi-token Hunyuan seed_mode must be 'random', "
+                "'random_with_ith', or 'fast_random_with_ith'."
+            )
 
     block_groups = (
         ("dual", getattr(pipe.transformer, "transformer_blocks", None)),

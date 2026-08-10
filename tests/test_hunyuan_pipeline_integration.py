@@ -124,9 +124,44 @@ class HunyuanPipelineInstallationTests(unittest.TestCase):
                     "height": 480,
                     "width": 720,
                     "num_frames": 129,
-                    "seed_mode": "random",
+                    "select_temperature": 1.0,
                 },
             )
+
+    def test_installer_accepts_hard_route_c2_c4_c6(self):
+        """The three launcher variants must reach every processor unchanged."""
+
+        for num_merge_tokens in (2, 4, 6):
+            with self.subTest(num_merge_tokens=num_merge_tokens):
+                pipe = fake_pipeline()
+                install_hunyuan_token_merging_attention(
+                    pipe,
+                    {
+                        "enable": True,
+                        "height": 480,
+                        "width": 720,
+                        "num_frames": 129,
+                        "layout": "hard_route",
+                        "num_merge_tokens": num_merge_tokens,
+                        "seed_mode": "random_with_ith",
+                        "seed": 23,
+                    },
+                )
+                processors = [
+                    block.attn.processor
+                    for block in (
+                        pipe.transformer.transformer_blocks
+                        + pipe.transformer.single_transformer_blocks
+                    )
+                ]
+                self.assertTrue(
+                    all(
+                        processor.num_merge_tokens == num_merge_tokens
+                        and processor.seed_mode == "random_with_ith"
+                        and processor.seed == 23
+                        for processor in processors
+                    )
+                )
 
 
 if __name__ == "__main__":

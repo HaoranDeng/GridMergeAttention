@@ -28,6 +28,8 @@ class HunyuanTokenMergingAttnProcessor2_0:
         query_outer_chunk=1,
         layout="hard_route",
         num_merge_tokens=1,
+        seed_mode="random_with_ith",
+        seed=0,
         layer_index=None,
         block_kind=None,
     ):
@@ -44,6 +46,8 @@ class HunyuanTokenMergingAttnProcessor2_0:
         self.query_outer_chunk = int(query_outer_chunk)
         self.layout = layout
         self.num_merge_tokens = int(num_merge_tokens)
+        self.seed_mode = seed_mode
+        self.seed = int(seed)
         self.layer_index = layer_index
         self.block_kind = block_kind
 
@@ -166,6 +170,8 @@ class HunyuanTokenMergingAttnProcessor2_0:
                 query_outer_chunk=self.query_outer_chunk,
                 layout=self.layout,
                 num_merge_tokens=self.num_merge_tokens,
+                seed_mode=self.seed_mode,
+                seed=self.seed,
             )
         )
 

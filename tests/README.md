@@ -9,8 +9,9 @@ These tests are designed to prove three separate properties:
 2. the causal self-attention calls GridMerge with current-block Q and a growing
    visible K/V prefix;
 3. Hunyuan's joint video/text Token-Merging equations preserve masks and one
-   shared normalization, and the processor/pipeline integration can reproduce
-   untouched Diffusers Hunyuan when the attention core is exact.
+   shared normalization for one-token and hard C2/C4/C6 routing, and the
+   processor/pipeline integration can reproduce untouched Diffusers Hunyuan
+   when the attention core is exact.
 
 They use Python's built-in `unittest` because the `etm` environment currently
 does not include `pytest`.
@@ -68,14 +69,19 @@ The individual test files document the behavior they require:
   Hunyuan run with our installed Hunyuan processor using a test-only exact
   dense attention core.
 - `test_hunyuan_token_merging.py` checks the approximate joint video/text
-  equations and mask behavior directly on CPU.
+  equations, mask behavior, exact hard C2/C4/C6 partitions, and agreement with
+  the existing Wan hard-routing core directly on CPU.
 - `test_hunyuan_pipeline_integration.py` checks runtime grid derivation and
   processor installation in both Hunyuan main block families.
 - `test_hunyuan_generation_routing.py` checks CLI geometry propagation,
-  deterministic samples, resume behavior, and atomic output routing with a
-  fake pipeline.
+  deterministic samples, resume behavior, prompt sharding, VBench filenames,
+  and atomic output routing with a fake pipeline.
+- `test_hunyuan_multi_gpu_launcher.py` checks that the Hunyuan experiment
+  launcher contains only hard C2/C4/C6, shards prompts across explicit GPUs,
+  and rejects a launch with no reserved GPU list.
 - `test_hunyuan_diffusers_tiny_parity.py` is the opt-in, checkpoint-free parity
-  test against a tiny real Diffusers 0.34 Hunyuan transformer.
+  and hard C2/C4/C6 execution test against a tiny real Diffusers 0.34 Hunyuan
+  transformer.
 
 ## Real-checkpoint GPU test
 

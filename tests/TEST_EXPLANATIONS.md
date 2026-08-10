@@ -10,7 +10,7 @@ KV prefix, commit clean context, and call Token Merging from causal
 self-attention. The tests verify these requirements separately and then verify
 their integration with the real checkpoint.
 
-Sections 11-15 cover HunyuanVideo. They separately validate the real-checkpoint
+Sections 11-16 cover HunyuanVideo. They separately validate the real-checkpoint
 pipeline boundary, the joint video/text Token-Merging equations, processor
 installation, CLI routing, and a checkpoint-free whole-transformer comparison
 against untouched Diffusers.
@@ -636,10 +636,34 @@ Why this matters: Hunyuan constructs a joint key mask after its text refiner.
 Losing or shifting that mask when splitting the sequence would let padding
 affect every later transformer block.
 
+### `test_multi_token_hard_route_exact_partition_matches_dense_joint_attention`
+
+This executes C2, C4, and C6. The small Q/K tensors are constructed so each
+hard-routed cluster contains exactly one video key. With no within-cluster
+compression error, both output streams must match independently calculated
+dense joint attention, including a padded text key.
+
+Why this matters: it tests the full Hunyuan-specific multi-token equation. In
+particular, the C compressed video logits and exact text logits must receive
+the same scale and enter one shared softmax. A video-only hard-route test cannot
+detect a wrong video/text normalization boundary.
+
+### `test_multi_token_video_core_matches_wan_hard_route`
+
+This executes C2, C4, and C6 on random inputs while masking all text keys from
+the video-query result. It compares Hunyuan's approximate video output with the
+repository's established Wan `hard_route` implementation using identical
+geometry, seeds, Q/K/V, and scale.
+
+Why this matters: the Hunyuan implementation intentionally adapts the existing
+hard assignment, within-cluster merge, entropy correction, and deterministic
+seed selection. Agreement proves those mechanics were preserved before the
+Hunyuan-only exact text logits are added.
+
 ### Unsupported-layout and contract tests
 
-The remaining tests require explicit errors for transposed/multi-token Wan
-layouts, malformed video geometry, and non-boolean masks. A clear early error
+The remaining tests require explicit errors for select/transposed Wan layouts,
+invalid merge-token counts, malformed video geometry, and non-boolean masks. A clear early error
 is safer than silently treating text tokens as part of a video grid or treating
 an additive attention bias as a boolean validity mask.
 
@@ -674,6 +698,11 @@ text refiner must remain unchanged because it has no video grid.
 Invalid pixel geometry and unknown configuration keys must fail during setup,
 before model denoising consumes substantial time or GPU memory.
 
+The C2/C4/C6 propagation test additionally installs each hard-route variant
+and verifies that `num_merge_tokens`, `seed_mode`, and `seed` reach every dual-
+and single-stream processor. This catches the common failure mode where the
+YAML says C4 or C6 but the runtime silently retains a one-token default.
+
 ## 14. Tiny Diffusers Hunyuan whole-transformer parity
 
 File: `test_hunyuan_diffusers_tiny_parity.py`
@@ -700,6 +729,13 @@ test: it catches projection, stream-boundary, RoPE, output-projection, and
 block-installation errors using actual Diffusers code, but needs neither model
 downloads nor a GPU.
 
+The second test uses a 6x6 post-patch video grid and runs hard C2, C4, and C6
+through one real dual-stream block and one real single-stream block. It checks
+the final tensor's shape and finiteness and verifies that every installed
+processor received the requested C value. This is an execution smoke test, not
+a dense-parity test: hard routing is intentionally approximate once clusters
+contain multiple keys.
+
 Run it in the existing Hunyuan-capable environment:
 
 ```bash
@@ -713,9 +749,9 @@ PYTHONPATH=/xuanwu-tank/east/zrl/training-free-videogen \
 
 File: `test_hunyuan_generation_routing.py`
 
-This CPU-only test invokes `generate_hunyuan.main()` with a temporary YAML
-configuration, two prompts, two requested samples per prompt, and a fake
-pipeline. One output is pre-created to simulate a resumed run.
+This CPU-only test invokes `generate_hunyuan.main()` with temporary YAML
+configurations, prompt files, and a fake pipeline. The resume case uses two
+prompts and two requested samples per prompt, with one pre-created output.
 
 It verifies that:
 
@@ -732,9 +768,33 @@ It verifies that:
   partial artifact behind;
 - the already completed video is never overwritten.
 
+A second case supplies repeated VBench prompts and selects one of two prompt
+shards. It verifies that repeated prompt text is generated only once, all
+samples for a prompt stay on one worker, the assigned sample keeps its global
+deterministic seed, and the output is named `<prompt>-<sample>.mp4`.
+
 This does not test neural generation. It protects the operational code around
 the model so a correct attention implementation is not undermined by wrong
 geometry, non-reproducible resume behavior, or incomplete output files.
+
+## 16. Hunyuan hard-only multi-GPU launcher
+
+File: `test_hunyuan_multi_gpu_launcher.py`
+
+This CPU-only test treats the shell launcher and its three YAML files as one
+experiment contract. It verifies that:
+
+- the exact run set is `hard_c2`, `hard_c4`, and `hard_c6`;
+- no select-route configuration or run name is present;
+- each YAML uses `layout: hard_route` and the matching C value;
+- model and generation settings are identical across the three YAML files;
+- workers receive prompt-shard, resume, and VBench-filename arguments;
+- Self-Forcing-only checkpoint/EMA arguments cannot leak into Hunyuan;
+- launching without `GPU_IDS` exits safely before loading a model.
+
+Why this matters: attention tests can pass while a batch launcher points at the
+wrong config or writes colliding filenames. This test protects the exact
+hard-only experiment requested here without reserving a GPU or loading weights.
 
 ## Supporting files
 
@@ -796,13 +856,14 @@ For Hunyuan, the currently passing fast/checkpoint-free evidence is:
 
 ```text
 shared video/text softmax and prompt-mask equation tests
++ hard C2/C4/C6 assignment/merge parity with the Wan core
 + installation in every dual- and single-stream main block
 + text-refiner exclusion
-+ runtime-grid and generation-routing tests
++ runtime-grid, generation-sharding, and hard-only launcher tests
 + whole-transformer parity against tiny untouched Diffusers Hunyuan
 ```
 
-The remaining real-checkpoint evidence is:
+The real-checkpoint dense-probe evidence has also passed:
 
 ```text
 real checkpoint loaded in both subprocesses
@@ -812,7 +873,8 @@ real checkpoint loaded in both subprocesses
 + per-step and final latent parity with untouched Diffusers
 ```
 
-That final differential test will establish the full-checkpoint non-approximate
-pipeline baseline. A real run with the approximate core enabled, followed by
-memory/runtime and video-quality measurement, is still required before
-claiming practical acceleration or preserved quality.
+The recorded run observed all 120 attention calls over two denoising steps and
+matched both per-step and final latents exactly. A real run with the C2/C4/C6
+approximate core enabled, followed by memory/runtime and video-quality
+measurement, is still required before claiming practical acceleration or
+preserved quality.

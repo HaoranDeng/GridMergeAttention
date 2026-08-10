@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 
 from attention.hunyuan_token_merging import hunyuan_token_merging_attn
+from attention.token_merging import token_merging_attn
 
 
 def dense_joint_attention(video_q, video_k, video_v, text_q, text_k, text_v, mask):
@@ -179,13 +180,134 @@ class HunyuanJointTokenMergingTests(unittest.TestCase):
             actual_text, expected_text, rtol=1e-5, atol=2e-6
         )
 
+    def test_hard_route_c2_c4_c6_exact_partition_matches_dense_joint_attention(self):
+        """Hard C2/C4/C6 must share one exact video/text softmax."""
+
+        for num_merge_tokens in (2, 4, 6):
+            with self.subTest(num_merge_tokens=num_merge_tokens):
+                size = num_merge_tokens
+                video_q = torch.zeros(1, size, size, 1, size)
+                video_k = torch.zeros_like(video_q)
+                for row in range(size):
+                    video_q[:, row, :, 0, row] = 1.0
+                for column in range(size):
+                    video_k[:, :, column, 0, column] = 1.0
+                video_q = video_q.reshape(1, size * size, 1, size)
+                video_k = video_k.reshape_as(video_q)
+
+                generator = torch.Generator().manual_seed(900 + size)
+                video_v = torch.randn(
+                    video_q.shape, generator=generator
+                )
+                text_q = torch.randn(
+                    1, 3, 1, size, generator=generator
+                )
+                text_k = torch.randn(
+                    1, 3, 1, size, generator=generator
+                )
+                text_v = torch.randn(
+                    1, 3, 1, size, generator=generator
+                )
+                mask = torch.ones(1, size * size + 3, dtype=torch.bool)
+                mask[:, -1] = False
+
+                actual_video, actual_text = hunyuan_token_merging_attn(
+                    video_q,
+                    video_k,
+                    video_v,
+                    text_q,
+                    text_k,
+                    text_v,
+                    f_tied=1,
+                    h_reduce=1,
+                    w_reduce=1,
+                    h=size,
+                    w=size,
+                    attention_mask=mask,
+                    layout="hard_route",
+                    num_merge_tokens=num_merge_tokens,
+                    seed_mode="random_with_ith",
+                    seed=17,
+                )
+                expected_video, expected_text = dense_joint_attention(
+                    video_q,
+                    video_k,
+                    video_v,
+                    text_q,
+                    text_k,
+                    text_v,
+                    mask,
+                )
+                torch.testing.assert_close(
+                    actual_video, expected_video, rtol=1e-5, atol=2e-6
+                )
+                torch.testing.assert_close(
+                    actual_text, expected_text, rtol=1e-5, atol=2e-6
+                )
+
+    def test_hard_route_c2_c4_c6_match_wan_core_when_text_is_masked(self):
+        """The approximate video-key path must retain the established hard-route math."""
+
+        torch.manual_seed(707)
+        height, width = 6, 7
+        video_shape = (1, height * width, 2, 4)
+        text_shape = (1, 2, 2, 4)
+        video_q = torch.randn(video_shape)
+        video_k = torch.randn(video_shape)
+        video_v = torch.randn(video_shape)
+        text_q = torch.randn(text_shape)
+        text_k = torch.randn(text_shape)
+        text_v = torch.randn(text_shape)
+        mask = torch.ones(1, height * width + 2, dtype=torch.bool)
+        mask[:, height * width :] = False
+
+        for num_merge_tokens in (2, 4, 6):
+            with self.subTest(num_merge_tokens=num_merge_tokens):
+                actual, _ = hunyuan_token_merging_attn(
+                    video_q,
+                    video_k,
+                    video_v,
+                    text_q,
+                    text_k,
+                    text_v,
+                    f_tied=1,
+                    h_reduce=1,
+                    w_reduce=1,
+                    h=height,
+                    w=width,
+                    attention_mask=mask,
+                    layout="hard_route",
+                    num_merge_tokens=num_merge_tokens,
+                    seed_mode="random_with_ith",
+                    seed=31,
+                )
+                expected = token_merging_attn(
+                    video_q,
+                    video_k,
+                    video_v,
+                    f_tied=1,
+                    h_reduce=1,
+                    w_reduce=1,
+                    h=height,
+                    w=width,
+                    layout="hard_route",
+                    num_merge_tokens=num_merge_tokens,
+                    seed_mode="random_with_ith",
+                    seed=31,
+                )
+                torch.testing.assert_close(
+                    actual, expected, rtol=1e-5, atol=2e-6
+                )
+
     def test_unsupported_wan_layouts_are_rejected_explicitly(self):
         """Unvalidated Wan-only layouts must not silently run as Hunyuan."""
 
         with self.assertRaisesRegex(ValueError, "only layout='hard_route'"):
             self.call(layout="hard_route_transpose")
-        with self.assertRaisesRegex(ValueError, "num_merge_tokens=1"):
-            self.call(num_merge_tokens=2)
+        with self.assertRaisesRegex(ValueError, "only layout='hard_route'"):
+            self.call(layout="select_route", num_merge_tokens=2)
+        with self.assertRaisesRegex(ValueError, "num_merge_tokens >= 1"):
+            self.call(num_merge_tokens=0)
 
     def test_geometry_and_mask_contracts_fail_early(self):
         """Wrong grids and additive masks would otherwise corrupt token boundaries."""

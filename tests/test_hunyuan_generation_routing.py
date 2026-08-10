@@ -152,6 +152,79 @@ class HunyuanGenerationRoutingTests(unittest.TestCase):
                 self.assertEqual((output_dir / filename).read_bytes(), b"video")
             self.assertEqual(list(output_dir.glob(".*.partial.mp4")), [])
 
+    def test_vbench_prompts_are_deduplicated_and_sharded(self):
+        """Each prompt stays on one worker and uses VBench-compatible filenames."""
+
+        with tempfile.TemporaryDirectory(prefix="hunyuan_sharding_test_") as root:
+            root = Path(root)
+            config_path = root / "config.yaml"
+            prompt_path = root / "prompts.txt"
+            output_dir = root / "videos"
+            config_path.write_text(
+                yaml.safe_dump(
+                    {
+                        "model": {"dtype": "bf16"},
+                        "generation": {
+                            "height": 32,
+                            "width": 48,
+                            "num_frames": 5,
+                            "num_inference_steps": 2,
+                        },
+                        "token_merging_args": {
+                            "enable": True,
+                            "layout": "hard_route",
+                            "num_merge_tokens": 2,
+                            "seed_mode": "random_with_ith",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            prompt_path.write_text("alpha\nbeta\nalpha\n", encoding="utf-8")
+            fake_pipe = FakeHunyuanPipeline()
+
+            def fake_export(unused_frames, path, fps=None):
+                del unused_frames, fps
+                Path(path).write_bytes(b"video")
+
+            argv = [
+                "generate_hunyuan.py",
+                "--config",
+                str(config_path),
+                "--prompt_path",
+                str(prompt_path),
+                "--output_dir",
+                str(output_dir),
+                "--num_videos",
+                "-1",
+                "--num_samples",
+                "1",
+                "--num_prompt_shards",
+                "2",
+                "--prompt_shard_id",
+                "1",
+                "--vbench_filenames",
+                "--seed",
+                "20",
+            ]
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.object(torch.cuda, "is_available", return_value=True),
+                mock.patch.object(
+                    generate_hunyuan,
+                    "load_hunyuan_token_merging_pipeline",
+                    return_value=fake_pipe,
+                ),
+                mock.patch("diffusers.utils.export_to_video", side_effect=fake_export),
+            ):
+                generate_hunyuan.main()
+
+            self.assertEqual(len(fake_pipe.calls), 1)
+            self.assertEqual(fake_pipe.calls[0]["prompt"], "beta")
+            self.assertEqual(fake_pipe.calls[0]["generator_seed"], 21)
+            self.assertEqual((output_dir / "beta-0.mp4").read_bytes(), b"video")
+            self.assertFalse((output_dir / "alpha-0.mp4").exists())
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

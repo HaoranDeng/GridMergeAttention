@@ -7,16 +7,21 @@ the files changed, environment requirements, validation, and current limits.
 
 ## Status
 
-- Production implementation: complete for Diffusers HunyuanVideo text-to-video.
-- Fast CPU equation/installation/generation tests: passed (9 tests).
-- Tiny real-Diffusers transformer parity: passed in the existing `SVG` Conda
-  environment after the final attention changes (`Ran 1 test in 103.640s`,
-  `OK`; runtime varies substantially on the shared filesystem).
-- Complete fast regression suite: 30 tests, all 26 enabled tests passed and 4
-  expensive opt-in tests were skipped as expected (`Ran 30 tests in 55.343s`).
-- Real-checkpoint pipeline parity and full MP4 generation: available as opt-in
-  tests/runs, but not yet executed because this host has neither a locally
-  cached Hunyuan checkpoint nor an accessible free GPU.
+- Production implementation: complete for Diffusers HunyuanVideo text-to-video,
+  including the hard-route C2, C4, and C6 experiment family.
+- Fast CPU equation/installation/generation/launcher tests: passed.
+- Tiny real-Diffusers transformer parity plus hard C2/C4/C6 block execution:
+  both passed in the existing `SVG` Conda environment (`Ran 2 tests in
+  7.558s`, `OK`; runtime varies on the shared filesystem).
+- Complete fast regression suite: 38 tests, all 33 enabled tests passed and 5
+  expensive opt-in tests were skipped as expected.
+- Real-checkpoint dense-probe pipeline parity: passed exactly on an A100 using
+  the cached 12.821B-parameter transformer. All 120 attention calls across two
+  denoising steps were observed; final and per-step latent errors were zero.
+  Peak allocated CUDA memory was 23.894 GiB.
+- Full approximate 480p MP4 generation with hard C2/C4/C6 has not yet been
+  executed. Only the transformer weights are currently cached, so the first
+  full-pipeline run may still download tokenizers, text encoders, and the VAE.
 
 ## Previous and new execution paths
 
@@ -61,7 +66,7 @@ tokens into arbitrary spatial groups. Running video attention and text
 attention independently would also be wrong because two separate softmaxes do
 not preserve the competition between video and text keys.
 
-The implemented rule is therefore:
+For the one-token GridMerge case, the implemented rule is therefore:
 
 ```text
 video queries:
@@ -83,6 +88,24 @@ attention because the text sequence is small. More importantly, it avoids
 compounding an unvalidated approximation through Hunyuan's recurrently updated
 text stream.
 
+For the requested multi-token hard-routing runs (C2, C4, and C6), each video
+block instead does the following:
+
+```text
+choose C deterministic seed-query rows
+    -> score every video key against the C seeds
+    -> hard-assign every video key to its highest-scoring seed
+    -> softmax and merge K/V within each assigned cluster
+    -> apply the hard-route entropy correction
+    -> concatenate C compressed-video logits with exact-text logits
+    -> apply one shared softmax
+```
+
+This is the same hard-assignment/merge equation used by the repository's Wan
+hard-route attention. The Hunyuan-specific part is preserving exact text keys
+inside that same normalization and keeping all text-query attention dense.
+Select routing and transposed layouts are deliberately not enabled.
+
 ## File-by-file changes
 
 ### `attention/hunyuan_token_merging.py` (new)
@@ -99,8 +122,9 @@ It:
 - normalizes compressed video keys and exact text keys in one softmax;
 - evaluates exact text-query SDPA over the original joint sequence;
 - supports bounded `query_outer_chunk` execution;
-- initially permits only the validated one-token, non-transposed
-  `layout: hard_route` path.
+- supports the non-transposed `layout: hard_route` path for one token and for
+  deterministic multi-token C2/C4/C6 routing;
+- keeps select routing and transposed layouts disabled.
 
 ### `attention/hunyuan_attention_processor.py` (new)
 
@@ -155,6 +179,10 @@ Adds a dedicated text-to-video CLI. It:
 - installs Token Merging for the configured generation geometry;
 - generates samples sequentially with deterministic per-output seeds;
 - supports resume through `--skip_existing`;
+- supports deterministic prompt sharding across independent GPU workers;
+- keeps every prompt and all of its missing sample indices on one worker;
+- deduplicates repeated VBench prompts and can emit the required
+  `<prompt>-<sample>.mp4` filenames;
 - exports videos at the configured FPS using atomic partial-file replacement;
 - accepts runtime overrides for model ID, `w_reduce`, and query chunk size.
 
@@ -170,6 +198,21 @@ validated one-token GridMerge settings.
 key row's full width is merged to one routed token. Increasing `w_reduce`
 creates more, narrower width groups and therefore reduces the compression.
 
+### Hard-route experiment configurations (new)
+
+The following configurations hold the Hunyuan model, resolution, 129-frame
+length, 50-step denoising schedule, and all other Token-Merging settings fixed.
+Only `num_merge_tokens` changes:
+
+```text
+configs/token_merging_hunyuan_hard_route_c2_480p.yaml  -> C=2
+configs/token_merging_hunyuan_hard_route_c4_480p.yaml  -> C=4
+configs/token_merging_hunyuan_hard_route_c6_480p.yaml  -> C=6
+```
+
+All three use `layout: hard_route` and `seed_mode: random_with_ith`. There are
+no Hunyuan select-route experiment configurations.
+
 ### `scripts/generate/generate_token_merging_hunyuan.sh` (new)
 
 Adds a reproducible launcher. By default, Hugging Face downloads and temporary
@@ -179,6 +222,22 @@ files stay on the shared project filesystem:
 HF_HOME=/xuanwu-tank/east/zrl/huggingface_cache
 TMPDIR=/xuanwu-tank/east/zrl/tmp
 ```
+
+### `scripts/generate/launch_hunyuan_hard_configs_multi_gpu.sh` (new)
+
+Mirrors the existing six-config Wan launcher while running only the requested
+hard-route variants. For each of C2, C4, and C6 it:
+
+1. starts one independent Hunyuan process per explicitly reserved GPU;
+2. balances unfinished prompt groups across those workers;
+3. waits for all workers to finish before starting the next C value;
+4. resumes valid existing MP4s and writes VBench-compatible filenames;
+5. records one log per configuration and GPU;
+6. aborts the sweep if any worker fails.
+
+The default allows Hugging Face downloads because only transformer weights are
+known to be cached. Set `LOCAL_FILES_ONLY=1` only after the complete Diffusers
+pipeline is available locally.
 
 ### `requirements-hunyuan.txt` (new)
 
@@ -194,16 +253,22 @@ available Conda environment name.
 ### Tests (new and extended)
 
 - `test_hunyuan_token_merging.py` checks the joint equations, shared
-  video/text normalization, prompt masking, and explicit rejection of
-  unsupported layouts.
+  video/text normalization, prompt masking, exact C2/C4/C6 partitions, parity
+  of the multi-token video core with Wan hard routing, and explicit rejection
+  of unsupported layouts.
 - `test_hunyuan_pipeline_integration.py` checks runtime grid derivation and
-  installation in both main block families without touching the text refiner.
+  C2/C4/C6 option propagation into both main block families without touching
+  the text refiner.
 - `test_hunyuan_generation_routing.py` runs the CLI with a fake pipeline and
-  checks geometry propagation, per-sample seeds, resume behavior, and atomic
-  video output without loading model weights.
+  checks geometry propagation, per-sample seeds, resume behavior, prompt
+  sharding, VBench deduplication/names, and atomic output without model weights.
+- `test_hunyuan_multi_gpu_launcher.py` proves that the sweep contains exactly
+  hard C2/C4/C6, that its configs differ only where intended, and that the
+  launcher refuses to run without an explicit GPU reservation.
 - `test_hunyuan_diffusers_tiny_parity.py` compares a tiny untouched Diffusers
   Hunyuan transformer with an identical transformer using the production
-  processor/core in an exact one-key-per-group limit.
+  processor/core in an exact one-key-per-group limit, then smoke-tests hard
+  C2/C4/C6 through real dual- and single-stream Diffusers blocks.
 - `test_hunyuan_pipeline_reference_parity.py` and its runner compare the full
   real checkpoint and Diffusers denoising pipeline using a test-only dense core
   probe. These were written before implementation and now bind to the
@@ -218,7 +283,8 @@ TOKEN_MERGING_FORCE_TORCH_RMSNORM=1 \
 /home/zrlu/miniforge3/envs/etm/bin/python -m unittest \
   tests.test_hunyuan_token_merging \
   tests.test_hunyuan_pipeline_integration \
-  tests.test_hunyuan_generation_routing -v
+  tests.test_hunyuan_generation_routing \
+  tests.test_hunyuan_multi_gpu_launcher -v
 ```
 
 Tiny whole-transformer Diffusers parity (no checkpoint or GPU):
@@ -237,17 +303,37 @@ CUDA_VISIBLE_DEVICES=0 \
 bash scripts/generate/generate_token_merging_hunyuan.sh
 ```
 
+Hard-only C2/C4/C6 multi-GPU VBench sweep:
+
+```bash
+GPU_IDS="0 3 5 6" \
+PYTHON_BIN=/home/zrlu/miniforge3/envs/SVG/bin/python \
+bash scripts/generate/launch_hunyuan_hard_configs_multi_gpu.sh
+```
+
+The defaults generate five samples for every prompt into
+`videos/token_merging_hunyuan_hard_configs/{hard_c2,hard_c4,hard_c6}`. Override
+`GPU_IDS`, `NUM_SAMPLES`, `NUM_VIDEOS`, `PROMPT_PATH`, or `OUTPUT_ROOT` with
+environment variables. Use only GPUs reserved for this run: every worker loads
+its own Hunyuan pipeline and may also consume substantial host RAM.
+
 The real-checkpoint dense pipeline parity command is documented in
 `tests/README.md` and `tests/TEST_EXPLANATIONS.md`.
 
 ## Current limits and remaining empirical work
 
-- Only `hard_route` with `num_merge_tokens: 1` is enabled. Other Wan layouts
-  are rejected rather than silently applying unvalidated joint-attention math.
+- Only non-transposed `hard_route` is enabled. The one-token case and hard
+  C2/C4/C6 are covered by equation/integration tests. Select routing and
+  transposed layouts are rejected rather than silently applying unvalidated
+  joint-attention math.
 - Processor geometry is fixed when installed. A caller that changes output
   resolution or frame count on the same loaded pipeline must reinstall the
   processors with the new geometry; the supplied CLI uses one fixed geometry.
 - Passing parity proves integration semantics, not speed or video quality.
+- The real 480p C2/C4/C6 path has not yet been GPU-smoked or memory-profiled.
+  Multi-token seed logits require more temporary memory than the one-token
+  path, so start with C2 and a short/single-prompt run before launching a full
+  VBench sweep on 40 GiB cards.
 - The real approximate core still needs a full-checkpoint GPU generation,
   peak-memory/runtime measurement, and dense-vs-Token-Merging quality
   evaluation (for example VBench) before making an acceleration-quality claim.
