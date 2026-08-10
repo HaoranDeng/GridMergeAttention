@@ -182,9 +182,14 @@ def token_merging_attn(
 ):
     """Dispatch the ordinary-Wan C4 and causal Self-Forcing C1 paths.
 
-    Ordinary Wan supports main's PyTorch, Triton, and fused Triton hard-C4
-    backends. Causal Self-Forcing uses one-token GridMerge because its
-    current-block Q is shorter than its visible cached K/V prefix.
+    Ordinary Wan supports main's hard-C4 backends:
+      - hard_route_backend="sdpa": readable PyTorch reference.
+      - hard_route_backend="hard_c4": optimized Triton path.
+      - hard_route_backend="hard_c4_fused": experimental fused Triton path
+        retained for manual optimization.
+
+    Causal Self-Forcing uses one-token GridMerge because its current-block Q is
+    shorter than its visible cached K/V prefix.
     """
 
     del seed_mode, seed, hard_route_routing_backend
