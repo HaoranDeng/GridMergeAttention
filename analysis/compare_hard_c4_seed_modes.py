@@ -20,6 +20,8 @@ from utils.misc import set_seed
 
 
 HASH_MOD = 2147483647
+FLOAT_NEG_INF = torch.finfo(torch.float32).min
+ADAPTIVE_SEED_MODES = {"top_mean_with_ith", "top_max_with_ith", "greedy_cover_with_ith"}
 
 
 class Stats:
@@ -139,6 +141,49 @@ def ring_offset_seed_rows(query_outer, key_outer, key_rows, query_columns, query
     return seed_rows.expand(query_outer.numel(), key_outer.numel(), key_rows, query_columns, 4)
 
 
+def adaptive_seed_rows_for_mode(mode, q, k, scale):
+    """Choose four rows from the current Q/K block, then run the same hard C4 merge."""
+    logits = torch.einsum("baijhd,bfklhd->bhafkjil", q, k).float() * float(scale)
+    logits = logits.mean(dim=(0, 1))
+    query_rows = q.size(2)
+    key_rows = k.size(2)
+    key_row = torch.arange(key_rows, device=q.device).view(1, 1, key_rows, 1)
+    first = key_row.expand(logits.size(0), logits.size(1), key_rows, logits.size(3))
+
+    if mode == "top_mean_with_ith":
+        row_score = logits.mean(dim=-1)
+    elif mode == "top_max_with_ith":
+        row_score = logits.amax(dim=-1)
+    else:
+        row_score = None
+
+    if row_score is not None:
+        row_score = row_score.scatter(-1, first.unsqueeze(-1), FLOAT_NEG_INF)
+        extra = row_score.topk(3, dim=-1).indices.long()
+        return torch.cat((first.unsqueeze(-1).long(), extra), dim=-1)
+
+    best = logits.gather(
+        dim=-2,
+        index=first.unsqueeze(-1).unsqueeze(-1).expand(*first.shape, 1, logits.size(-1)),
+    ).squeeze(-2)
+    available = torch.ones((*first.shape, query_rows), device=q.device, dtype=torch.bool)
+    available.scatter_(dim=-1, index=first.unsqueeze(-1), value=False)
+    chosen = [first.long()]
+    for _ in range(3):
+        cover = torch.maximum(best.unsqueeze(-2), logits).mean(dim=-1)
+        row = cover.masked_fill(~available, FLOAT_NEG_INF).argmax(dim=-1)
+        chosen.append(row.long())
+        available.scatter_(dim=-1, index=row.unsqueeze(-1), value=False)
+        best = torch.maximum(
+            best,
+            logits.gather(
+                dim=-2,
+                index=row.unsqueeze(-1).unsqueeze(-1).expand(*row.shape, 1, logits.size(-1)),
+            ).squeeze(-2),
+        )
+    return torch.stack(chosen, dim=-1)
+
+
 def seed_rows_for_mode(mode, device, query_outer_offset, query_outer_count, key_outer_count, key_rows, query_columns, query_rows, seed):
     query_outer = torch.arange(query_outer_offset, query_outer_offset + query_outer_count, device=device)
     key_outer = torch.arange(key_outer_count, device=device)
@@ -179,7 +224,9 @@ def seed_rows_for_mode(mode, device, query_outer_offset, query_outer_count, key_
     raise ValueError(f"unknown seed mode: {mode}")
 
 
-def hard_c4_seed_mode_chunk(q, k, v, scale, seed_rows):
+def hard_c4_seed_mode_chunk(q, k, v, scale, seed_rows, mode):
+    if mode in ADAPTIVE_SEED_MODES:
+        seed_rows = adaptive_seed_rows_for_mode(mode, q, k, scale)
     seed_queries = gather_seed_queries(q, seed_rows)
     merged_keys, merged_values, routing_bias = hard_route_merge_kv_pytorch(seed_queries, k, v, scale)
     query = rearrange(q, "b a i j h d -> (b h a j) i d")
@@ -206,17 +253,19 @@ def hard_c4_seed_mode_attention(q, k, v, grid_size, scale, mode, seed, query_out
 
     for q_start in range(0, q_blocks.size(1), query_outer_chunk):
         q_end = min(q_start + query_outer_chunk, q_blocks.size(1))
-        seed_rows = seed_rows_for_mode(
-            mode,
-            q.device,
-            q_start,
-            q_end - q_start,
-            k_blocks.size(1),
-            k_blocks.size(2),
-            q_blocks.size(3),
-            q_blocks.size(2),
-            seed,
-        )
+        seed_rows = None
+        if mode not in ADAPTIVE_SEED_MODES:
+            seed_rows = seed_rows_for_mode(
+                mode,
+                q.device,
+                q_start,
+                q_end - q_start,
+                k_blocks.size(1),
+                k_blocks.size(2),
+                q_blocks.size(3),
+                q_blocks.size(2),
+                seed,
+            )
         for h_start in range(0, q_blocks.size(4), head_chunk):
             h_end = min(h_start + head_chunk, q_blocks.size(4))
             out[:, q_start:q_end, :, :, h_start:h_end] = hard_c4_seed_mode_chunk(
@@ -225,6 +274,7 @@ def hard_c4_seed_mode_attention(q, k, v, grid_size, scale, mode, seed, query_out
                 v_blocks[:, :, :, :, h_start:h_end].contiguous(),
                 scale,
                 seed_rows,
+                mode,
             )
     return blocks_to_video(out)
 
