@@ -334,6 +334,14 @@ check before launching another speed/quality sweep.
   `hard_c4_fused_full_m16`, versus about 22.73 ms/call for
   `hard_c4_full_core_tokenmajor` in the same smoke benchmark. The error was
   similar, but the runtime was far worse.
+- Recheck: Slurm jobs `367834` and `367835` reproduced the same direction with
+  a simpler one-block streaming fused kernel. The vector-reduction version was
+  1.59 ms vs 0.13 ms for `key_outer=2`, and 16.44 ms vs 0.32 ms for
+  `key_outer=21`. Slurm jobs `367837`, `367838`, and `367866` then replaced
+  the inner reductions with tiled matmuls; this improved accuracy and speed but
+  was still slower than the current two-kernel path: 0.42 ms vs 0.12 ms for
+  `key_outer=2`, 4.15 ms vs 0.32 ms for `key_outer=21`, and 87.95 ms vs
+  10.57 ms for a near-real chunk with `query_outer=10`, `heads=12`.
 - Why not repeat directly: the fused kernel saves global writes/reads of
   compressed K/V/bias, but loses the current merge kernel's reuse across query
   columns and the routing kernel's tensor-core tile over compressed tokens.
