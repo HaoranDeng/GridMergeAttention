@@ -378,6 +378,11 @@ if triton is not None:
                 tl.where(key_row >= Q_ROWS - 2, Q_ROWS - 4, key_row - 2),
             )
 
+            seed0 = tl.sum(tl.where(query_rows[:, None] == key_row, q, 0.0), axis=0)
+            seed1 = tl.sum(tl.where(query_rows[:, None] == seed_row1, q, 0.0), axis=0)
+            seed2 = tl.sum(tl.where(query_rows[:, None] == seed_row2, q, 0.0), axis=0)
+            seed3 = tl.sum(tl.where(query_rows[:, None] == seed_row3, q, 0.0), axis=0)
+
             key_base = key_ptr + (((batch * F + key_outer) * K_ROWS + key_row) * L * H + head) * D_HEAD
             key_block = tl.load(
                 key_base + key_offsets[:, None] * H * D_HEAD + dim_offsets[None, :],
@@ -391,26 +396,22 @@ if triton is not None:
                 other=0.0,
             )
 
-            seed_ids = tl.arange(0, 4)
-            seed_rows = tl.where(
-                seed_ids == 0,
-                key_row,
-                tl.where(seed_ids == 1, seed_row1, tl.where(seed_ids == 2, seed_row2, seed_row3)),
+            logits0 = (
+                tl.sum((key_block * seed0[None, :]).to(tl.float32), axis=1) * SCORE_SCALE
             )
-            seeds = tl.load(
-                query_ptr
-                + query_base
-                + (((seed_rows[:, None] * J + query_col) * H + head) * D_HEAD + dim_offsets[None, :]),
-                mask=valid_dim[None, :],
-                other=0.0,
+            logits1 = (
+                tl.sum((key_block * seed1[None, :]).to(tl.float32), axis=1) * SCORE_SCALE
             )
-            seed_logits = tl.dot(seeds, tl.trans(key_block), input_precision=LOGIT_INPUT_PRECISION) * SCORE_SCALE
-            seed_logits = tl.where(valid_key[None, :], seed_logits, -float("inf"))
-
-            logits0 = tl.sum(tl.where(seed_ids[:, None] == 0, seed_logits, 0.0), axis=0)
-            logits1 = tl.sum(tl.where(seed_ids[:, None] == 1, seed_logits, 0.0), axis=0)
-            logits2 = tl.sum(tl.where(seed_ids[:, None] == 2, seed_logits, 0.0), axis=0)
-            logits3 = tl.sum(tl.where(seed_ids[:, None] == 3, seed_logits, 0.0), axis=0)
+            logits2 = (
+                tl.sum((key_block * seed2[None, :]).to(tl.float32), axis=1) * SCORE_SCALE
+            )
+            logits3 = (
+                tl.sum((key_block * seed3[None, :]).to(tl.float32), axis=1) * SCORE_SCALE
+            )
+            logits0 = tl.where(valid_key, logits0, -float("inf"))
+            logits1 = tl.where(valid_key, logits1, -float("inf"))
+            logits2 = tl.where(valid_key, logits2, -float("inf"))
+            logits3 = tl.where(valid_key, logits3, -float("inf"))
 
             best_logits = logits0
             assignments = tl.zeros((BLOCK_L,), tl.int32)
@@ -424,35 +425,41 @@ if triton is not None:
             best_logits = tl.where(update, logits3, best_logits)
             assignments = tl.where(update, 3, assignments)
 
-            active = valid_key[None, :] & (assignments[None, :] == seed_ids[:, None])
-            row_max = tl.max(tl.where(active, best_logits[None, :], -float("inf")), axis=1)
-            has_keys = row_max > -float("inf")
-            safe_row_max = tl.where(has_keys, row_max, 0.0)
-            probs = tl.where(
-                active,
-                tl.exp2((best_logits[None, :] - safe_row_max[:, None]) * 1.4426950408889634),
-                0.0,
-            )
-            denom = tl.sum(probs, axis=1)
-            safe_denom = tl.where(has_keys, denom, 1.0)
-            weights = probs / safe_denom[:, None]
-            log_denom = safe_row_max + tl.log2(safe_denom) * 0.6931471805599453
+            for seed_idx in tl.static_range(0, 4):
+                active = valid_key & (assignments == seed_idx)
+                row_max = tl.max(tl.where(active, best_logits, -float("inf")), axis=0)
+                has_keys = row_max > -float("inf")
+                safe_row_max = tl.where(has_keys, row_max, 0.0)
+                probs = tl.where(
+                    active,
+                    tl.exp2((best_logits - safe_row_max) * 1.4426950408889634),
+                    0.0,
+                )
+                denom = tl.sum(probs, axis=0)
+                safe_denom = tl.where(has_keys, denom, 1.0)
+                weights = probs / safe_denom
+                log_denom = safe_row_max + tl.log2(safe_denom) * 0.6931471805599453
 
-            merged_key = tl.dot(weights.to(key_block.dtype), key_block).to(tl.float16)
-            merged_value = tl.dot(weights.to(value_block.dtype), value_block).to(tl.float16)
-            expected_logit = tl.sum(tl.where(active, weights * best_logits[None, :], 0.0), axis=1)
-            routing_bias = tl.where(has_keys, expected_logit - log_denom, float("inf"))
+                merged_key = tl.sum(weights[:, None].to(key_block.dtype) * key_block, axis=0)
+                merged_value = tl.sum(weights[:, None].to(value_block.dtype) * value_block, axis=0)
+                expected_logit = tl.sum(tl.where(active, weights * best_logits, 0.0), axis=0)
+                routing_bias = tl.where(has_keys, expected_logit - log_denom, float("inf"))
 
-            scores = tl.dot(q_for_attention, tl.trans(merged_key)) * SCORE_SCALE - routing_bias[None, :]
-            scores = tl.where(valid_query[:, None] & has_keys[None, :], scores, -float("inf"))
+                merged_key = merged_key.to(tl.float16)
+                merged_value = merged_value.to(tl.float16)
+                score = (
+                    tl.sum((q_for_attention * merged_key[None, :]).to(tl.float32), axis=1)
+                    * SCORE_SCALE
+                    - routing_bias
+                )
+                score = tl.where(valid_query, score, -float("inf"))
 
-            block_max = tl.max(scores, axis=1)
-            next_max = tl.maximum(max_score, block_max)
-            p = tl.exp2((scores - next_max[:, None]) * 1.4426950408889634)
-            alpha = tl.exp2((max_score - next_max) * 1.4426950408889634)
-            acc = acc * alpha[:, None] + tl.dot(p.to(merged_value.dtype), merged_value)
-            normalizer = normalizer * alpha + tl.sum(p, axis=1)
-            max_score = next_max
+                next_max = tl.maximum(max_score, score)
+                p = tl.exp2((score - next_max) * 1.4426950408889634)
+                alpha = tl.exp2((max_score - next_max) * 1.4426950408889634)
+                acc = acc * alpha[:, None] + p[:, None] * merged_value[None, :]
+                normalizer = normalizer * alpha + p
+                max_score = next_max
 
         out = acc / normalizer[:, None]
         out_base = out_ptr + batch * A * Q_ROWS * J * H * D_HEAD
