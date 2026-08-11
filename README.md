@@ -17,7 +17,7 @@ Model weights and Self-Forcing checkpoints are not stored in the repository.
 | --- | --- | --- | --- |
 | Wan2.1 | All latent frames are denoised bidirectionally | Hard C4 with PyTorch and fused Triton implementations | `generate.py` |
 | Self-Forcing | Seven causal three-frame blocks, with current-block Q and a growing visible K/V prefix | Cache-aware hard C1 | `generate.py` through the causal config |
-| HunyuanVideo | Standard Diffusers denoising with joint `[video | text]` attention | PyTorch hard C1/C2/C4/C6; video K/V are merged while text remains exact | `generate_hunyuan.py` |
+| HunyuanVideo | Standard Diffusers denoising with joint `[video / text]` attention | PyTorch hard C1/C2/C4/C6; video K/V are merged while text remains exact | `generate_hunyuan.py` |
 
 `C` is the number of compressed video K/V tokens retained per local routing
 block. It is not the attention head dimension or the original number of keys.
