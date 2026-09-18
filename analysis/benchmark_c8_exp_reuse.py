@@ -12,6 +12,7 @@ import json
 import math
 import os
 from pathlib import Path
+import socket
 import statistics
 import subprocess
 import sys
@@ -120,7 +121,8 @@ def main():
     from torch.nn.attention import sdpa_kernel, SDPBackend
     torch.set_grad_enabled(False)
     torch.set_num_threads(4)
-    result = {'scope': 'H200 real Wan14B 720p captures, full H40 default Hellinger C8 r2',
+    result = {'host': socket.gethostname(),
+              'scope': 'H200 real Wan14B 720p captures, full H40 default Hellinger C8 r2',
               'kind': 'three-layer kernel diagnostic; no video generation or quality claim',
               'shape': [1,21,45,80,40,128], 'capacity': 8, 'singleton_count': 0,
               'initial_gpu': initial, 'blocks': args.blocks, 'layers': {}, 'candidates': {},
@@ -167,9 +169,11 @@ def main():
     thread = threading.Thread(target=monitor, daemon=True)
     thread.start()
     try:
+        print(json.dumps({'phase': 'prepare_r2', 'host': result['host']}), flush=True)
         op = create_c8()
         retained = op.merge
         retained_gs = op.gs
+        print(json.dumps({'phase': 'prepare_slow_reference'}), flush=True)
         slow_merge = slow_package._extension('gma_c8_owner_pack_v0', True)
         slow_gs = slow_package._extension('gma_c8_cuda_gs_v10')
 
@@ -186,6 +190,7 @@ def main():
         include = Path(torch.__file__).resolve().parent.parent/'flashinfer/data/cutlass/include'
         modules = {}
         for name in args.sources:
+            print(json.dumps({'phase': 'compile_candidate', 'candidate': name}), flush=True)
             path = args.run_dir/'sources'/name
             digest = hashlib.sha256(path.read_bytes()).hexdigest()
             modules[name] = load(name='fisher_c8_merge_'+digest[:16], sources=[str(path)],
@@ -194,11 +199,14 @@ def main():
                                  verbose=False)
             result['candidates'][name] = {'source_sha256': digest,
                 'resources': dict(zip(('registers','local_bytes','shared_bytes','ctas_per_sm'), modules[name].resources()))}
+            print(json.dumps({'phase': 'candidate_ready', 'candidate': name,
+                              **result['candidates'][name]}), flush=True)
         refs = [torch.empty_like(x) for x in (op.mk, op.mv, op.bias)]
         save()
         captures = Path('/local2/denghaoran/GridMergeAttention/experiments/gma_c8_cuda_150ms_20260908')
         for layer in args.layers.split(','):
             clean()
+            print(json.dumps({'phase': 'load_capture', 'layer': layer}), flush=True)
             payload = torch.load(captures/f'real_full40_step0_layer{layer}.pt', map_location='cpu', weights_only=True)
             q, k, v = [payload[n].reshape(1,21,45,80,40,128).cuda() for n in ('q','k','v')]
             del payload

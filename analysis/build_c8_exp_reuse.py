@@ -181,6 +181,69 @@ def build_probability(source):
     return source
 
 
+def prescale(source):
+    """Retire unscaled logits before exp, including the rare stable fallback."""
+    source = replace_once(source, '    if(stop_after==1) continue;',
+        '''    if(stop_after==1) continue;
+    // Keep a single scaled score representation across the range check.
+    // The fallback uses a rounded multiply followed by subtraction instead
+    // of retaining the original score for a fused multiply-add.
+    #pragma unroll
+    for(int i=0;i<40;++i) s[i]=__fmul_rn(s[i],scale);''')
+    for old, new in (
+        ('ex2(__fmul_rn(s[4*(i/2)+2*half+(i&1)],scale))',
+         'ex2(s[4*(i/2)+2*half+(i&1)])'),
+        ('fmaxf(__fmul_rn(s[4*i+2*half],scale),__fmul_rn(s[4*i+2*half+1],scale))',
+         'fmaxf(s[4*i+2*half],s[4*i+2*half+1])'),
+        ('ex2(__fmaf_rn(s[4*(i/2)+2*half+(i&1)],scale,-mx))',
+         'ex2(__fadd_rn(s[4*(i/2)+2*half+(i&1)],-mx))'),
+        ('__fadd_rn(offset,-__fmul_rn(s[ix],scale))', '__fadd_rn(offset,-s[ix])'),
+    ):
+        source = replace_once(source, old, new)
+    return source
+
+
+def build_half_shared(source):
+    source = build(source, True)
+    source = replace_once(source, '    float cached_exp[40];',
+        '''    // Each warp owns 4 KiB of the existing TMA staging allocation.
+    // Retire its previous asynchronous V-store read before reusing 2.5 KiB
+    // for one row-half's exponentials. Each thread reads only its own stores.
+    if(lane==0) asm volatile("cp.async.bulk.wait_group.read 0;":::"memory");
+    __syncwarp();
+    volatile float* exp_scratch=reinterpret_cast<float*>(temp+warp*2048);
+    float cached_exp[40];''')
+    for name in ('direct', 'bs'):
+        source = replace_once(source,
+            f'        cached_exp[4*(i/2)+2*half+(i&1)]={name}[i];',
+            f'''        if(half==0) exp_scratch[32*i+lane]={name}[i];
+        else cached_exp[4*(i/2)+2*half+(i&1)]={name}[i];''')
+    source = replace_once(source,
+        '      float p0=owner==oc0?cached_exp[ix]:0.f;',
+        '      float p0=owner==oc0?exp_scratch[32*i+lane]:0.f;')
+    return source
+
+
+def normalize_cached(source):
+    """Reuse probabilities with the retained log-score entropy moment."""
+    source = replace_once(source,
+        '    float norm_log=lg2((lane&1)?norm_sum[1]:norm_sum[0]);',
+        '''    float norm_log=lg2((lane&1)?norm_sum[1]:norm_sum[0]);
+    float norm_inv=reciprocal((lane&1)?norm_sum[1]:norm_sum[0]);''')
+    source = replace_once(source, '      float offset=__fadd_rn(norm,1.f);',
+        '''      float offset=__fadd_rn(norm,1.f);
+      float inverse=__shfl_sync(0xffffffff,norm_inv,(lane&~1)+half);''')
+    source = replace_once(source, '        s[ix]=__fadd_rn(offset,-s[ix]);',
+        '''        s[ix]=__fadd_rn(offset,-s[ix]);
+        cached_exp[ix]=__fmul_rn(cached_exp[ix],inverse);''')
+    start = source.index('      // log P = log E - log Z.')
+    end = source.index('      int row=warp*16+seed+8*half', start)
+    source = source[:start] + '''      // Cached values are normalized P; retain log P from the scores.
+      float correction=__fmul_rn(__fadd_rn(__fmul_rn(dots[half],inv),-log_safe),0.6931471805599453f);
+''' + source[end:]
+    return source
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--baseline', type=Path, required=True)
@@ -194,9 +257,20 @@ def main():
     for name, signed in (('c8_exp_reuse_raw_v1.cu', False),
                          ('c8_exp_reuse_signed_v2.cu', True),
                          ('c8_exp_reuse_signed_lb3_v3.cu', True),
-                         ('c8_probability_inplace_v4.cu', True)):
+                         ('c8_probability_inplace_v4.cu', True),
+                         ('c8_exp_reuse_prescale_v5.cu', True),
+                         ('c8_exp_reuse_half_shared_v6.cu', True),
+                         ('c8_exp_reuse_prescale_half_shared_v7.cu', True),
+                         ('c8_exp_reuse_prescale_arrays_v8.cu', False),
+                         ('c8_exp_reuse_prescale_arrays_probability_v9.cu', False)):
         path = args.output_dir / name
         content = build_probability(source) if '_inplace_' in name else build(source, signed)
+        if '_half_shared_' in name:
+            content = build_half_shared(source)
+        if '_prescale_' in name:
+            content = prescale(content)
+        if '_arrays_probability_' in name:
+            content = normalize_cached(content)
         if '_lb3_' in name:
             content = replace_once(content, '__launch_bounds__(128,4) void merge_kernel(',
                                    '__launch_bounds__(128,3) void merge_kernel(')
