@@ -1,0 +1,40 @@
+# Self-Forcing T2V: generate 21 latent frames as seven causal 3-frame blocks.
+causal: true
+independent_first_frame: false
+num_frame_per_block: 3
+
+# After each block's few-step denoising, rerun it at timestep zero to commit
+# clean K/V context for later blocks.
+context_noise: 0
+
+image_or_video_shape:
+  - 1
+  - 21
+  - 16
+  - 60
+  - 104
+
+denoising_step_list:
+  - 1000
+  - 750
+  - 500
+  - 250
+warp_denoising_step: true
+
+model_kwargs:
+  model_name: Wan2.1-T2V-1.3B
+  timestep_shift: 5.0
+  # -1 retains the full visible temporal prefix. sink_size is relevant only
+  # when using a rolling local-attention cache.
+  local_attn_size: -1
+  sink_size: 0
+
+token_merging_args:
+  enable: true
+  f_tied: 1
+  h_reduce: 1
+  w_reduce: 1
+  # Cached causal attention has been validated for one-token GridMerge only.
+  layout: hard_route
+  q_init: ith
+  num_merge_tokens: 1

@@ -1,0 +1,33 @@
+model:
+  id: tencent/HunyuanVideo
+  revision: refs/pr/18
+  transformer_subfolder: transformer
+  dtype: bf16
+  scheduler_shift: 7.0
+  device: cuda
+  local_files_only: false
+  model_cpu_offload: true
+  sequential_cpu_offload: false
+  enable_vae_tiling: true
+
+generation:
+  height: 480
+  width: 720
+  num_frames: 129
+  num_inference_steps: 50
+  guidance_scale: 6.0
+  true_cfg_scale: 1.0
+  max_sequence_length: 256
+  fps: 24
+
+token_merging_args:
+  enable: true
+  f_tied: 1
+  h_reduce: 1
+  w_reduce: 1
+  layout: hard_route
+  num_merge_tokens: 6
+  seed_mode: random_with_ith
+  seed: 0
+  q_init: ith
+  query_outer_chunk: 1

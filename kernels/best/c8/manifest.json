@@ -1,0 +1,25 @@
+{
+  "variant": "c8",
+  "scope": "One retained exact-capacity H40 attention implementation; only create() is supported. C8 is exactly eight merged K/V representatives and never an 8+1 route.",
+  "original_sources": {
+    "gma_c8_native.py": "08f71df3a331bb64b6f790c917095619d2cd9950597736d44dbb51680b1512df",
+    "gma_c8_candidate_table.json": "eeffd8d22084d68732d89291f753bf6a68721213ecc372cc66253e5c7cd8b873",
+    "gma_c8_cuda_probe.cu": "2951e28d0e988b45024da8a3b34451088339ac339db49e52f543f21221235fd5",
+    "gma_c8_cuda_gs_v10.cu": "32d9d3400a566a02b3f5bd7d6eb778cb3e40dc6fbe4e3b3157986d7f53101533",
+    "gma_c8_owner_pack_v0.cu": "b16821e91a710526856092449e6f615b83ed2818a4655553f744d9164fc41f5a",
+    "gma_c8_route_pipeline.cu": "7cd72aeed49c86b1a2044dda77531ea067d61d22099d8c7370041e59588e6c0c"
+  },
+  "files": {
+    "gma_c8_native.py": "6749709586202110724415e81999443db008da5871ed97f60b77957f881d416f",
+    "gma_c8_candidate_table.json": "eeffd8d22084d68732d89291f753bf6a68721213ecc372cc66253e5c7cd8b873",
+    "gma_c8_cuda_probe.cu": "2951e28d0e988b45024da8a3b34451088339ac339db49e52f543f21221235fd5",
+    "gma_c8_cuda_gs_v10.cu": "32d9d3400a566a02b3f5bd7d6eb778cb3e40dc6fbe4e3b3157986d7f53101533",
+    "gma_c8_owner_pack_v0.cu": "b16821e91a710526856092449e6f615b83ed2818a4655553f744d9164fc41f5a",
+    "gma_c8_route_pipeline.cu": "7cd72aeed49c86b1a2044dda77531ea067d61d22099d8c7370041e59588e6c0c",
+    "evidence.json": "7d7eac3b873c5374dabe85f104ad0067f420020d6dac6b05dfadfa4b2cffa169"
+  },
+  "shared_dependencies": {
+    "attention/capacity_contract.py": "adf40ac79e5f0a1ce08744e98e2e766b6e0736709b447d6a757db2c093d0e124"
+  },
+  "packaging_changes": []
+}

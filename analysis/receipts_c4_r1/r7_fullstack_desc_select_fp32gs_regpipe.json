@@ -1,0 +1,404 @@
+{
+  "initial_gpu": {
+    "utc": "2026-09-14T14:58:43.077062+00:00",
+    "gpu": {
+      "index": 0,
+      "name": "NVIDIA H200",
+      "uuid": "GPU-4eca131f-0ba3-759d-bcb5-0418d6b7c68e",
+      "memory_mib": 0,
+      "utilization_percent": 0
+    },
+    "compute_processes": []
+  },
+  "layers": [
+    "00",
+    "19",
+    "39"
+  ],
+  "candidate_merge": "native_fisher/fisher_c4_desc_select.cu",
+  "candidate_selector": "native_fisher/fisher_c4_selector_fp32gs_regpipe.cu",
+  "scope": "Complete-call paired timing of the retained C4 pair against both candidate kernels together, with an A/A null pair in the same square. Numerics recorded on every captured layer.",
+  "resources": {
+    "retained": [
+      127,
+      0,
+      57344,
+      4
+    ],
+    "candidate": [
+      124,
+      0,
+      57344,
+      4
+    ],
+    "retained_bis": [
+      127,
+      0,
+      57344,
+      4
+    ]
+  },
+  "merge_sha256": {
+    "retained": "41b33423fc68fd3f669ddf32169d99ff5b287a75eb67018a9efe2fe113700e2f",
+    "candidate": "ad61ccea5c663f2589e52d9cf3598fca795a5c3a0e27e0cb8e47cde6921a6d68",
+    "retained_bis": "41b33423fc68fd3f669ddf32169d99ff5b287a75eb67018a9efe2fe113700e2f"
+  },
+  "selector_sha256": {
+    "retained": "78efc23307fe25e9b11bffd58b44ed0c4edc8490f6ea13cc8373532fb5dc3b89",
+    "candidate": "626460801fe502300e4306143eba8e0fa40822dd080a3b3769f3d85190ed66f0",
+    "retained_bis": "78efc23307fe25e9b11bffd58b44ed0c4edc8490f6ea13cc8373532fb5dc3b89"
+  },
+  "monitor_errors": [],
+  "monitor_samples": [
+    {
+      "utc": "2026-09-14T14:58:44.098818+00:00",
+      "processes": []
+    },
+    {
+      "utc": "2026-09-14T14:58:47.606143+00:00",
+      "processes": []
+    },
+    {
+      "utc": "2026-09-14T14:58:50.712728+00:00",
+      "processes": [
+        {
+          "pid": 3474494,
+          "memory_mib": "532",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T14:58:53.910916+00:00",
+      "processes": [
+        {
+          "pid": 3474494,
+          "memory_mib": "16924",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T14:58:57.049100+00:00",
+      "processes": [
+        {
+          "pid": 3474494,
+          "memory_mib": "19884",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T14:59:00.169257+00:00",
+      "processes": [
+        {
+          "pid": 3474494,
+          "memory_mib": "26630",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T14:59:03.276685+00:00",
+      "processes": [
+        {
+          "pid": 3474494,
+          "memory_mib": "26630",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T14:59:06.460369+00:00",
+      "processes": [
+        {
+          "pid": 3474494,
+          "memory_mib": "26630",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T14:59:09.627611+00:00",
+      "processes": [
+        {
+          "pid": 3474494,
+          "memory_mib": "26630",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T14:59:12.764948+00:00",
+      "processes": [
+        {
+          "pid": 3474494,
+          "memory_mib": "17016",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T14:59:15.876592+00:00",
+      "processes": [
+        {
+          "pid": 3474494,
+          "memory_mib": "26630",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T14:59:19.002675+00:00",
+      "processes": [
+        {
+          "pid": 3474494,
+          "memory_mib": "26630",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T14:59:22.114494+00:00",
+      "processes": [
+        {
+          "pid": 3474494,
+          "memory_mib": "26630",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T14:59:25.247345+00:00",
+      "processes": [
+        {
+          "pid": 3474494,
+          "memory_mib": "26630",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T14:59:28.389910+00:00",
+      "processes": [
+        {
+          "pid": 3474494,
+          "memory_mib": "26630",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T14:59:31.541632+00:00",
+      "processes": [
+        {
+          "pid": 3474494,
+          "memory_mib": "17016",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T14:59:34.722683+00:00",
+      "processes": [
+        {
+          "pid": 3474494,
+          "memory_mib": "26630",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T14:59:37.883697+00:00",
+      "processes": [
+        {
+          "pid": 3474494,
+          "memory_mib": "26630",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T14:59:41.016332+00:00",
+      "processes": [
+        {
+          "pid": 3474494,
+          "memory_mib": "26630",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T14:59:44.138492+00:00",
+      "processes": [
+        {
+          "pid": 3474494,
+          "memory_mib": "26630",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    }
+  ],
+  "correctness": {
+    "00": {
+      "candidate": {
+        "seeds_bitwise_equal": false,
+        "output_bitwise_equal": false,
+        "seed_mismatches": 12,
+        "seed_total": 12096000,
+        "seed_mismatch_fraction": 9.92063492063492e-07,
+        "finite": true,
+        "max_abs": 0.046875,
+        "relative_l2": 4.9229696742258966e-05
+      },
+      "retained_bis": {
+        "seeds_bitwise_equal": true,
+        "output_bitwise_equal": true,
+        "seed_mismatches": 0,
+        "seed_total": 12096000,
+        "seed_mismatch_fraction": 0.0,
+        "finite": true,
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      }
+    },
+    "19": {
+      "candidate": {
+        "seeds_bitwise_equal": false,
+        "output_bitwise_equal": false,
+        "seed_mismatches": 2,
+        "seed_total": 12096000,
+        "seed_mismatch_fraction": 1.6534391534391535e-07,
+        "finite": true,
+        "max_abs": 0.0306396484375,
+        "relative_l2": 3.2052354072220623e-05
+      },
+      "retained_bis": {
+        "seeds_bitwise_equal": true,
+        "output_bitwise_equal": true,
+        "seed_mismatches": 0,
+        "seed_total": 12096000,
+        "seed_mismatch_fraction": 0.0,
+        "finite": true,
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      }
+    },
+    "39": {
+      "candidate": {
+        "seeds_bitwise_equal": false,
+        "output_bitwise_equal": false,
+        "seed_mismatches": 5191,
+        "seed_total": 12096000,
+        "seed_mismatch_fraction": 0.00042915013227513225,
+        "finite": true,
+        "max_abs": 0.0078125,
+        "relative_l2": 2.3763388526276685e-05
+      },
+      "retained_bis": {
+        "seeds_bitwise_equal": true,
+        "output_bitwise_equal": true,
+        "seed_mismatches": 0,
+        "seed_total": 12096000,
+        "seed_mismatch_fraction": 0.0,
+        "finite": true,
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      }
+    }
+  },
+  "arms": {
+    "00": {
+      "effect": {
+        "arm_a": "retained",
+        "arm_b": "candidate",
+        "a_mean_ms": 105.05917867024739,
+        "b_mean_ms": 101.13512420654297,
+        "delta_mean_ms": -3.9240544637044272,
+        "delta_sd_ms": 3.781214849867621,
+        "n": 30,
+        "t": -5.68413388814708,
+        "b_faster_count": 28
+      },
+      "null": {
+        "arm_a": "retained",
+        "arm_b": "retained_bis",
+        "a_mean_ms": 104.91072565714518,
+        "b_mean_ms": 104.89975179036459,
+        "delta_mean_ms": -0.010973866780598958,
+        "delta_sd_ms": 1.2625086028735653,
+        "n": 30,
+        "t": -0.04760866076563744,
+        "b_faster_count": 16
+      },
+      "candidate_delta_ms": -3.9130805969238285,
+      "retained_call_ms": 105.05917867024739,
+      "candidate_call_ms": 101.13512420654297
+    },
+    "19": {
+      "effect": {
+        "arm_a": "retained",
+        "arm_b": "candidate",
+        "a_mean_ms": 104.49254811604818,
+        "b_mean_ms": 100.83062159220377,
+        "delta_mean_ms": -3.661926523844401,
+        "delta_sd_ms": 2.1594790312009144,
+        "n": 30,
+        "t": -9.287979795389127,
+        "b_faster_count": 29
+      },
+      "null": {
+        "arm_a": "retained",
+        "arm_b": "retained_bis",
+        "a_mean_ms": 104.28700434366861,
+        "b_mean_ms": 104.28757603963216,
+        "delta_mean_ms": 0.0005716959635416667,
+        "delta_sd_ms": 1.3425090679830276,
+        "n": 30,
+        "t": 0.0023324294988701006,
+        "b_faster_count": 16
+      },
+      "candidate_delta_ms": -3.6624982198079428,
+      "retained_call_ms": 104.49254811604818,
+      "candidate_call_ms": 100.83062159220377
+    },
+    "39": {
+      "effect": {
+        "arm_a": "retained",
+        "arm_b": "candidate",
+        "a_mean_ms": 103.52506764729817,
+        "b_mean_ms": 100.1471435546875,
+        "delta_mean_ms": -3.377924092610677,
+        "delta_sd_ms": 1.7780856050864833,
+        "n": 30,
+        "t": -10.405377658816649,
+        "b_faster_count": 30
+      },
+      "null": {
+        "arm_a": "retained",
+        "arm_b": "retained_bis",
+        "a_mean_ms": 103.29618988037109,
+        "b_mean_ms": 103.3114008585612,
+        "delta_mean_ms": 0.015210978190104167,
+        "delta_sd_ms": 0.6246338591837867,
+        "n": 30,
+        "t": 0.13338047167865427,
+        "b_faster_count": 14
+      },
+      "candidate_delta_ms": -3.3931350708007812,
+      "retained_call_ms": 103.52506764729817,
+      "candidate_call_ms": 100.1471435546875
+    }
+  },
+  "summary": {
+    "pooled_delta_ms": -3.6562379625108505,
+    "per_layer_delta_ms": {
+      "00": -3.9130805969238285,
+      "19": -3.6624982198079428,
+      "39": -3.3931350708007812
+    },
+    "retained_call_ms": 104.35893147786459,
+    "candidate_call_ms": 100.70429645114474
+  },
+  "valid": true
+}

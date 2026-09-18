@@ -1,0 +1,28 @@
+image_or_video_shape:
+  - 1
+  - 21
+  - 16
+  - 90
+  - 160
+denoising_step_list:
+  - 1000
+  - 750
+  - 500
+  - 250
+warp_denoising_step: true
+model_kwargs:
+  model_name: Wan2.1-T2V-14B-StepDistill-CfgDistill
+  load_pretrained_weights: false
+  timestep_shift: 5.0
+token_merging_args:
+  enable: true
+  f_tied: 1
+  h_reduce: 1
+  w_reduce: 1
+  layout: hard_route
+  query_outer_chunk: 21
+  head_chunk: 8
+  num_merge_tokens: 4
+  seed_mode: hellinger_span_alpha0p2_c32_p16_a2_j4_t1_rf0_u16_cg45
+  seed: 0
+  hard_route_backend: hard_c4

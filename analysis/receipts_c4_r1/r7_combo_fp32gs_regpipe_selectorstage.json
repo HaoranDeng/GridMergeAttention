@@ -1,0 +1,165 @@
+{
+  "initial_gpu": {
+    "utc": "2026-09-14T08:10:53.351978+00:00",
+    "gpu": {
+      "index": 1,
+      "name": "NVIDIA H200",
+      "uuid": "GPU-47bbc7f8-5685-5077-4342-4a7e49e0b614",
+      "memory_mib": 4,
+      "utilization_percent": 0
+    },
+    "compute_processes": []
+  },
+  "layer": "00",
+  "candidate": "native_fisher/fisher_c4_selector_fp32gs_regpipe.cu",
+  "scope": "C4 selector stage timed in place inside a complete call, arms interleaved, with an A/A null pair in the same square.",
+  "source_sha256": {
+    "retained": "78efc23307fe25e9b11bffd58b44ed0c4edc8490f6ea13cc8373532fb5dc3b89",
+    "candidate": "626460801fe502300e4306143eba8e0fa40822dd080a3b3769f3d85190ed66f0",
+    "retained_bis": "78efc23307fe25e9b11bffd58b44ed0c4edc8490f6ea13cc8373532fb5dc3b89"
+  },
+  "correctness": {
+    "candidate": {
+      "seeds_bitwise_equal": false,
+      "output_bitwise_equal": false,
+      "seed_mismatches": 12,
+      "seed_total": 12096000,
+      "seed_mismatch_fraction": 9.92063492063492e-07,
+      "output_max_abs": 0.046875,
+      "output_relative_l2": 4.9229696742258966e-05
+    },
+    "retained_bis": {
+      "seeds_bitwise_equal": true,
+      "output_bitwise_equal": true,
+      "seed_mismatches": 0,
+      "seed_total": 12096000,
+      "seed_mismatch_fraction": 0.0,
+      "output_max_abs": 0.0,
+      "output_relative_l2": 0.0
+    }
+  },
+  "monitor_errors": [],
+  "monitor_query_errors": [],
+  "monitor_samples": [
+    {
+      "utc": "2026-09-14T08:10:53.752942+00:00",
+      "processes": []
+    },
+    {
+      "utc": "2026-09-14T08:10:57.096233+00:00",
+      "processes": [
+        {
+          "pid": 3224241,
+          "memory_mib": "14",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T08:11:00.237895+00:00",
+      "processes": [
+        {
+          "pid": 3224241,
+          "memory_mib": "26630",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T08:11:03.348480+00:00",
+      "processes": [
+        {
+          "pid": 3224241,
+          "memory_mib": "26630",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T08:11:06.511179+00:00",
+      "processes": [
+        {
+          "pid": 3224241,
+          "memory_mib": "26630",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T08:11:09.656400+00:00",
+      "processes": [
+        {
+          "pid": 3224241,
+          "memory_mib": "26630",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T08:11:12.891935+00:00",
+      "processes": [
+        {
+          "pid": 3224241,
+          "memory_mib": "26630",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T08:11:16.013025+00:00",
+      "processes": [
+        {
+          "pid": 3224241,
+          "memory_mib": "26630",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T08:11:19.134842+00:00",
+      "processes": [
+        {
+          "pid": 3224241,
+          "memory_mib": "26630",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T08:11:22.251274+00:00",
+      "processes": [
+        {
+          "pid": 3224241,
+          "memory_mib": "26630",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    }
+  ],
+  "arms": {
+    "effect": {
+      "arm_a": "retained",
+      "arm_b": "candidate",
+      "a_mean_ms": 9.951235183080037,
+      "b_mean_ms": 7.17608802318573,
+      "delta_mean_ms": -2.7751471598943076,
+      "delta_sd_ms": 0.3063638302441532,
+      "n": 60,
+      "t": -70.1655853106412,
+      "b_faster_count": 60
+    },
+    "null": {
+      "arm_a": "retained",
+      "arm_b": "retained_bis",
+      "a_mean_ms": 9.93722292582194,
+      "b_mean_ms": 9.988377634684245,
+      "delta_mean_ms": 0.051154708862304686,
+      "delta_sd_ms": 0.2585339832167025,
+      "n": 60,
+      "t": 1.5326521723662938,
+      "b_faster_count": 26
+    }
+  },
+  "candidate_delta_ms": -2.8263018687566124,
+  "valid": true
+}

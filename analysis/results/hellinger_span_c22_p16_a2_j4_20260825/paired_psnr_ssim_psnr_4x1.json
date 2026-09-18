@@ -1,0 +1,40 @@
+{
+  "reference": "/xuanwu-tank/east/zrl/exp-gridmergeattn/h200_run/videos/dense",
+  "protocol": "same filename/prompt/seed; framewise RGB PSNR and SSIM",
+  "methods": {
+    "hellinger_span_c22_p16_a2_j4": {
+      "summary": {
+        "psnr": 11.22135472400935,
+        "ssim": 0.3565640326488251,
+        "videos": 4,
+        "frames": 324
+      },
+      "videos": [
+        {
+          "video": "A tranquil tableau of restaurant-0.mp4",
+          "frames": 81,
+          "psnr": 10.179653321456625,
+          "ssim": 0.26384285489434045
+        },
+        {
+          "video": "a cow-0.mp4",
+          "frames": 81,
+          "psnr": 11.440238074610384,
+          "ssim": 0.3763528022771473
+        },
+        {
+          "video": "a shark is swimming in the ocean, pixel art-0.mp4",
+          "frames": 81,
+          "psnr": 12.863106617276557,
+          "ssim": 0.3886153373737488
+        },
+        {
+          "video": "a wine glass on the right of a cup, front view-0.mp4",
+          "frames": 81,
+          "psnr": 10.402420882693828,
+          "ssim": 0.39744513605006376
+        }
+      ]
+    }
+  }
+}

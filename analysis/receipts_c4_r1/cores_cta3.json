@@ -1,0 +1,130 @@
+{
+  "initial_gpu": {
+    "utc": "2026-09-14T03:29:31.443917+00:00",
+    "gpu": {
+      "index": 0,
+      "name": "NVIDIA H200",
+      "uuid": "GPU-4eca131f-0ba3-759d-bcb5-0418d6b7c68e",
+      "memory_mib": 4,
+      "utilization_percent": 0
+    },
+    "compute_processes": []
+  },
+  "layer": "00",
+  "scope": "C4 occupancy cost curve and merge/route co-residency. Merge residency is capped by padding the dynamic shared request; arithmetic and code path are untouched.",
+  "arms_requested": [
+    "cta3_pad"
+  ],
+  "resources": {
+    "cta4_retained": [
+      127,
+      0,
+      57344,
+      4
+    ],
+    "cta3_pad": [
+      127,
+      0,
+      62464,
+      3
+    ]
+  },
+  "occupancy_check": {
+    "cta4_retained": {
+      "intended_ctas_per_sm": 4,
+      "measured_ctas_per_sm": 4,
+      "ok": true
+    },
+    "cta3_pad": {
+      "intended_ctas_per_sm": 3,
+      "measured_ctas_per_sm": 3,
+      "ok": true
+    }
+  },
+  "monitor_errors": [],
+  "monitor_query_errors": [],
+  "monitor_samples": [
+    {
+      "utc": "2026-09-14T03:29:31.833842+00:00",
+      "processes": []
+    },
+    {
+      "utc": "2026-09-14T03:29:35.061631+00:00",
+      "processes": []
+    },
+    {
+      "utc": "2026-09-14T03:29:38.199708+00:00",
+      "processes": [
+        {
+          "pid": 4058590,
+          "memory_mib": "32594",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T03:29:41.354948+00:00",
+      "processes": [
+        {
+          "pid": 4058590,
+          "memory_mib": "35554",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T03:29:44.470133+00:00",
+      "processes": [
+        {
+          "pid": 4058590,
+          "memory_mib": "37866",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T03:29:47.648953+00:00",
+      "processes": [
+        {
+          "pid": 4058590,
+          "memory_mib": "37866",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T03:29:50.834788+00:00",
+      "processes": [
+        {
+          "pid": 4058590,
+          "memory_mib": "37866",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-14T03:29:53.961238+00:00",
+      "processes": [
+        {
+          "pid": 4058590,
+          "memory_mib": "37866",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    }
+  ],
+  "arms": {
+    "cta3_pad": {
+      "serial_merge_total_ms": 60.354246616363525,
+      "overlap_bitwise_equal": true,
+      "serial_call_ms": 107.11514282226562,
+      "overlap_call_ms": 106.19952430725098,
+      "overlap_minus_serial_ms": -0.9156185150146484,
+      "sd_ms": 1.4227823810735054,
+      "n": 20,
+      "t": -2.8780019604760505,
+      "overlap_faster_count": 14
+    }
+  },
+  "valid": true
+}

@@ -1,0 +1,149 @@
+{
+  "initial_gpu": {
+    "utc": "2026-09-15T23:10:52.637012+00:00",
+    "gpu": {
+      "index": 1,
+      "name": "NVIDIA H200",
+      "uuid": "GPU-47bbc7f8-5685-5077-4342-4a7e49e0b614",
+      "memory_mib": 0,
+      "utilization_percent": 0
+    },
+    "compute_processes": []
+  },
+  "scope": "Complete H40 output and C4 seed-selection agreement against the retained C4 stack on three captured layers, plus selector tie edge cases. Tolerance is declared, not implied. No timings.",
+  "backend": "fused_cooperative_loop",
+  "control": "explicit control sources, see `sources`",
+  "sources": {
+    "candidate_selector": "native_fisher/fisher_c4_selector_v9c_halving_mxredux.cu",
+    "candidate_merge": "native_fisher/fisher_c4_desc_select.cu",
+    "control_selector": "native_fisher/fisher_c4_selector_v8_ldsm_packed.cu",
+    "control_merge": "native_fisher/fisher_c4_desc_select.cu"
+  },
+  "declared_tolerance": {
+    "max_seed_mismatch_fraction": 0.0,
+    "max_relative_l2": 0.0
+  },
+  "captures": {
+    "00": {
+      "raw_storage_mismatches": 0,
+      "seed_mismatches": 0,
+      "seed_total": 12096000,
+      "seed_mismatch_fraction": 0.0,
+      "seeds_bitwise_equal": true,
+      "output_bitwise_equal": true,
+      "finite": true,
+      "max_abs": 0.0,
+      "relative_l2": 0.0
+    },
+    "19": {
+      "raw_storage_mismatches": 0,
+      "seed_mismatches": 0,
+      "seed_total": 12096000,
+      "seed_mismatch_fraction": 0.0,
+      "seeds_bitwise_equal": true,
+      "output_bitwise_equal": true,
+      "finite": true,
+      "max_abs": 0.0,
+      "relative_l2": 0.0
+    },
+    "39": {
+      "raw_storage_mismatches": 0,
+      "seed_mismatches": 0,
+      "seed_total": 12096000,
+      "seed_mismatch_fraction": 0.0,
+      "seeds_bitwise_equal": true,
+      "output_bitwise_equal": true,
+      "finite": true,
+      "max_abs": 0.0,
+      "relative_l2": 0.0
+    }
+  },
+  "seed_edges": {
+    "zero_query_all_ties": {
+      "seed_mismatches": 0,
+      "seed_total": 12096000,
+      "seed_mismatch_fraction": 0.0
+    },
+    "identical_probe_vectors": {
+      "seed_mismatches": 0,
+      "seed_total": 12096000,
+      "seed_mismatch_fraction": 0.0
+    }
+  },
+  "generation_validation_pending": true,
+  "merge_source_sha256": "ad61ccea5c663f2589e52d9cf3598fca795a5c3a0e27e0cb8e47cde6921a6d68",
+  "selector_source_sha256": "aed1e0536e9cf94a4d3774b6cd2dd266b20d38bbddd37233814bca9c4f8ace53",
+  "control_merge_sha256": "ad61ccea5c663f2589e52d9cf3598fca795a5c3a0e27e0cb8e47cde6921a6d68",
+  "control_selector_sha256": "e2a8eb89296edc7bb04ae6716204fb7b4ad0c8dfb14e8e08fedceb2bb23f0010",
+  "selector_resources": [
+    80,
+    0,
+    39168,
+    5
+  ],
+  "merge_changed": false,
+  "monitor_errors": [],
+  "monitor_samples": [
+    {
+      "utc": "2026-09-15T23:10:52.763938+00:00",
+      "processes": []
+    },
+    {
+      "utc": "2026-09-15T23:10:56.172452+00:00",
+      "processes": []
+    },
+    {
+      "utc": "2026-09-15T23:10:59.405817+00:00",
+      "processes": [
+        {
+          "pid": 1404399,
+          "memory_mib": "33278",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T23:11:02.719851+00:00",
+      "processes": [
+        {
+          "pid": 1404399,
+          "memory_mib": "33278",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T23:11:05.843344+00:00",
+      "processes": [
+        {
+          "pid": 1404399,
+          "memory_mib": "33370",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T23:11:08.991845+00:00",
+      "processes": [
+        {
+          "pid": 1404399,
+          "memory_mib": "33370",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T23:11:12.174049+00:00",
+      "processes": [
+        {
+          "pid": 1404399,
+          "memory_mib": "33370",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    }
+  ],
+  "tolerance_breaches": [],
+  "within_declared_tolerance": true,
+  "valid": true
+}

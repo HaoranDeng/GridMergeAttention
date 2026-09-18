@@ -1,0 +1,35 @@
+{
+  "variant": "fp8/c10",
+  "scope": "One retained complete H40 attention implementation; only create() is supported.",
+  "original_sources": {
+    "c10_fp8_candidate.py": "fcf06c04b7c2d0c9fed90d3bd07167805862fe4d877f1e814f1c8396724e074d",
+    "operator.py": "2d2ac10208d7ef1e01e871aa52c92aa07b4e83f257c11ca63e00090eceb6831d",
+    "selector.py": "2c8c7af0d226ce9f08f13cce63122625539ebc6ea9a0793ce395994b743709ea",
+    "fp8_c10.py": "b6af054e11762926a3c5c569d68dc3bee1f9cfc9c407a4b22b1adce0399de5e8",
+    "fp8_via_float_route.py": "80eafb5d305c24e1788774bd48aa4fe4122ccef0359ed830302726834c739659",
+    "fisher_c10_fp8_local_scores.cu": "6dabac09d497f89bda35e41a43a2893fd05c99862da506f74c19478189ed1730",
+    "fisher_c10_long_tiles_tree.cu": "22008a819e5a9dac345444a0df2ba0d9d5b7efff8fcd8c8212075f02d4682704",
+    "fisher_gs_register_distribute.cu": "7709e24cea2836eb9a43078bb18d563ad450b44a4cbc3bd5f5a1a95677d748ec",
+    "attention/hard_c4_wan21_14b_720p_triton.py": "b9441cee9754725f749a30a7ee030f6e979f4daf47f0f29950d71bd9b9c0b1d1"
+  },
+  "files": {
+    "c10_fp8_candidate.py": "fcf06c04b7c2d0c9fed90d3bd07167805862fe4d877f1e814f1c8396724e074d",
+    "operator.py": "894014bfc3362c3b14ea42d9ec52b82ff74e55923a9563e1c57640c2937cb408",
+    "selector.py": "2c8c7af0d226ce9f08f13cce63122625539ebc6ea9a0793ce395994b743709ea",
+    "fp8_c10.py": "16756973ad1aa997b90194d16b5529129128808f33632eb641688230093f59fa",
+    "fp8_via_float_route.py": "80eafb5d305c24e1788774bd48aa4fe4122ccef0359ed830302726834c739659",
+    "fisher_c10_fp8_local_scores.cu": "6dabac09d497f89bda35e41a43a2893fd05c99862da506f74c19478189ed1730",
+    "fisher_c10_long_tiles_tree.cu": "22008a819e5a9dac345444a0df2ba0d9d5b7efff8fcd8c8212075f02d4682704",
+    "fisher_gs_register_distribute.cu": "7709e24cea2836eb9a43078bb18d563ad450b44a4cbc3bd5f5a1a95677d748ec",
+    "route_reference.py": "b9441cee9754725f749a30a7ee030f6e979f4daf47f0f29950d71bd9b9c0b1d1",
+    "evidence.json": "dede170c4c18a53d74165286eaf864bed78d164e40880353645a81f40f939ee8"
+  },
+  "shared_dependencies": {
+    "attention/adaptive_seed_pytorch.py": "ab288d3a1d70013f912a944f912337633cfc6fe2228b9ee4649febcb94c42e22",
+    "attention/hard_route_pytorch.py": "eaa9dffada5f7eed2cab7457050c3cccd116b5e3fb705ea5b138eb67741e3ffa"
+  },
+  "packaging_changes": [
+    "operator.py: point route import at the frozen local module",
+    "fp8_c10.py: point route import at the frozen local module"
+  ]
+}

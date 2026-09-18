@@ -1,0 +1,434 @@
+{
+  "initial_gpu": {
+    "utc": "2026-09-13T10:47:46.458594+00:00",
+    "gpu": {
+      "index": 4,
+      "name": "NVIDIA H200",
+      "uuid": "GPU-923ad71f-2808-6bf7-701e-dc79b7aaa38f",
+      "memory_mib": 0,
+      "utilization_percent": 0
+    },
+    "compute_processes": []
+  },
+  "layers": [
+    "00",
+    "19"
+  ],
+  "head_chunk": 10,
+  "candidates": [
+    "native_fisher/fisher_c4_head10.cu",
+    "native_fisher/fisher_c4_head10_desc_select.cu"
+  ],
+  "scope": "Complete H40 C4 call with a larger head chunk against the shipped five-head chunk; bitwise gate then paired ABBA.",
+  "base_resources": [
+    127,
+    0,
+    57344,
+    4
+  ],
+  "arms": {},
+  "monitor_errors": [
+    "foreign GPU process",
+    "foreign GPU process",
+    "foreign GPU process",
+    "foreign GPU process",
+    "foreign GPU process",
+    "foreign GPU process",
+    "foreign GPU process",
+    "foreign GPU process",
+    "foreign GPU process",
+    "foreign GPU process",
+    "foreign GPU process"
+  ],
+  "monitor_query_errors": [],
+  "monitor_samples": [
+    {
+      "utc": "2026-09-13T10:47:47.013587+00:00",
+      "processes": []
+    },
+    {
+      "utc": "2026-09-13T10:47:50.182938+00:00",
+      "processes": []
+    },
+    {
+      "utc": "2026-09-13T10:47:53.325994+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "16898",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:47:56.447866+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "22078",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:47:59.576461+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:48:02.714411+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:48:05.833690+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:48:08.956889+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:48:12.078090+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:48:15.204372+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:48:18.360686+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:48:21.493608+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:48:24.620994+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:48:27.755172+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:48:30.878880+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:48:34.012055+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:48:37.227834+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:48:40.359746+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:48:43.509428+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:48:46.660010+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:48:49.783482+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:48:52.900251+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:48:56.021457+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:48:59.153839+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        },
+        {
+          "pid": 3256844,
+          "memory_mib": "18810",
+          "process_name": "ray::WorkerDict.actor_rollout_init_model"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:49:02.276042+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        },
+        {
+          "pid": 3256844,
+          "memory_mib": "17292",
+          "process_name": "ray::WorkerDict"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:49:05.398295+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        },
+        {
+          "pid": 3256844,
+          "memory_mib": "17292",
+          "process_name": "ray::WorkerDict"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:49:08.514047+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        },
+        {
+          "pid": 3256844,
+          "memory_mib": "17292",
+          "process_name": "ray::WorkerDict"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:49:12.247485+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        },
+        {
+          "pid": 3256844,
+          "memory_mib": "17292",
+          "process_name": "ray::WorkerDict"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:49:15.372150+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        },
+        {
+          "pid": 3256844,
+          "memory_mib": "17292",
+          "process_name": "ray::WorkerDict"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:49:18.499161+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        },
+        {
+          "pid": 3256844,
+          "memory_mib": "17292",
+          "process_name": "ray::WorkerDict"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:49:21.627836+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "23558",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        },
+        {
+          "pid": 3256844,
+          "memory_mib": "17292",
+          "process_name": "ray::WorkerDict"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:49:24.912535+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "56046",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        },
+        {
+          "pid": 3256844,
+          "memory_mib": "17292",
+          "process_name": "ray::WorkerDict"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:49:28.064332+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "56048",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        },
+        {
+          "pid": 3256844,
+          "memory_mib": "17292",
+          "process_name": "ray::WorkerDict"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-13T10:49:31.198368+00:00",
+      "processes": [
+        {
+          "pid": 3243735,
+          "memory_mib": "61312",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        },
+        {
+          "pid": 3256844,
+          "memory_mib": "17292",
+          "process_name": "ray::WorkerDict"
+        },
+        {
+          "pid": 3261021,
+          "memory_mib": "714",
+          "process_name": "sglang::scheduler"
+        }
+      ]
+    }
+  ]
+}

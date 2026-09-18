@@ -1,0 +1,83 @@
+{
+  "variant": "c4",
+  "scope": "One exact-capacity H40 attention implementation; only create() is supported. C4 means exactly four merged K/V representatives. A fifth singleton/SQ1 route is forbidden. Pre-change SQ1 measurements in evidence.json are retired history and do not validate this implementation.",
+  "original_sources": {
+    "optimized_c4.py": "f558aaa83b128f7f4cb6c50c3cb4c0451b8777269ff0b861f10979db458dcade",
+    "operator.py": "51d69188be290648dbd4a66258a29b28cd54d5f9888a04b1b46986c7cdc250e9",
+    "fused_selector.py": "3b91ef84f9aa47e91f020ba05482fadce3cba143bef431c36c379f51af9c6671",
+    "fisher_c4_fused_selector_register_basis_loop.cu": "78efc23307fe25e9b11bffd58b44ed0c4edc8490f6ea13cc8373532fb5dc3b89",
+    "warp_mma.cuh": "7e02c115926bf147fbd85b4a8d8fc37211035768f08d28cb1c3fe7f51096494d",
+    "attention/hard_c4_wan21_14b_720p_triton.py": "6a62c06dd4ea1d6dc45b34be2e01548a5b8a65493597db9a1f1a4ede87df3f8f",
+    "fisher_c4_desc_select.cu": "ad61ccea5c663f2589e52d9cf3598fca795a5c3a0e27e0cb8e47cde6921a6d68",
+    "fisher_c4_selector_fp32gs_regpipe.cu": "626460801fe502300e4306143eba8e0fa40822dd080a3b3769f3d85190ed66f0",
+    "fisher_c4_selector_v8_ldsm_packed.cu": "e2a8eb89296edc7bb04ae6716204fb7b4ad0c8dfb14e8e08fedceb2bb23f0010",
+    "fisher_c4_selector_v9c_halving_mxredux.cu": "aed1e0536e9cf94a4d3774b6cd2dd266b20d38bbddd37233814bca9c4f8ace53"
+  },
+  "files": {
+    "optimized_c4.py": "dc98fcae20008e0c218e89fb840b988284b6a766a6df408f7afc91ceccc79243",
+    "operator.py": "c3108e541b51c76057dfef5f7a55a483f6b70434c6e144ce9b12e511a8112974",
+    "fused_selector.py": "3b91ef84f9aa47e91f020ba05482fadce3cba143bef431c36c379f51af9c6671",
+    "fisher_c4_fused_selector_register_basis_loop.cu": "78efc23307fe25e9b11bffd58b44ed0c4edc8490f6ea13cc8373532fb5dc3b89",
+    "warp_mma.cuh": "7e02c115926bf147fbd85b4a8d8fc37211035768f08d28cb1c3fe7f51096494d",
+    "route_reference.py": "6a62c06dd4ea1d6dc45b34be2e01548a5b8a65493597db9a1f1a4ede87df3f8f",
+    "evidence.json": "94e34248ed9899fe35583e60301c96ffea5c121b25ff289dd2021e144b7651df",
+    "fisher_c4_desc_select.cu": "182d1d7e635c05d91fb447f2386025d5d5600954f1da9d2287876cf666cac566",
+    "fisher_c4_selector_fp32gs_regpipe.cu": "626460801fe502300e4306143eba8e0fa40822dd080a3b3769f3d85190ed66f0",
+    "fisher_c4_selector_v8_ldsm_packed.cu": "e2a8eb89296edc7bb04ae6716204fb7b4ad0c8dfb14e8e08fedceb2bb23f0010",
+    "fisher_c4_selector_v9c_halving_mxredux.cu": "aed1e0536e9cf94a4d3774b6cd2dd266b20d38bbddd37233814bca9c4f8ace53"
+  },
+  "shared_dependencies": {
+    "attention/capacity_contract.py": "adf40ac79e5f0a1ce08744e98e2e766b6e0736709b447d6a757db2c093d0e124",
+    "attention/adaptive_seed_pytorch.py": "ab288d3a1d70013f912a944f912337633cfc6fe2228b9ee4649febcb94c42e22",
+    "attention/hard_route_pytorch.py": "eaa9dffada5f7eed2cab7457050c3cccd116b5e3fb705ea5b138eb67741e3ffa"
+  },
+  "packaging_changes": [
+    "operator.py: point route import at the frozen local module",
+    "operator.py: enforce exact C4 routing with SINGLETON_TOP_R=0 and SINGLETON_QUERY_COLUMN=False",
+    "fisher_c4_desc_select.cu: normalize and merge the full owned support without peeling a query-column singleton",
+    "optimized_c4.py: selector_source now fisher_c4_selector_v8_ldsm_packed.cu (bitwise-equal seeds and output to fisher_c4_selector_fp32gs_regpipe.cu, which stays as the paired control)",
+    "optimized_c4.py: selector_source now fisher_c4_selector_v9c_halving_mxredux.cu (bitwise-equal seeds and output to fisher_c4_selector_v8_ldsm_packed.cu, which stays as the paired control)"
+  ],
+  "provenance_20260914": {
+    "gates": [
+      "equiv: promoted stack bitwise equal (seeds and output, layers 00/19/39, tie edges) to the arm the 20-video screen ran",
+      "pkg_final: promoted stack vs retained stack within declared 5e-4 ceiling",
+      "fullstack: complete-call ABBA/BAAB with A/A null pair, 30 pairs per layer, layers 00/19/39",
+      "video: 20 paired videos per arm, same host, CPU PSNR vs dense reference"
+    ],
+    "receipts": [
+      "analysis/receipts_c4_r1/r7_fullstack_desc_select_fp32gs_regpipe.json",
+      "analysis/receipts_c4_r1/r7_video_fp32_psnr_summary.json",
+      "analysis/receipts_c4_r1/r8_equiv_promoted_vs_screened.json",
+      "analysis/receipts_c4_r1/r8_package_final.json"
+    ],
+    "declared_tolerance": {
+      "max_seed_mismatch_fraction": 0.0005,
+      "max_relative_l2": 0.0005
+    }
+  },
+  "provenance_selector_round9_selector_v8_20260915": {
+    "gates": [
+      "equivalence at tolerance 0: seeds and complete output bitwise on layers 00/19/39, tie edges 0",
+      "selector stage timed in place with A/A null, interleaved",
+      "complete-call ABBA/BAAB with A/A null, 30 pairs per layer"
+    ],
+    "receipts": [
+      "analysis/receipts_c4_r1/r9_pkg_v8_equiv.json",
+      "analysis/receipts_c4_r1/r9_sel_v8_vs_packaged.json",
+      "analysis/receipts_c4_r1/r9_full3_v7_v8_fullcall.json"
+    ]
+  },
+  "provenance_selector_round9_selector_mxredux_20260915": {
+    "gates": [
+      "equivalence at tolerance 0: seeds and complete output bitwise on layers 00/19/39, tie edges 0",
+      "selector stage timed in place with A/A null, interleaved",
+      "complete-call ABBA/BAAB with A/A null, 30 pairs per layer"
+    ],
+    "receipts": [
+      "analysis/receipts_c4_r1/r9_pkg_mxredux_equiv.json",
+      "analysis/receipts_c4_r1/r9_sel3_round3_vs_v8.json",
+      "analysis/receipts_c4_r1/r9_full4_mxredux_v10ac_fullcall.json"
+    ]
+  }
+}

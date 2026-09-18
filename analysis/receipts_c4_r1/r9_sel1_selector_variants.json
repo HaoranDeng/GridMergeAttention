@@ -1,0 +1,2378 @@
+{
+  "initial_gpu": {
+    "utc": "2026-09-15T12:15:17.166845+00:00",
+    "gpu": {
+      "index": 3,
+      "name": "NVIDIA H200",
+      "uuid": "GPU-e273c2a1-b1b5-3a2b-4f58-877075fe8915",
+      "memory_mib": 0,
+      "utilization_percent": 0
+    },
+    "compute_processes": []
+  },
+  "host": "scai6",
+  "layers": [
+    "00",
+    "19",
+    "39"
+  ],
+  "base_selector": "/local2/denghaoran/GridMergeAttention/worktrees/c4-cuda-80ms-20260912/native_fisher/fisher_c4_selector_fp32gs_regpipe.cu",
+  "merge_source": "/local2/denghaoran/GridMergeAttention/worktrees/c4-cuda-80ms-20260912/native_fisher/fisher_c4_desc_select.cu",
+  "variants": [
+    "native_fisher/fisher_c4_selector_v1_argmax.cu",
+    "native_fisher/fisher_c4_selector_v3fix_abd.cu",
+    "native_fisher/fisher_c4_selector_ldsm.cu",
+    "native_fisher/fisher_c4_selector_v4_ldsm.cu",
+    "native_fisher/fisher_c4_selector_v5_ldsm_occ5.cu",
+    "native_fisher/fisher_c4_selector_v6_ldsm_carveout.cu"
+  ],
+  "scope": "Selector stage timed in place inside complete C4 calls on the promoted merge, selector module swapped per arm, interleaved ABBA/BAAB with an A/A null arm; seeds and output compared bitwise with the base per layer; resources recorded per arm.",
+  "selector_sha256": {
+    "base": "626460801fe502300e4306143eba8e0fa40822dd080a3b3769f3d85190ed66f0",
+    "null": "626460801fe502300e4306143eba8e0fa40822dd080a3b3769f3d85190ed66f0",
+    "v1_argmax": "ad98dd510c00b44f9f1342e2cfbe10b60189e2848177290b7a779da5461184c6",
+    "v3fix_abd": "5ab7d10c6271f01add06abe1db1ab14e0912be54e9f8284cce1e9f632b6e2d53",
+    "ldsm": "b1fcce46be05915e97fec5247e6251c9fbe4d5fc8b5a41a02bcb5d0ceefe1885",
+    "v4_ldsm": "06391b71d0efa7a893aa1c05442b7bee9a84810e78576b5ff272f71d454931a6",
+    "v5_ldsm_occ5": "db609b8b9066f04fa39ad1854a63c91ac6f8efb7d36000fc3bc733139c8dba88",
+    "v6_ldsm_carveout": "acf887a13f747a3e79533b44d41228ba977f895eb1f79df905004fc119dd26ce"
+  },
+  "resources": {
+    "base": [
+      124,
+      0,
+      36864,
+      4
+    ],
+    "null": [
+      124,
+      0,
+      36864,
+      4
+    ],
+    "v1_argmax": [
+      122,
+      0,
+      36864,
+      4
+    ],
+    "v3fix_abd": [
+      128,
+      0,
+      36864,
+      4
+    ],
+    "ldsm": [
+      74,
+      0,
+      39168,
+      5
+    ],
+    "v4_ldsm": [
+      80,
+      0,
+      39168,
+      5
+    ],
+    "v5_ldsm_occ5": [
+      80,
+      0,
+      39168,
+      5
+    ],
+    "v6_ldsm_carveout": [
+      80,
+      0,
+      39168,
+      5
+    ]
+  },
+  "merge_sha256": "ad61ccea5c663f2589e52d9cf3598fca795a5c3a0e27e0cb8e47cde6921a6d68",
+  "monitor_errors": [],
+  "monitor_samples": [
+    {
+      "utc": "2026-09-15T12:15:17.687088+00:00",
+      "processes": []
+    },
+    {
+      "utc": "2026-09-15T12:15:21.160752+00:00",
+      "processes": []
+    },
+    {
+      "utc": "2026-09-15T12:15:24.422761+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16908",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:15:27.613275+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16908",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:15:30.855540+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16908",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:15:34.037897+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16908",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:15:37.460299+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16908",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:15:40.772607+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16908",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:15:44.015931+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16908",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:15:47.225502+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16908",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:15:50.423693+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16908",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:15:53.593735+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16908",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:15:56.790319+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16908",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:16:00.098585+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16908",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:16:03.342342+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16908",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:16:06.625604+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16908",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:16:09.824111+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16908",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:16:13.168927+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16908",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:16:16.484593+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16908",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:16:19.694720+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16908",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:16:22.885290+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16908",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:16:26.070329+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16908",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:16:29.336256+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16908",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:16:32.558447+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16908",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:16:35.851851+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16920",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:16:39.026979+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16920",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:16:42.276720+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16920",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:16:45.546914+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16920",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:16:48.849327+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16920",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:16:52.060913+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16920",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:16:55.290390+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16920",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:16:58.485452+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16920",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:17:01.632155+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16920",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:17:04.962825+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16920",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:17:08.199113+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16920",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:17:11.482615+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16920",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:17:14.798186+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16920",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:17:18.036812+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16920",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:17:21.231879+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16920",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:17:24.558473+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16920",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:17:27.797482+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16920",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:17:30.983320+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16920",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:17:34.215522+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16920",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:17:37.419713+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16920",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:17:40.680830+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16932",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:17:43.872068+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16932",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:17:47.311707+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16932",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:17:50.497190+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16932",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:17:53.737315+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16932",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:17:56.909929+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16932",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:18:00.122035+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16932",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:18:03.400893+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16932",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:18:06.563741+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16932",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:18:09.857024+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16932",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:18:13.072065+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16932",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:18:16.259320+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16932",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:18:19.442943+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16932",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:18:22.664093+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16932",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:18:25.921384+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16932",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:18:29.198217+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16932",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:18:32.442887+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16932",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:18:35.630273+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16932",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:18:39.023557+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16932",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:18:42.274481+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16932",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:18:45.458820+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16932",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:18:48.724012+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16932",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:18:51.928584+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16944",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:18:55.274743+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16944",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:18:58.485202+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16944",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:19:01.761453+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16944",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:19:05.086768+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16944",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:19:08.366016+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16944",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:19:11.560234+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16944",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:19:14.867820+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16944",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:19:18.036893+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16944",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:19:21.295990+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16944",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:19:24.595475+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16944",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:19:27.794270+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16944",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:19:31.103042+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16944",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:19:34.308815+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16944",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:19:37.710696+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16944",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:19:40.993579+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16944",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:19:44.253946+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16944",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:19:47.443663+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16944",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:19:50.656933+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16944",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:19:53.929053+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16944",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:19:57.094281+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16944",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:20:00.355507+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16956",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:20:03.512351+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16956",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:20:06.784238+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16956",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:20:10.113269+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16956",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:20:13.371165+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16956",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:20:16.563913+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16956",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:20:19.762959+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16956",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:20:22.976682+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16956",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:20:26.208015+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16956",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:20:29.605957+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16956",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:20:32.936272+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16956",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:20:36.156178+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16956",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:20:39.400163+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16956",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:20:42.688202+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16956",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:20:45.934187+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16956",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:20:49.232950+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16956",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:20:52.391864+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16956",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:20:55.599831+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16956",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:20:58.820303+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16956",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:21:02.111870+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16956",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:21:05.388218+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16956",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:21:08.591147+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16968",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:21:11.872681+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16968",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:21:15.083578+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16968",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:21:18.295711+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16968",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:21:21.562451+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16968",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:21:24.810498+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16968",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:21:28.104209+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16968",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:21:31.328381+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16968",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:21:34.623738+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16968",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:21:37.870377+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16968",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:21:41.224294+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16968",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:21:44.414975+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16968",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:21:47.690936+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16968",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:21:50.896464+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16968",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:21:54.114165+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16968",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:21:57.323212+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16968",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:22:00.591229+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16968",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:22:03.922076+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16968",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:22:07.151989+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16968",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:22:10.400637+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16968",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:22:13.608056+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16968",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:22:16.943401+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16968",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:22:20.188081+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "16982",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:22:23.492947+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:22:26.742630+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:22:30.045680+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:22:33.424254+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:22:36.646216+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:22:39.944999+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:22:43.183399+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:22:46.625180+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:22:49.828623+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:22:53.137105+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:22:56.549653+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:22:59.755625+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:23:03.080005+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:23:06.297693+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:23:09.637650+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "21514",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:23:12.869814+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:23:16.080319+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:23:19.346699+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:23:22.623324+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:23:25.935324+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:23:29.192528+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:23:32.578171+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:23:35.731436+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:23:38.976961+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:23:42.172010+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:23:45.440374+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:23:48.764499+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:23:52.008748+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:23:55.272019+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "17074",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:23:58.576394+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:24:01.864986+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:24:05.142428+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:24:08.410036+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:24:11.776438+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:24:15.151741+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:24:18.489576+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:24:21.710443+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:24:25.122545+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:24:28.349876+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:24:31.737149+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:24:35.029887+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    },
+    {
+      "utc": "2026-09-15T12:24:38.389620+00:00",
+      "processes": [
+        {
+          "pid": 114349,
+          "memory_mib": "25948",
+          "process_name": "/home/denghaoran/miniconda3/envs/monarch_rt/bin/python"
+        }
+      ]
+    }
+  ],
+  "correctness": {
+    "00": {
+      "null": {
+        "seeds_bitwise_equal": true,
+        "seed_mismatches": 0,
+        "seed_total": 12096000,
+        "output_bitwise_equal": true,
+        "finite": true,
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "v1_argmax": {
+        "seeds_bitwise_equal": true,
+        "seed_mismatches": 0,
+        "seed_total": 12096000,
+        "output_bitwise_equal": true,
+        "finite": true,
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "v3fix_abd": {
+        "seeds_bitwise_equal": true,
+        "seed_mismatches": 0,
+        "seed_total": 12096000,
+        "output_bitwise_equal": true,
+        "finite": true,
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "ldsm": {
+        "seeds_bitwise_equal": true,
+        "seed_mismatches": 0,
+        "seed_total": 12096000,
+        "output_bitwise_equal": true,
+        "finite": true,
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "v4_ldsm": {
+        "seeds_bitwise_equal": true,
+        "seed_mismatches": 0,
+        "seed_total": 12096000,
+        "output_bitwise_equal": true,
+        "finite": true,
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "v5_ldsm_occ5": {
+        "seeds_bitwise_equal": true,
+        "seed_mismatches": 0,
+        "seed_total": 12096000,
+        "output_bitwise_equal": true,
+        "finite": true,
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "v6_ldsm_carveout": {
+        "seeds_bitwise_equal": true,
+        "seed_mismatches": 0,
+        "seed_total": 12096000,
+        "output_bitwise_equal": true,
+        "finite": true,
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      }
+    },
+    "19": {
+      "null": {
+        "seeds_bitwise_equal": true,
+        "seed_mismatches": 0,
+        "seed_total": 12096000,
+        "output_bitwise_equal": true,
+        "finite": true,
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "v1_argmax": {
+        "seeds_bitwise_equal": true,
+        "seed_mismatches": 0,
+        "seed_total": 12096000,
+        "output_bitwise_equal": true,
+        "finite": true,
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "v3fix_abd": {
+        "seeds_bitwise_equal": true,
+        "seed_mismatches": 0,
+        "seed_total": 12096000,
+        "output_bitwise_equal": true,
+        "finite": true,
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "ldsm": {
+        "seeds_bitwise_equal": true,
+        "seed_mismatches": 0,
+        "seed_total": 12096000,
+        "output_bitwise_equal": true,
+        "finite": true,
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "v4_ldsm": {
+        "seeds_bitwise_equal": true,
+        "seed_mismatches": 0,
+        "seed_total": 12096000,
+        "output_bitwise_equal": true,
+        "finite": true,
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "v5_ldsm_occ5": {
+        "seeds_bitwise_equal": true,
+        "seed_mismatches": 0,
+        "seed_total": 12096000,
+        "output_bitwise_equal": true,
+        "finite": true,
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "v6_ldsm_carveout": {
+        "seeds_bitwise_equal": true,
+        "seed_mismatches": 0,
+        "seed_total": 12096000,
+        "output_bitwise_equal": true,
+        "finite": true,
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      }
+    },
+    "39": {
+      "null": {
+        "seeds_bitwise_equal": true,
+        "seed_mismatches": 0,
+        "seed_total": 12096000,
+        "output_bitwise_equal": true,
+        "finite": true,
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "v1_argmax": {
+        "seeds_bitwise_equal": true,
+        "seed_mismatches": 0,
+        "seed_total": 12096000,
+        "output_bitwise_equal": true,
+        "finite": true,
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "v3fix_abd": {
+        "seeds_bitwise_equal": true,
+        "seed_mismatches": 0,
+        "seed_total": 12096000,
+        "output_bitwise_equal": true,
+        "finite": true,
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "ldsm": {
+        "seeds_bitwise_equal": true,
+        "seed_mismatches": 0,
+        "seed_total": 12096000,
+        "output_bitwise_equal": true,
+        "finite": true,
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "v4_ldsm": {
+        "seeds_bitwise_equal": true,
+        "seed_mismatches": 0,
+        "seed_total": 12096000,
+        "output_bitwise_equal": true,
+        "finite": true,
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "v5_ldsm_occ5": {
+        "seeds_bitwise_equal": true,
+        "seed_mismatches": 0,
+        "seed_total": 12096000,
+        "output_bitwise_equal": true,
+        "finite": true,
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "v6_ldsm_carveout": {
+        "seeds_bitwise_equal": true,
+        "seed_mismatches": 0,
+        "seed_total": 12096000,
+        "output_bitwise_equal": true,
+        "finite": true,
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      }
+    }
+  },
+  "arms": {
+    "00": {
+      "null": {
+        "arm_a": "base",
+        "arm_b": "null",
+        "a_mean_ms": 7.299495474497477,
+        "b_mean_ms": 7.2661514600118,
+        "delta_mean_ms": -0.03334401448567708,
+        "delta_sd_ms": 0.12682829191139955,
+        "n": 30,
+        "t": -1.4399995944392925,
+        "b_faster_count": 21
+      },
+      "v1_argmax": {
+        "arm_a": "base",
+        "arm_b": "v1_argmax",
+        "a_mean_ms": 7.323080523808797,
+        "b_mean_ms": 6.553850666681925,
+        "delta_mean_ms": -0.7692298571268718,
+        "delta_sd_ms": 0.10644092350046486,
+        "n": 30,
+        "t": -39.5829471221211,
+        "b_faster_count": 30,
+        "delta_offset_corrected_ms": -0.7358858426411947
+      },
+      "v3fix_abd": {
+        "arm_a": "base",
+        "arm_b": "v3fix_abd",
+        "a_mean_ms": 7.334840536117554,
+        "b_mean_ms": 6.607060305277506,
+        "delta_mean_ms": -0.7277802308400472,
+        "delta_sd_ms": 0.08690500668038431,
+        "n": 30,
+        "t": -45.8686633329936,
+        "b_faster_count": 30,
+        "delta_offset_corrected_ms": -0.6944362163543701
+      },
+      "ldsm": {
+        "arm_a": "base",
+        "arm_b": "ldsm",
+        "a_mean_ms": 7.259686406453451,
+        "b_mean_ms": 6.381650145848592,
+        "delta_mean_ms": -0.8780362606048584,
+        "delta_sd_ms": 0.3809108093191838,
+        "n": 30,
+        "t": -12.625534757082173,
+        "b_faster_count": 29,
+        "delta_offset_corrected_ms": -0.8446922461191814
+      },
+      "v4_ldsm": {
+        "arm_a": "base",
+        "arm_b": "v4_ldsm",
+        "a_mean_ms": 7.3664309024810795,
+        "b_mean_ms": 5.5320895989735925,
+        "delta_mean_ms": -1.834341303507487,
+        "delta_sd_ms": 0.11351064046666728,
+        "n": 30,
+        "t": -88.51241663018514,
+        "b_faster_count": 30,
+        "delta_offset_corrected_ms": -1.8009972890218098
+      },
+      "v5_ldsm_occ5": {
+        "arm_a": "base",
+        "arm_b": "v5_ldsm_occ5",
+        "a_mean_ms": 7.374231481552124,
+        "b_mean_ms": 5.568115202585856,
+        "delta_mean_ms": -1.806116278966268,
+        "delta_sd_ms": 0.08291608391171673,
+        "n": 30,
+        "t": -119.30744685438877,
+        "b_faster_count": 30,
+        "delta_offset_corrected_ms": -1.7727722644805908
+      },
+      "v6_ldsm_carveout": {
+        "arm_a": "base",
+        "arm_b": "v6_ldsm_carveout",
+        "a_mean_ms": 7.340729602177938,
+        "b_mean_ms": 5.541421842575073,
+        "delta_mean_ms": -1.7993077596028646,
+        "delta_sd_ms": 0.07327920326202086,
+        "n": 30,
+        "t": -134.4885593672042,
+        "b_faster_count": 30,
+        "delta_offset_corrected_ms": -1.7659637451171875
+      }
+    },
+    "19": {
+      "null": {
+        "arm_a": "base",
+        "arm_b": "null",
+        "a_mean_ms": 7.394070402781169,
+        "b_mean_ms": 7.34305919011434,
+        "delta_mean_ms": -0.051011212666829425,
+        "delta_sd_ms": 0.16189433099275619,
+        "n": 30,
+        "t": -1.7258165676329882,
+        "b_faster_count": 19
+      },
+      "v1_argmax": {
+        "arm_a": "base",
+        "arm_b": "v1_argmax",
+        "a_mean_ms": 7.4572074731191,
+        "b_mean_ms": 6.6862431844075525,
+        "delta_mean_ms": -0.7709642887115479,
+        "delta_sd_ms": 0.10168931469898468,
+        "n": 30,
+        "t": -41.52594923156233,
+        "b_faster_count": 30,
+        "delta_offset_corrected_ms": -0.7199530760447185
+      },
+      "v3fix_abd": {
+        "arm_a": "base",
+        "arm_b": "v3fix_abd",
+        "a_mean_ms": 7.364882119496664,
+        "b_mean_ms": 6.666157913208008,
+        "delta_mean_ms": -0.6987242062886556,
+        "delta_sd_ms": 0.07170958716574638,
+        "n": 30,
+        "t": -53.36901582972687,
+        "b_faster_count": 30,
+        "delta_offset_corrected_ms": -0.6477129936218262
+      },
+      "ldsm": {
+        "arm_a": "base",
+        "arm_b": "ldsm",
+        "a_mean_ms": 7.401928551991781,
+        "b_mean_ms": 6.440322144826253,
+        "delta_mean_ms": -0.9616064071655274,
+        "delta_sd_ms": 0.10718590126379621,
+        "n": 30,
+        "t": -49.13832084592977,
+        "b_faster_count": 30,
+        "delta_offset_corrected_ms": -0.910595194498698
+      },
+      "v4_ldsm": {
+        "arm_a": "base",
+        "arm_b": "v4_ldsm",
+        "a_mean_ms": 7.283066654205323,
+        "b_mean_ms": 5.452537552515666,
+        "delta_mean_ms": -1.8305291016896565,
+        "delta_sd_ms": 0.15791075324567638,
+        "n": 30,
+        "t": -63.49295792448162,
+        "b_faster_count": 30,
+        "delta_offset_corrected_ms": -1.7795178890228271
+      },
+      "v5_ldsm_occ5": {
+        "arm_a": "base",
+        "arm_b": "v5_ldsm_occ5",
+        "a_mean_ms": 7.28792322476705,
+        "b_mean_ms": 5.494311428070068,
+        "delta_mean_ms": -1.793611796696981,
+        "delta_sd_ms": 0.11709706336238715,
+        "n": 30,
+        "t": -83.89635164615619,
+        "b_faster_count": 30,
+        "delta_offset_corrected_ms": -1.7426005840301515
+      },
+      "v6_ldsm_carveout": {
+        "arm_a": "base",
+        "arm_b": "v6_ldsm_carveout",
+        "a_mean_ms": 7.274645312627157,
+        "b_mean_ms": 5.503325875600179,
+        "delta_mean_ms": -1.7713194370269776,
+        "delta_sd_ms": 0.10233696562000667,
+        "n": 30,
+        "t": -94.80363291300839,
+        "b_faster_count": 30,
+        "delta_offset_corrected_ms": -1.7203082243601482
+      }
+    },
+    "39": {
+      "null": {
+        "arm_a": "base",
+        "arm_b": "null",
+        "a_mean_ms": 7.312791458765665,
+        "b_mean_ms": 7.3026015599568685,
+        "delta_mean_ms": -0.0101898988087972,
+        "delta_sd_ms": 0.09701015740244968,
+        "n": 30,
+        "t": -0.575325057263778,
+        "b_faster_count": 14
+      },
+      "v1_argmax": {
+        "arm_a": "base",
+        "arm_b": "v1_argmax",
+        "a_mean_ms": 7.345253372192383,
+        "b_mean_ms": 6.5777237256368,
+        "delta_mean_ms": -0.7675296465555826,
+        "delta_sd_ms": 0.07620407198789218,
+        "n": 30,
+        "t": -55.16677652596503,
+        "b_faster_count": 30,
+        "delta_offset_corrected_ms": -0.7573397477467855
+      },
+      "v3fix_abd": {
+        "arm_a": "base",
+        "arm_b": "v3fix_abd",
+        "a_mean_ms": 7.267385578155517,
+        "b_mean_ms": 6.57949226697286,
+        "delta_mean_ms": -0.6878933111826578,
+        "delta_sd_ms": 0.07810368909296551,
+        "n": 30,
+        "t": -48.24031848779817,
+        "b_faster_count": 30,
+        "delta_offset_corrected_ms": -0.6777034123738607
+      },
+      "ldsm": {
+        "arm_a": "base",
+        "arm_b": "ldsm",
+        "a_mean_ms": 7.3244320551554365,
+        "b_mean_ms": 6.302582438786825,
+        "delta_mean_ms": -1.0218496163686117,
+        "delta_sd_ms": 0.4022354169274026,
+        "n": 30,
+        "t": -13.914490413063364,
+        "b_faster_count": 30,
+        "delta_offset_corrected_ms": -1.0116597175598145
+      },
+      "v4_ldsm": {
+        "arm_a": "base",
+        "arm_b": "v4_ldsm",
+        "a_mean_ms": 7.222193082173665,
+        "b_mean_ms": 5.4243498802185055,
+        "delta_mean_ms": -1.7978432019551596,
+        "delta_sd_ms": 0.09880795236868314,
+        "n": 30,
+        "t": -99.65992138910677,
+        "b_faster_count": 30,
+        "delta_offset_corrected_ms": -1.7876533031463624
+      },
+      "v5_ldsm_occ5": {
+        "arm_a": "base",
+        "arm_b": "v5_ldsm_occ5",
+        "a_mean_ms": 7.199428256352743,
+        "b_mean_ms": 5.467638365427653,
+        "delta_mean_ms": -1.7317898909250895,
+        "delta_sd_ms": 0.07402060732071968,
+        "n": 30,
+        "t": -128.14544793035893,
+        "b_faster_count": 30,
+        "delta_offset_corrected_ms": -1.7215999921162923
+      },
+      "v6_ldsm_carveout": {
+        "arm_a": "base",
+        "arm_b": "v6_ldsm_carveout",
+        "a_mean_ms": 7.212156788508097,
+        "b_mean_ms": 5.50075732866923,
+        "delta_mean_ms": -1.711399459838867,
+        "delta_sd_ms": 0.07710505156635875,
+        "n": 30,
+        "t": -121.57077519741695,
+        "b_faster_count": 30,
+        "delta_offset_corrected_ms": -1.70120956103007
+      }
+    }
+  },
+  "summary": {
+    "v1_argmax": {
+      "pooled_selector_delta_ms_per_call": -0.7377262221442328,
+      "per_layer_ms": {
+        "00": -0.7358858426411947,
+        "19": -0.7199530760447185,
+        "39": -0.7573397477467855
+      },
+      "wins": 90,
+      "n": 90,
+      "seeds_bitwise_all_layers": true,
+      "output_bitwise_all_layers": true,
+      "resources": [
+        122,
+        0,
+        36864,
+        4
+      ]
+    },
+    "v3fix_abd": {
+      "pooled_selector_delta_ms_per_call": -0.673284207450019,
+      "per_layer_ms": {
+        "00": -0.6944362163543701,
+        "19": -0.6477129936218262,
+        "39": -0.6777034123738607
+      },
+      "wins": 90,
+      "n": 90,
+      "seeds_bitwise_all_layers": true,
+      "output_bitwise_all_layers": true,
+      "resources": [
+        128,
+        0,
+        36864,
+        4
+      ]
+    },
+    "ldsm": {
+      "pooled_selector_delta_ms_per_call": -0.9223157193925647,
+      "per_layer_ms": {
+        "00": -0.8446922461191814,
+        "19": -0.910595194498698,
+        "39": -1.0116597175598145
+      },
+      "wins": 89,
+      "n": 90,
+      "seeds_bitwise_all_layers": true,
+      "output_bitwise_all_layers": true,
+      "resources": [
+        74,
+        0,
+        39168,
+        5
+      ]
+    },
+    "v4_ldsm": {
+      "pooled_selector_delta_ms_per_call": -1.789389493730333,
+      "per_layer_ms": {
+        "00": -1.8009972890218098,
+        "19": -1.7795178890228271,
+        "39": -1.7876533031463624
+      },
+      "wins": 90,
+      "n": 90,
+      "seeds_bitwise_all_layers": true,
+      "output_bitwise_all_layers": true,
+      "resources": [
+        80,
+        0,
+        39168,
+        5
+      ]
+    },
+    "v5_ldsm_occ5": {
+      "pooled_selector_delta_ms_per_call": -1.7456576135423447,
+      "per_layer_ms": {
+        "00": -1.7727722644805908,
+        "19": -1.7426005840301515,
+        "39": -1.7215999921162923
+      },
+      "wins": 90,
+      "n": 90,
+      "seeds_bitwise_all_layers": true,
+      "output_bitwise_all_layers": true,
+      "resources": [
+        80,
+        0,
+        39168,
+        5
+      ]
+    },
+    "v6_ldsm_carveout": {
+      "pooled_selector_delta_ms_per_call": -1.729160510169135,
+      "per_layer_ms": {
+        "00": -1.7659637451171875,
+        "19": -1.7203082243601482,
+        "39": -1.70120956103007
+      },
+      "wins": 90,
+      "n": 90,
+      "seeds_bitwise_all_layers": true,
+      "output_bitwise_all_layers": true,
+      "resources": [
+        80,
+        0,
+        39168,
+        5
+      ]
+    },
+    "base_selector_ms_per_call": 7.335452445348103
+  },
+  "valid": true
+}
