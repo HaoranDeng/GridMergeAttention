@@ -20,7 +20,9 @@ def main():
             report['methods'][name]={'videos':0,'quality_complete':False,'state':'not_submitted_speed_gate'}
             continue
         folder=Path(active[axes]['output'])
-        item={'videos':len(list(folder.glob('*.mp4'))),'quality_complete':False}
+        item={'videos':len(list(folder.glob('*.mp4'))),'quality_complete':False,'recorded_videos':0}
+        item['workers']=[{k:w[k] for k in ('host','gpu','indices') if k in w} for w in active[axes].get('workers',[active[axes]])]
+        item['speed_exception_authorized']=active[axes].get('speed_exception_authorized',False)
         runtime=folder/'runtime.json'
         if runtime.exists():
             data=json.loads(runtime.read_text()); records=data['videos']
@@ -33,20 +35,26 @@ def main():
             for count,filename in [(5,'quality_first5.json'),(20,'quality.json')]:
                 if (folder/filename).exists():
                     q=json.loads((folder/filename).read_text())['methods'][name]
+                    if len(q['videos'])!=count:continue
                     baseline=reference[f'c8_first{count}']['summary']
                     item[f'quality_first{count}']=q['summary']
                     item[f'delta_first{count}_vs_existing_c8']={k:q['summary'][k]-baseline[k] for k in ['psnr','ssim','lpips']}
-        guard=Path(active[axes]['guard'])
-        if guard.exists():
-            item['guard']=str(guard)
-            if (guard/'completion.json').exists(): item['completion']=json.loads((guard/'completion.json').read_text())
+        item['guards']=[]
+        guard_paths=active[axes].get('guards',[active[axes]['guard']])
+        for guard_path in guard_paths:
+            guard=Path(guard_path);entry={'path':str(guard),'started':guard.exists()}
+            item['guards'].append(entry)
+            if not guard.exists():continue
+            if (guard/'completion.json').exists():entry['completion']=json.loads((guard/'completion.json').read_text())
             log=guard/'worker.log'
             if log.exists():
                 with log.open('rb') as f:
                     f.seek(max(0,log.stat().st_size-2000)); tail=f.read().decode(errors='replace')
                 progress=[line.strip() for line in tail.replace('\r','\n').splitlines() if '/50' in line]
-                if progress:item['denoising_progress']=progress[-1]
-                if 'Traceback' in tail:item['error_tail']=tail[-1400:]
+                if progress:entry['denoising_progress']=progress[-1]
+                if 'Traceback' in tail:entry['error_tail']=tail[-1400:]
+        if all('completion' in e for e in item['guards']):
+            item['completion']={'valid':all(e['completion']['valid'] for e in item['guards'])}
         report['methods'][name]=item
     report['complete']=all(v['quality_complete'] and v.get('completion',{}).get('valid') for v in report['methods'].values())
     save(base/'status.json',report)

@@ -23,6 +23,7 @@ def main():
     p.add_argument('--validation', type=Path, required=True)
     p.add_argument('--reference', type=Path, required=True)
     p.add_argument('--speed-gate', type=Path, required=True)
+    p.add_argument('--allow-user-speed-exception',action='store_true')
     p.add_argument('--model', default='/home/denghaoran/wan_models/Wan2.1-T2V-14B-Diffusers')
     p.add_argument('--svg', default='/local2/denghaoran/GridMergeAttention_worktrees/svg_official_20260906ch')
     a = p.parse_args()
@@ -30,7 +31,7 @@ def main():
     assert validation['passed'] and validation['axes'] == a.axes
     root = Path(__file__).resolve().parents[1]
     from analysis.axis_c4_speed_gate import verify_gate
-    gate = verify_gate(a.speed_gate, root, a.axes)
+    gate = verify_gate(a.speed_gate, root, a.axes,a.allow_user_speed_exception)
     prompt_path = root/'prompts/MovieGenVideoBench_extended.txt'
     prompts = [v.strip() for v in prompt_path.read_text().splitlines() if v.strip()]
     validate_canonical_prompt_contract(prompt_path, prompts)

@@ -25,6 +25,7 @@ def main():
     root=Path(__file__).resolve().parents[1]
     files=[module.__file__,'attention/axis_current_c4_selector.cu','attention/axis_current_c4_merge.cu',
            'kernels/best/c4/warp_mma.cuh','kernels/best/c4/route_reference.py','analysis/quick_axis_c4_qkv.py']
+    files+=getattr(module,'extra_source_files',[])
     report = {'axes': args.axes, 'capacity': 4, 'cases': [], 'passed': False, 'module':args.module,
               'environment':{key:value for key,value in os.environ.items() if key.startswith('AXIS_')},
               'source_sha256':{str((root/file).relative_to(root)):hashlib.sha256((root/file).read_bytes()).hexdigest()

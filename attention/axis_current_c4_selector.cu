@@ -494,6 +494,224 @@ __device__ __forceinline__ void fisher_fma_trimmed(const float (&local)[P][16/P]
   if(lane==0)*reinterpret_cast<uint32_t*>(seeds+int64_t(group)*4)=packed;
 }
 template<int SEEDS,int P>
+__device__ __forceinline__ void fisher_moments(const float (&local)[P][16/P],
+ int cand_lane,int anchor,uint8_t* seeds,int group,float scale) {
+  constexpr int CS=32/P,PR=16/P;
+  const int lane=threadIdx.x&31,probe=lane%P,slot=lane/P;
+  float z[P][PR];
+  #pragma unroll
+  for(int p=0;p<PR;++p){
+    #pragma unroll
+    for(int c=0;c<P;++c)z[c][p]=__fmul_rn(local[c][p],scale);
+  }
+  float rho[PR],root[PR],anchor_z[PR];
+  #pragma unroll
+  for(int p=0;p<PR;++p){
+    float value=0;
+    #pragma unroll
+    for(int c=0;c<P;++c)value=choose_candidate(value,z[c][p],anchor/CS,c);
+    anchor_z[p]=__shfl_sync(0xffffffff,value,(anchor%CS)*P+probe);
+  }
+  static_assert(P==4,"Four probe lanes");
+  const int subset=(lane>>3)&3;
+  float argument=0.f;
+  #pragma unroll
+  for(int p=0;p<4;++p)argument=choose_candidate(argument,anchor_z[p],subset,p);
+  int mk=__float_as_int(argument);mk^=(mk>>31)&0x7fffffff;
+  mk=__reduce_max_sync(0xffffffffu,mk);mk^=(mk>>31)&0x7fffffff;
+  float exponential=__expf(argument-__int_as_float(mk));
+  float den=exponential;
+  den+=__shfl_xor_sync(0xffffffff,den,16);
+  den+=__shfl_xor_sync(0xffffffff,den,8);
+  den+=__shfl_xor_sync(0xffffffff,den,2);
+  den+=__shfl_xor_sync(0xffffffff,den,1);
+  float normalized=__fdividef(exponential,den),owned_root=sqrtf(normalized);
+  #pragma unroll
+  for(int p=0;p<4;++p){rho[p]=__shfl_sync(0xffffffff,normalized,p*8+probe);root[p]=__shfl_sync(0xffffffff,owned_root,p*8+probe);}
+
+  constexpr int A=(NC+CS-1)/CS;
+  float delta[A][PR],means[A],scores[A],first_cov[A];
+  #pragma unroll
+  for(int c=0;c<A;++c){
+    float mean=0.f,second=0.f;
+    #pragma unroll
+    for(int p=0;p<PR;++p){
+      delta[c][p]=z[c][p]-anchor_z[p];
+      mean=fmaf(delta[c][p],rho[p],mean);
+      second=fmaf(delta[c][p]*delta[c][p],rho[p],second);
+    }
+    #pragma unroll
+    for(int width=P/2;width;width/=2){
+      mean+=__shfl_xor_sync(0xffffffff,mean,width);
+      second+=__shfl_xor_sync(0xffffffff,second,width);
+    }
+    means[c]=mean;scores[c]=fmaxf(fmaf(-mean,mean,second),0.f);
+  }
+  unsigned used=unsigned(~((uint64_t(1)<<NC)-1))|(1u<<anchor);
+  unsigned packed=__shfl_sync(0xffffffffu,cand_lane,anchor)&0xffu;
+  const int own_index=probe*CS+slot;float first_factor=0.f;
+  #pragma unroll
+  for(int step=1;step<4;++step){
+    float score=0;
+    #pragma unroll
+    for(int c=0;c<A;++c)score=choose_candidate(score,scores[c],probe,c);
+    bool valid=((used>>own_index)&1u)==0;
+    unsigned key=valid?__float_as_uint(fmaxf(score,0.f)):0u;
+    unsigned bestbits=__reduce_max_sync(0xffffffffu,key);
+    int picked=__reduce_min_sync(0xffffffffu,(valid&&key==bestbits)?unsigned(own_index):32u);
+    float best=__uint_as_float(bestbits);
+    used|=1u<<picked;packed|=(__shfl_sync(0xffffffffu,cand_lane,picked)&0xffu)<<(8*step);
+    if(step<3){
+      float direction[PR],mean=0.f,picked_first_cov=0.f;
+      #pragma unroll
+      for(int c=0;c<A;++c){
+        mean=choose_candidate(mean,means[c],picked/CS,c);
+        if(step==2)picked_first_cov=choose_candidate(picked_first_cov,first_cov[c],picked/CS,c);
+      }
+      mean=__shfl_sync(0xffffffff,mean,(picked%CS)*P+probe);
+      if(step==2)picked_first_cov=__shfl_sync(0xffffffff,picked_first_cov,(picked%CS)*P+probe);
+      #pragma unroll
+      for(int p=0;p<PR;++p){
+        float value=0;
+        #pragma unroll
+        for(int c=0;c<A;++c)value=choose_candidate(value,delta[c][p],picked/CS,c);
+        direction[p]=__shfl_sync(0xffffffff,value,(picked%CS)*P+probe)*rho[p];
+      }
+      float inv=__fdividef(1.f,best+1.e-12f),factor=(2.f-best*inv)*inv;
+      #pragma unroll
+      for(int c=0;c<A;++c){
+        float covariance=0.f;
+        #pragma unroll
+        for(int p=0;p<PR;++p)covariance=fmaf(delta[c][p],direction[p],covariance);
+        #pragma unroll
+        for(int width=P/2;width;width/=2)covariance+=__shfl_xor_sync(0xffffffff,covariance,width);
+        covariance=fmaf(-means[c],mean,covariance);
+        if(step==1)first_cov[c]=covariance;
+        else covariance=fmaf(-first_cov[c]*picked_first_cov,first_factor,covariance);
+        scores[c]=fmaxf(fmaf(-covariance*covariance,factor,scores[c]),0.f);
+      }
+      if(step==1)first_factor=factor;
+    }
+  }
+  if(lane==0)*reinterpret_cast<uint32_t*>(seeds+int64_t(group)*4)=packed;
+}
+template<int SEEDS,int P>
+__device__ __forceinline__ void fisher_register_gram(const float (&local)[P][16/P],
+ int cand_lane,int anchor,uint8_t* seeds,int group,float scale,__half* scratch) {
+  constexpr int CS=32/P,PR=16/P;
+  const int lane=threadIdx.x&31,probe=lane%P,slot=lane/P;
+  float z[P][PR];
+  #pragma unroll
+  for(int p=0;p<PR;++p){
+    #pragma unroll
+    for(int c=0;c<((NC+CS-1)/CS);++c)z[c][p]=__fmul_rn(local[c][p],scale);
+  }
+  float rho[PR],root[PR],anchor_z[PR];
+  #pragma unroll
+  for(int p=0;p<PR;++p){
+    float value=0;
+    #pragma unroll
+    for(int c=0;c<((NC+CS-1)/CS);++c)value=choose_candidate(value,z[c][p],anchor/CS,c);
+    anchor_z[p]=__shfl_sync(0xffffffff,value,(anchor%CS)*P+probe);
+  }
+  static_assert(P==4,"Four probe lanes");
+  const int subset=(lane>>3)&3;
+  float argument=0.f;
+  #pragma unroll
+  for(int p=0;p<4;++p)argument=choose_candidate(argument,anchor_z[p],subset,p);
+  int mk=__float_as_int(argument);mk^=(mk>>31)&0x7fffffff;
+  mk=__reduce_max_sync(0xffffffffu,mk);mk^=(mk>>31)&0x7fffffff;
+  float exponential=__expf(argument-__int_as_float(mk));
+  float den=exponential;
+  den+=__shfl_xor_sync(0xffffffff,den,16);
+  den+=__shfl_xor_sync(0xffffffff,den,8);
+  den+=__shfl_xor_sync(0xffffffff,den,2);
+  den+=__shfl_xor_sync(0xffffffff,den,1);
+  float normalized=__fdividef(exponential,den),owned_root=sqrtf(normalized);
+  #pragma unroll
+  for(int p=0;p<4;++p){rho[p]=__shfl_sync(0xffffffff,normalized,p*8+probe);root[p]=__shfl_sync(0xffffffff,owned_root,p*8+probe);}
+  float res[P][PR];
+  #pragma unroll
+  for(int c=0;c<((NC+CS-1)/CS);++c){
+    float delta[PR],mean=0.f;
+    #pragma unroll
+    for(int p=0;p<PR;++p){delta[p]=z[c][p]-anchor_z[p];mean=fmaf(delta[p],rho[p],mean);}
+    #pragma unroll
+    for(int width=P/2;width; width/=2)mean+=__shfl_xor_sync(0xffffffff,mean,width);
+    #pragma unroll
+    for(int p=0;p<PR;++p)res[c][p]=__fmul_rn(__fadd_rn(delta[p],-mean),root[p]);
+  }
+
+
+  #pragma unroll
+  for(int c=0;c<4;++c){
+    #pragma unroll
+    for(int p=0;p<4;++p)scratch[(c*8+slot)*24+p*4+probe]=__float2half_rn(c<((NC+7)/8)?res[c][p]:0.f);
+  }
+  __syncwarp();
+  float gram[2][4][4]={};
+  #pragma unroll
+  for(int m=0;m<2;++m){
+    int row=m*16+slot,d=probe*2;
+    uint32_t a[4]={*reinterpret_cast<uint32_t*>(scratch+row*24+d),
+                    *reinterpret_cast<uint32_t*>(scratch+(row+8)*24+d),
+                    *reinterpret_cast<uint32_t*>(scratch+row*24+d+8),
+                    *reinterpret_cast<uint32_t*>(scratch+(row+8)*24+d+8)};
+    #pragma unroll
+    for(int n=0;n<4;++n){
+      uint32_t b[2]={*reinterpret_cast<uint32_t*>(scratch+(n*8+slot)*24+d),
+                      *reinterpret_cast<uint32_t*>(scratch+(n*8+slot)*24+d+8)};
+      auto& g=gram[m][n];
+      asm volatile("mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 "
+        "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};"
+        : "+f"(g[0]),"+f"(g[1]),"+f"(g[2]),"+f"(g[3])
+        : "r"(a[0]),"r"(a[1]),"r"(a[2]),"r"(a[3]),"r"(b[0]),"r"(b[1]));
+    }
+  }
+  float score=0.f;
+  #pragma unroll
+  for(int c=0;c<4;++c){
+    float diagonal=(slot&1)?gram[c/2][c][2*(c&1)+1]:gram[c/2][c][2*(c&1)];
+    diagonal=__shfl_sync(0xffffffff,diagonal,slot*4+slot/2);
+    score=choose_candidate(score,diagonal,probe,c);
+  }
+  unsigned used=unsigned(~((uint64_t(1)<<NC)-1))|(1u<<anchor);
+  unsigned packed=__shfl_sync(0xffffffffu,cand_lane,anchor)&0xffu;
+  int own_index=probe*8+slot;float first_cov=0.f,first_factor=0.f;
+  #pragma unroll
+  for(int step=1;step<4;++step){
+    bool valid=((used>>own_index)&1u)==0;
+    unsigned key=valid?__float_as_uint(fmaxf(score,0.f)):0u;
+    unsigned bestbits=__reduce_max_sync(0xffffffffu,key);
+    int picked=__reduce_min_sync(0xffffffffu,(valid&&key==bestbits)?unsigned(own_index):32u);
+    float best=__uint_as_float(bestbits);
+    used|=1u<<picked;packed|=(__shfl_sync(0xffffffffu,cand_lane,picked)&0xffu)<<(8*step);
+    if(step<3){
+      float covariance=0.f;
+      #pragma unroll
+      for(int c=0;c<4;++c){
+        float value=0.f;
+        #pragma unroll
+        for(int n=0;n<4;++n){
+          float g=(picked&1)?gram[c/2][n][2*(c&1)+1]:gram[c/2][n][2*(c&1)];
+          value=choose_candidate(value,g,picked/8,n);
+        }
+        value=__shfl_sync(0xffffffff,value,slot*4+(picked%8)/2);
+        covariance=choose_candidate(covariance,value,probe,c);
+      }
+      if(step==2){
+        float cross=__shfl_sync(0xffffffff,first_cov,(picked%8)*4+picked/8);
+        covariance=fmaf(-first_cov*cross,first_factor,covariance);
+      }
+      float inv=__fdividef(1.f,best+1.e-12f),factor=(2.f-best*inv)*inv;
+      score=fmaxf(fmaf(-covariance*covariance,factor,score),0.f);
+      if(step==1){first_cov=covariance;first_factor=factor;}
+    }
+  }
+  if(lane==0)*reinterpret_cast<uint32_t*>(seeds+int64_t(group)*4)=packed;
+  __syncwarp();
+}
+template<int SEEDS,int P>
 __device__ __forceinline__ void fisher_gram(const float (&local)[P][16/P],
  int cand_lane,int anchor,uint8_t* seeds,int group,float scale,float* gram) {
   constexpr int CS=32/P,PR=16/P;
@@ -627,25 +845,30 @@ __global__ __launch_bounds__(W*32,W==4?4:2) void fused_selector(const bf16* __re
  // 16x128 probe tile lives in two uint4 registers. The load for frame+1 is
  // issued before this frame's dots and Gram-Schmidt and only reaches shared at
  // the top of the next frame, so its latency hides behind work.
- int pf_probe=tid>>4,pf_d=(tid&15)*8;
- uint4 pf0,pf1;
- {
-  int ki=(((key_row*L+pf_probe*L/16)*H+HS+head)*128)+pf_d;
-  pf0=*reinterpret_cast<const uint4*>(k+ki);
-  ki=(((key_row*L+(pf_probe+8)*L/16)*H+HS+head)*128)+pf_d;
-  if constexpr(W==4)pf1=*reinterpret_cast<const uint4*>(k+ki);
+ constexpr int PF=8/W;
+ uint4 prefetched[PF];
+ #pragma unroll
+ for(int p=0;p<PF;++p){
+   int vec=tid+p*W*32,probe=vec/16,d=vec%16*8;
+   int ki=((key_row*L+probe*L/16)*H+HS+head)*128+d;
+   prefetched[p]=*reinterpret_cast<const uint4*>(k+ki);
  }
  #pragma unroll 1
- for(int frame=0;frame<O;++frame) {
- __syncthreads();
- *reinterpret_cast<uint4*>(sk+qoff(pf_probe,pf_d))=pf0;
- if constexpr(W==4)*reinterpret_cast<uint4*>(sk+qoff(pf_probe+8,pf_d))=pf1;
- __syncthreads();
- if(frame<O-1) {
-  int ki=((((frame+1)*R+key_row)*L+pf_probe*L/16)*H+HS+head)*128+pf_d;
-  pf0=*reinterpret_cast<const uint4*>(k+ki);
-  ki=((((frame+1)*R+key_row)*L+(pf_probe+8)*L/16)*H+HS+head)*128+pf_d;
-  if constexpr(W==4)pf1=*reinterpret_cast<const uint4*>(k+ki);
+ for(int frame=0;frame<O;++frame){
+ if constexpr(W==1)__syncwarp();else __syncthreads();
+ #pragma unroll
+ for(int p=0;p<PF;++p){
+   int vec=tid+p*W*32,probe=vec/16,d=vec%16*8;
+   *reinterpret_cast<uint4*>(sk+qoff(probe,d))=prefetched[p];
+ }
+ if constexpr(W==1)__syncwarp();else __syncthreads();
+ if(frame<O-1){
+   #pragma unroll
+   for(int p=0;p<PF;++p){
+     int vec=tid+p*W*32,probe=vec/16,d=vec%16*8;
+     int ki=((((frame+1)*R+key_row)*L+probe*L/16)*H+HS+head)*128+d;
+     prefetched[p]=*reinterpret_cast<const uint4*>(k+ki);
+   }
  }
  float acc[2][2][4]={};
  // ldmatrix row addresses in bytes. The lane-dependent part is fixed per
@@ -709,6 +932,11 @@ __global__ __launch_bounds__(W*32,W==4?4:2) void fused_selector(const bf16* __re
     #if AXIS_CHOLESKY == 2
     fisher_gram<4,4>(local,cand_lane,anchor,seeds,group,float(scale),
       reinterpret_cast<float*>(raw+(W*32+16)*136)+warp*1440);
+    #elif AXIS_CHOLESKY == 6
+    fisher_register_gram<4,4>(local,cand_lane,anchor,seeds,group,float(scale),
+      reinterpret_cast<__half*>(raw+(W*32+16)*136)+warp*768);
+    #elif AXIS_CHOLESKY == 5
+    fisher_moments<4,4>(local,cand_lane,anchor,seeds,group,float(scale));
     #elif AXIS_CHOLESKY == 4
     fisher_fma_trimmed<4,4>(local,cand_lane,anchor,seeds,group,float(scale));
     #elif AXIS_CHOLESKY == 3
@@ -729,7 +957,7 @@ void run(torch::Tensor q,torch::Tensor k,torch::Tensor candidates,torch::Tensor 
  TORCH_CHECK(candidates.numel()==R*32 && candidates.scalar_type()==at::kInt,"Padded candidate table required");
  TORCH_CHECK(seeds.numel()==int64_t(O)*L*AH*O*R*4 && seeds.scalar_type()==at::kByte,"Exact C4 seeds required");
  TORCH_CHECK(hs>=0 && hs+AH<=H,"Head range invalid");
- constexpr int smem=(W*32+16)*136*2+(AXIS_CHOLESKY==2?W*5760:0);
+ constexpr int smem=(W*32+16)*136*2+(AXIS_CHOLESKY==2?W*5760:(AXIS_CHOLESKY==6?W*1536:0));
  C10_CUDA_CHECK(cudaFuncSetAttribute(fused_selector,cudaFuncAttributeMaxDynamicSharedMemorySize,smem));
  fused_selector<<<dim3(R*((L+W-1)/W)*AH,O),W*32,smem,at::cuda::getCurrentCUDAStream()>>>(
   (const bf16*)q.data_ptr(),(const bf16*)k.data_ptr(),candidates.data_ptr<int>(),anchors.data_ptr<int>(),
@@ -738,7 +966,7 @@ void run(torch::Tensor q,torch::Tensor k,torch::Tensor candidates,torch::Tensor 
 }
 std::vector<int> resources() {
  cudaFuncAttributes attr{};C10_CUDA_CHECK(cudaFuncGetAttributes(&attr,fused_selector));
- int active=0;C10_CUDA_CHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&active,fused_selector,W*32,(W*32+16)*136*2+(AXIS_CHOLESKY==2?W*5760:0)));
- return {attr.numRegs,int(attr.localSizeBytes),int((W*32+16)*136*2+(AXIS_CHOLESKY==2?W*5760:0)),active};
+ int active=0;C10_CUDA_CHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&active,fused_selector,W*32,(W*32+16)*136*2+(AXIS_CHOLESKY==2?W*5760:(AXIS_CHOLESKY==6?W*1536:0))));
+ return {attr.numRegs,int(attr.localSizeBytes),int((W*32+16)*136*2+(AXIS_CHOLESKY==2?W*5760:(AXIS_CHOLESKY==6?W*1536:0))),active};
 }
 PYBIND11_MODULE(TORCH_EXTENSION_NAME,m){m.def("run",&run);m.def("resources",&resources);}

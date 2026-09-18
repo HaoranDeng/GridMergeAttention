@@ -133,8 +133,49 @@ Option 3 retains all32 padded
 positions and allows FMA accumulation; neither changes the four-slot
 capacity, empty-cluster policy, or full compressed attention stage.
 
-The corresponding T/H option4 trial measured median 554.8137 ms versus
-dense 327.0671 ms on a clean scai6 H200. It still fails the speed condition
-and has no submitted video job. W/H has completed two videos with measured
-mean attention 178.0764 ms. Its approximate 1.8646x speedup uses reused
-historical dense video timing and must not be confused with a matched gate.
+The earlier T/H option4 trial measured median554.8137ms versus dense327.0671ms
+and was not submitted under the original speed requirement.
+
+The final T/H selector uses two warps per CTA with the same four selected
+representatives. Complete-call mean is548.6932ms versus dense325.4217ms
+(0.5931x); medians548.5087ms and327.5527ms. Validation passes with real-QKV
+relativeL2=0.00161527, zero sampled seed mismatches and preserved empty
+clusters. Both evidence runs used exclusive H200s. The user then explicitly
+authorized running T21/H45/C4 despite the slower kernel. The source-bound
+receipt `authorized_speed_exception_th.json` preserves `passed=false` for
+speed and records this authorization; callers must explicitly enable the
+T/H-only exception. Numerical, source-hash and exclusive-GPU checks remain.
+T/H is submitted for20 videos/50steps on scai6 GPU3, with first5 evaluation,
+output `qt_kh_c4_current_cuda_warp2_v1_20`, guard `run_th_cuda_warp2_v1`.
+`axis_video_th_opt_source_20260918` is now frozen for the video run.
+
+Additional T/H engineering controls were slower and are rejected unchanged:
+WGMMA selector576.55ms, larger head chunk555.30ms, four-key-group fused
+merge/route958.93ms, weighted moments555.67ms, register Gram558.12ms,
+one-warp selector577.28ms (complete-call means). A diagnostic that deliberately
+omits Fisher selection measured173.74ms versus249.99ms for the full selector.
+This diagnostic is not a GMA candidate and is never used for video generation.
+
+To use all five available H200s, W/H and T/W are split by disjoint video
+indices across scai6/scai7. T/W uses scai6 GPU5 and scai7 GPU1; W/H uses
+GPU4 on each machine. Legacy workers finish the in-flight video before a
+controlled replacement, preserving completed videos. Per-method
+`*_parallel_config.json` lists original output and new shard directories;
+the aggregate views are `qt_kw_c4_current_parallel20` and
+`qw_kh_c4_current_parallel20`. Publishing requires identical kernel hashes,
+protocols and prompt manifests and rejects duplicate indices. First5 and20
+evaluations use exact contiguous prefixes; intermediate evaluator JSON is
+not considered complete until it contains the requested number of videos.
+Migration receipts explain the intentional legacy-guard termination. New
+shards have independent exclusivity guards. No baseline videos are rerun.
+
+W/H first5, all405 frames: PSNR15.0413258787, SSIM0.5091234441,
+LPIPS0.4506177936. Against existing C8 first5 the deltas are -0.6484401143dB,
+-0.0305798664, +0.0551125286 respectively; all three metrics are worse.
+T/W first2, all162 frames: PSNR12.4998149319 and SSIM0.3707670487,
+versus C8 PSNR12.7224995843 and SSIM0.4049644863. Matched W/H first2 is
+PSNR12.1710233069 and SSIM0.3734341503, so T/W improves PSNR but worsens
+SSIM on this prefix. T/W LPIPS and first5 are pending. These sample counts
+must not be mixed when comparing methods. Results are recorded incrementally
+in the existing `C:/GMA/tmp.xlsx`; the read-only heartbeat now covers all3
+methods and reports new first5 and20 completion without changing experiments.

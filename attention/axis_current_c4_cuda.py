@@ -14,6 +14,8 @@ import triton
 from analysis.quick_axis_c4_qkv import candidate_table
 from kernels.best.c4.route_reference import _hard_c4_720p_route_kernel
 
+extra_source_files=['attention/axis_current_c4_selector_wgmma.cu']
+
 
 @lru_cache(maxsize=32)
 def _compiled(o,r,l,h,ah):
@@ -32,7 +34,8 @@ def _compiled(o,r,l,h,ah):
     cutlass=Path(torch.__file__).resolve().parent.parent/'flashinfer/data/cutlass/include'
     modules=[]
     for name in ('selector','merge'):
-        source=here/f'axis_current_c4_{name}.cu'
+        suffix='_wgmma' if name=='selector' and os.environ.get('AXIS_C4_SELECTOR_BACKEND')=='wgmma' else ''
+        source=here/f'axis_current_c4_{name}{suffix}.cu'
         digest=hashlib.sha256(source.read_bytes()+' '.join(flags).encode()).hexdigest()[:16]
         module=load(name=f'axis_c4_{name}_{digest}',sources=[str(source)],
                     extra_include_paths=[str(cutlass)],extra_cuda_cflags=flags,
