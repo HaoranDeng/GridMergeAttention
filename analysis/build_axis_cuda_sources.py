@@ -129,6 +129,32 @@ def main():
   if(lane==0)*reinterpret_cast<uint32_t*>(seeds+int64_t(group)*4)=packed;
 }
 '''
+    fma=chol.replace('fisher_cholesky','fisher_fma')
+    fma=replace(fma,'''    float delta[PR],terms[PR];
+    #pragma unroll
+    for(int p=0;p<PR;++p){delta[p]=__fadd_rn(z[c][p],-anchor_z[p]);terms[p]=__fmul_rn(delta[p],rho[p]);}
+    float mean=sum_probe16<P>(terms);''','''    float delta[PR],mean=0.f;
+    #pragma unroll
+    for(int p=0;p<PR;++p){delta[p]=z[c][p]-anchor_z[p];mean=fmaf(delta[p],rho[p],mean);}
+    #pragma unroll
+    for(int width=P/2;width; width/=2)mean+=__shfl_xor_sync(0xffffffff,mean,width);''')
+    fma=replace(fma,'''    float terms[PR];
+    #pragma unroll
+    for(int p=0;p<PR;++p)terms[p]=res[c][p]*res[c][p];
+    scores[c]=sum_probe16<P>(terms);''','''    float norm=0.f;
+    #pragma unroll
+    for(int p=0;p<PR;++p)norm=fmaf(res[c][p],res[c][p],norm);
+    #pragma unroll
+    for(int width=P/2;width;width/=2)norm+=__shfl_xor_sync(0xffffffff,norm,width);
+    scores[c]=norm;''')
+    fma=replace(fma,'''        float terms[PR];
+        #pragma unroll
+        for(int p=0;p<PR;++p)terms[p]=res[c][p]*basis[p];
+        float projection=sum_probe16<P>(terms);''','''        float projection=0.f;
+        #pragma unroll
+        for(int p=0;p<PR;++p)projection=fmaf(res[c][p],basis[p],projection);
+        #pragma unroll
+        for(int width=P/2;width;width/=2)projection+=__shfl_xor_sync(0xffffffff,projection,width);''')
     gram=prefix.replace('fisher_from_registers','fisher_gram').replace('float scale) {','float scale,float* gram) {')+'''
   // FP16 residuals, FP32 Gram accumulation. The input QK products, Fisher
   // weighting, and pivot decisions remain in FP32. Validate near-tied pivots.
@@ -183,13 +209,23 @@ def main():
   __syncwarp();
 }
 '''
+    # Temporal lines contain 21 candidates. Candidate register groups 24..31
+    # can never become anchors or pivots, so omit their scalar Fisher/GS work.
+    # Invalid lanes in the partially occupied 16..23 group remain masked by
+    # the unchanged argmax validity mask. No actual candidate is removed.
+    trimmed=fma.replace('fisher_fma','fisher_fma_trimmed')
+    trimmed=trimmed.replace('c<P;', 'c<((NC+CS-1)/CS);')
     insertion=s.index('// Padded shared layout')
-    s=s[:insertion]+chol+gram+s[insertion:]
+    s=s[:insertion]+chol+fma+trimmed+gram+s[insertion:]
     s=replace(s,'if(column<L)fisher_from_registers<4,4>(local,cand_lane,anchor,seeds,group,float(scale));',
               '''if(column<L){
     #if AXIS_CHOLESKY == 2
     fisher_gram<4,4>(local,cand_lane,anchor,seeds,group,float(scale),
       reinterpret_cast<float*>(raw+(W*32+16)*136)+warp*1440);
+    #elif AXIS_CHOLESKY == 4
+    fisher_fma_trimmed<4,4>(local,cand_lane,anchor,seeds,group,float(scale));
+    #elif AXIS_CHOLESKY == 3
+    fisher_fma<4,4>(local,cand_lane,anchor,seeds,group,float(scale));
     #elif AXIS_CHOLESKY == 1
     fisher_cholesky<4,4>(local,cand_lane,anchor,seeds,group,float(scale));
     #else

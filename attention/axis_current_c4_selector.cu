@@ -292,6 +292,208 @@ __device__ __forceinline__ void fisher_cholesky(const float (&local)[P][16/P],
   if(lane==0)*reinterpret_cast<uint32_t*>(seeds+int64_t(group)*4)=packed;
 }
 template<int SEEDS,int P>
+__device__ __forceinline__ void fisher_fma(const float (&local)[P][16/P],
+ int cand_lane,int anchor,uint8_t* seeds,int group,float scale) {
+  constexpr int CS=32/P,PR=16/P;
+  const int lane=threadIdx.x&31,probe=lane%P,slot=lane/P;
+  float z[P][PR];
+  #pragma unroll
+  for(int p=0;p<PR;++p){
+    #pragma unroll
+    for(int c=0;c<P;++c)z[c][p]=__fmul_rn(local[c][p],scale);
+  }
+  float rho[PR],root[PR],anchor_z[PR];
+  #pragma unroll
+  for(int p=0;p<PR;++p){
+    float value=0;
+    #pragma unroll
+    for(int c=0;c<P;++c)value=choose_candidate(value,z[c][p],anchor/CS,c);
+    anchor_z[p]=__shfl_sync(0xffffffff,value,(anchor%CS)*P+probe);
+  }
+  static_assert(P==4,"Four probe lanes");
+  const int subset=(lane>>3)&3;
+  float argument=0.f;
+  #pragma unroll
+  for(int p=0;p<4;++p)argument=choose_candidate(argument,anchor_z[p],subset,p);
+  int mk=__float_as_int(argument);mk^=(mk>>31)&0x7fffffff;
+  mk=__reduce_max_sync(0xffffffffu,mk);mk^=(mk>>31)&0x7fffffff;
+  float exponential=__expf(argument-__int_as_float(mk));
+  float den=exponential;
+  den+=__shfl_xor_sync(0xffffffff,den,16);
+  den+=__shfl_xor_sync(0xffffffff,den,8);
+  den+=__shfl_xor_sync(0xffffffff,den,2);
+  den+=__shfl_xor_sync(0xffffffff,den,1);
+  float normalized=__fdividef(exponential,den),owned_root=sqrtf(normalized);
+  #pragma unroll
+  for(int p=0;p<4;++p){rho[p]=__shfl_sync(0xffffffff,normalized,p*8+probe);root[p]=__shfl_sync(0xffffffff,owned_root,p*8+probe);}
+  float res[P][PR];
+  #pragma unroll
+  for(int c=0;c<P;++c){
+    float delta[PR],mean=0.f;
+    #pragma unroll
+    for(int p=0;p<PR;++p){delta[p]=z[c][p]-anchor_z[p];mean=fmaf(delta[p],rho[p],mean);}
+    #pragma unroll
+    for(int width=P/2;width; width/=2)mean+=__shfl_xor_sync(0xffffffff,mean,width);
+    #pragma unroll
+    for(int p=0;p<PR;++p)res[c][p]=__fmul_rn(__fadd_rn(delta[p],-mean),root[p]);
+  }
+
+  float scores[P];
+  #pragma unroll
+  for(int c=0;c<P;++c){
+    float norm=0.f;
+    #pragma unroll
+    for(int p=0;p<PR;++p)norm=fmaf(res[c][p],res[c][p],norm);
+    #pragma unroll
+    for(int width=P/2;width;width/=2)norm+=__shfl_xor_sync(0xffffffff,norm,width);
+    scores[c]=norm;
+  }
+  unsigned used=unsigned(~((uint64_t(1)<<NC)-1)) | (1u<<anchor);
+  unsigned packed=__shfl_sync(0xffffffffu,cand_lane,anchor)&0xffu;
+  const int own_index=probe*CS+slot;
+  #pragma unroll
+  for(int step=1;step<4;++step){
+    float score=0;
+    #pragma unroll
+    for(int c=0;c<P;++c)score=choose_candidate(score,scores[c],probe,c);
+    bool valid=((used>>own_index)&1u)==0u;
+    unsigned key=valid?__float_as_uint(fmaxf(score,0.f)):0u;
+    unsigned bestbits=__reduce_max_sync(0xffffffffu,key);
+    int picked=__reduce_min_sync(0xffffffffu,(valid && key==bestbits)?unsigned(own_index):32u);
+    float best=__uint_as_float(bestbits);
+    used|=1u<<picked;
+    packed|=(__shfl_sync(0xffffffffu,cand_lane,picked)&0xffu)<<(8*step);
+    if(step<3){
+      float basis[PR],inv=rsqrtf(best+1.e-12f);
+      #pragma unroll
+      for(int p=0;p<PR;++p){
+        float value=0;
+        #pragma unroll
+        for(int c=0;c<P;++c)value=choose_candidate(value,res[c][p],picked/CS,c);
+        basis[p]=__shfl_sync(0xffffffff,value,(picked%CS)*P+probe)*inv;
+      }
+      // Pivoted Cholesky tracks residual norms analytically. Retain the first
+      // residual update because the second pivot needs its actual direction.
+      float factor=2.f-best/(best+1.e-12f);
+      #pragma unroll
+      for(int c=0;c<P;++c){
+        float projection=0.f;
+        #pragma unroll
+        for(int p=0;p<PR;++p)projection=fmaf(res[c][p],basis[p],projection);
+        #pragma unroll
+        for(int width=P/2;width;width/=2)projection+=__shfl_xor_sync(0xffffffff,projection,width);
+        scores[c]=fmaxf(fmaf(-projection*projection,factor,scores[c]),0.f);
+        if(step==1){
+          #pragma unroll
+          for(int p=0;p<PR;++p)res[c][p]=fmaf(-projection,basis[p],res[c][p]);
+        }
+      }
+    }
+  }
+  if(lane==0)*reinterpret_cast<uint32_t*>(seeds+int64_t(group)*4)=packed;
+}
+template<int SEEDS,int P>
+__device__ __forceinline__ void fisher_fma_trimmed(const float (&local)[P][16/P],
+ int cand_lane,int anchor,uint8_t* seeds,int group,float scale) {
+  constexpr int CS=32/P,PR=16/P;
+  const int lane=threadIdx.x&31,probe=lane%P,slot=lane/P;
+  float z[P][PR];
+  #pragma unroll
+  for(int p=0;p<PR;++p){
+    #pragma unroll
+    for(int c=0;c<((NC+CS-1)/CS);++c)z[c][p]=__fmul_rn(local[c][p],scale);
+  }
+  float rho[PR],root[PR],anchor_z[PR];
+  #pragma unroll
+  for(int p=0;p<PR;++p){
+    float value=0;
+    #pragma unroll
+    for(int c=0;c<((NC+CS-1)/CS);++c)value=choose_candidate(value,z[c][p],anchor/CS,c);
+    anchor_z[p]=__shfl_sync(0xffffffff,value,(anchor%CS)*P+probe);
+  }
+  static_assert(P==4,"Four probe lanes");
+  const int subset=(lane>>3)&3;
+  float argument=0.f;
+  #pragma unroll
+  for(int p=0;p<4;++p)argument=choose_candidate(argument,anchor_z[p],subset,p);
+  int mk=__float_as_int(argument);mk^=(mk>>31)&0x7fffffff;
+  mk=__reduce_max_sync(0xffffffffu,mk);mk^=(mk>>31)&0x7fffffff;
+  float exponential=__expf(argument-__int_as_float(mk));
+  float den=exponential;
+  den+=__shfl_xor_sync(0xffffffff,den,16);
+  den+=__shfl_xor_sync(0xffffffff,den,8);
+  den+=__shfl_xor_sync(0xffffffff,den,2);
+  den+=__shfl_xor_sync(0xffffffff,den,1);
+  float normalized=__fdividef(exponential,den),owned_root=sqrtf(normalized);
+  #pragma unroll
+  for(int p=0;p<4;++p){rho[p]=__shfl_sync(0xffffffff,normalized,p*8+probe);root[p]=__shfl_sync(0xffffffff,owned_root,p*8+probe);}
+  float res[P][PR];
+  #pragma unroll
+  for(int c=0;c<((NC+CS-1)/CS);++c){
+    float delta[PR],mean=0.f;
+    #pragma unroll
+    for(int p=0;p<PR;++p){delta[p]=z[c][p]-anchor_z[p];mean=fmaf(delta[p],rho[p],mean);}
+    #pragma unroll
+    for(int width=P/2;width; width/=2)mean+=__shfl_xor_sync(0xffffffff,mean,width);
+    #pragma unroll
+    for(int p=0;p<PR;++p)res[c][p]=__fmul_rn(__fadd_rn(delta[p],-mean),root[p]);
+  }
+
+  float scores[P];
+  #pragma unroll
+  for(int c=0;c<((NC+CS-1)/CS);++c){
+    float norm=0.f;
+    #pragma unroll
+    for(int p=0;p<PR;++p)norm=fmaf(res[c][p],res[c][p],norm);
+    #pragma unroll
+    for(int width=P/2;width;width/=2)norm+=__shfl_xor_sync(0xffffffff,norm,width);
+    scores[c]=norm;
+  }
+  unsigned used=unsigned(~((uint64_t(1)<<NC)-1)) | (1u<<anchor);
+  unsigned packed=__shfl_sync(0xffffffffu,cand_lane,anchor)&0xffu;
+  const int own_index=probe*CS+slot;
+  #pragma unroll
+  for(int step=1;step<4;++step){
+    float score=0;
+    #pragma unroll
+    for(int c=0;c<((NC+CS-1)/CS);++c)score=choose_candidate(score,scores[c],probe,c);
+    bool valid=((used>>own_index)&1u)==0u;
+    unsigned key=valid?__float_as_uint(fmaxf(score,0.f)):0u;
+    unsigned bestbits=__reduce_max_sync(0xffffffffu,key);
+    int picked=__reduce_min_sync(0xffffffffu,(valid && key==bestbits)?unsigned(own_index):32u);
+    float best=__uint_as_float(bestbits);
+    used|=1u<<picked;
+    packed|=(__shfl_sync(0xffffffffu,cand_lane,picked)&0xffu)<<(8*step);
+    if(step<3){
+      float basis[PR],inv=rsqrtf(best+1.e-12f);
+      #pragma unroll
+      for(int p=0;p<PR;++p){
+        float value=0;
+        #pragma unroll
+        for(int c=0;c<((NC+CS-1)/CS);++c)value=choose_candidate(value,res[c][p],picked/CS,c);
+        basis[p]=__shfl_sync(0xffffffff,value,(picked%CS)*P+probe)*inv;
+      }
+      // Pivoted Cholesky tracks residual norms analytically. Retain the first
+      // residual update because the second pivot needs its actual direction.
+      float factor=2.f-best/(best+1.e-12f);
+      #pragma unroll
+      for(int c=0;c<((NC+CS-1)/CS);++c){
+        float projection=0.f;
+        #pragma unroll
+        for(int p=0;p<PR;++p)projection=fmaf(res[c][p],basis[p],projection);
+        #pragma unroll
+        for(int width=P/2;width;width/=2)projection+=__shfl_xor_sync(0xffffffff,projection,width);
+        scores[c]=fmaxf(fmaf(-projection*projection,factor,scores[c]),0.f);
+        if(step==1){
+          #pragma unroll
+          for(int p=0;p<PR;++p)res[c][p]=fmaf(-projection,basis[p],res[c][p]);
+        }
+      }
+    }
+  }
+  if(lane==0)*reinterpret_cast<uint32_t*>(seeds+int64_t(group)*4)=packed;
+}
+template<int SEEDS,int P>
 __device__ __forceinline__ void fisher_gram(const float (&local)[P][16/P],
  int cand_lane,int anchor,uint8_t* seeds,int group,float scale,float* gram) {
   constexpr int CS=32/P,PR=16/P;
@@ -507,6 +709,10 @@ __global__ __launch_bounds__(W*32,W==4?4:2) void fused_selector(const bf16* __re
     #if AXIS_CHOLESKY == 2
     fisher_gram<4,4>(local,cand_lane,anchor,seeds,group,float(scale),
       reinterpret_cast<float*>(raw+(W*32+16)*136)+warp*1440);
+    #elif AXIS_CHOLESKY == 4
+    fisher_fma_trimmed<4,4>(local,cand_lane,anchor,seeds,group,float(scale));
+    #elif AXIS_CHOLESKY == 3
+    fisher_fma<4,4>(local,cand_lane,anchor,seeds,group,float(scale));
     #elif AXIS_CHOLESKY == 1
     fisher_cholesky<4,4>(local,cand_lane,anchor,seeds,group,float(scale));
     #else
