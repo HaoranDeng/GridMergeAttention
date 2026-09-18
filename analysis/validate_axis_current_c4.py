@@ -10,13 +10,25 @@ from analysis.quick_axis_c4_qkv import candidate_table, select_fisher, line_atte
 
 
 def main():
+    global AxisCurrentC4, merged_attention
     p = argparse.ArgumentParser()
     p.add_argument('--axes', choices=['tw', 'wh', 'th'], required=True)
     p.add_argument('--output', type=Path, required=True)
+    p.add_argument('--module', default='attention.axis_current_c4_triton')
     args = p.parse_args()
+    import importlib
+    module = importlib.import_module(args.module)
+    AxisCurrentC4, merged_attention = module.AxisCurrentC4, module.merged_attention
     torch.set_num_threads(1)
     torch.backends.cuda.matmul.allow_tf32 = False
-    report = {'axes': args.axes, 'capacity': 4, 'cases': [], 'passed': False}
+    import hashlib,os
+    root=Path(__file__).resolve().parents[1]
+    files=[module.__file__,'attention/axis_current_c4_selector.cu','attention/axis_current_c4_merge.cu',
+           'kernels/best/c4/warp_mma.cuh','kernels/best/c4/route_reference.py','analysis/quick_axis_c4_qkv.py']
+    report = {'axes': args.axes, 'capacity': 4, 'cases': [], 'passed': False, 'module':args.module,
+              'environment':{key:value for key,value in os.environ.items() if key.startswith('AXIS_')},
+              'source_sha256':{str((root/file).relative_to(root)):hashlib.sha256((root/file).read_bytes()).hexdigest()
+                               for file in files if (root/file).exists()}}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     try:
         # Production R/L dimensions, two outer slices, including tail columns.

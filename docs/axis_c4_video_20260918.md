@@ -1,7 +1,11 @@
 # Three directed-axis C4 video candidates
 
-User scope: five videos each, 50 denoising steps, PSNR/SSIM/LPIPS against
+User scope: twenty videos each, 50 denoising steps, PSNR/SSIM/LPIPS against
 existing dense outputs. Reuse existing C8 results; generate neither baseline.
+Evaluate and report immediately after the first five videos of each method,
+then continue to twenty. The user requires the complete attention operator
+to beat matched dense before that method is submitted. W/H may launch first;
+it does not need to wait for T/W and T/H to pass their own speed gates.
 Use all exclusively idle H200s on scai6 and scai7 (explicit override of the
 single-GPU default). No frames are inspected by a model.
 
@@ -27,10 +31,32 @@ checks seed identities, empty slots, sampled independent reference outputs,
 real frozen QKV, and complete 40-head calls before video inference.
 
 The runner uses Wan2.1 T2V 14B, 1280×720, 81 frames, UniPC flow_shift=5,
-50 steps, guidance=5, seed0, canonical MovieGenVideoBench prompts0–4,
+50 steps, guidance=5, seed0, canonical MovieGenVideoBench prompts0–19,
 and the existing SVG norm/RoPE/forward handling. It audits 100 calls in each
 layer per video and calculates framewise PSNR/SSIM/LPIPS(Alex) on all 81
-decoded frames. Output filenames are 000-00.mp4 through 004-00.mp4.
+decoded frames. Output filenames are 000-00.mp4 through 019-00.mp4.
+First-five evaluation uses verified subset views, strict frame/video counts,
+and executes before starting video 005. First-five metrics are written to
+`quality_first5.json`; all-twenty metrics go to `quality.json`.
+
+The original slow Triton generation jobs were intentionally stopped. They
+are not resumed or counted as optimized results. Native CUDA trials adapt
+the existing C4 MMA selector and WGMMA/TMA merger to all three directed axes,
+including current-line anchor-Fisher weighting and H45 tail masking. The
+CUDA compiler cache is isolated by host because scai6 uses CUDA 12.9 and
+scai7 uses CUDA 13.0. All complete-call timings include layout transforms,
+selection, merging, and full compressed attention on all forty heads.
+
+Initial native CUDA microbenchmarks measured W/H at about 182 ms against
+326 ms matched Flash SDPA (1.79x). Temporal variants have not yet passed:
+the best current synthetic trials are about 334 ms for T/W and 586 ms for
+T/H. These are engineering diagnostics, not video quality results or final
+launch receipts. Triton streaming fusion, the first CUDA streaming fusion,
+and FP16 residual-Gram selection were slower and are retained only as
+rejected engineering controls. Do not retry those implementations unchanged.
+No optimized video job is submitted without source-bound numerical validation,
+real captured QKV speed checks, and an exclusive-GPU receipt. The launch gate
+is enforced independently in both launcher and runner.
 
 The reused C8 video baseline is the existing standalone c79666e Hellinger
 RF0 implementation from 20260901; it is not a newly generated C8 r2 run.

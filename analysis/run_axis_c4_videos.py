@@ -1,4 +1,4 @@
-"""Five matched 50-step videos and paired metrics for a validated C4 axis core."""
+"""Twenty matched videos, with immediate first-five quality reporting."""
 import argparse
 import gc
 import json
@@ -22,26 +22,31 @@ def main():
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--validation', type=Path, required=True)
     p.add_argument('--reference', type=Path, required=True)
+    p.add_argument('--speed-gate', type=Path, required=True)
     p.add_argument('--model', default='/home/denghaoran/wan_models/Wan2.1-T2V-14B-Diffusers')
     p.add_argument('--svg', default='/local2/denghaoran/GridMergeAttention_worktrees/svg_official_20260906ch')
     a = p.parse_args()
     validation = json.loads(a.validation.read_text())
     assert validation['passed'] and validation['axes'] == a.axes
     root = Path(__file__).resolve().parents[1]
+    from analysis.axis_c4_speed_gate import verify_gate
+    gate = verify_gate(a.speed_gate, root, a.axes)
     prompt_path = root/'prompts/MovieGenVideoBench_extended.txt'
     prompts = [v.strip() for v in prompt_path.read_text().splitlines() if v.strip()]
     validate_canonical_prompt_contract(prompt_path, prompts)
-    manifest = build_prompt_manifest(prompt_path, prompts, selected_count=5, seed=0,
+    manifest = build_prompt_manifest(prompt_path, prompts, selected_count=20, seed=0,
                                      num_samples=1, vbench_filenames=False, allow_noncanonical=False)
     ensure_output_prompt_manifest(a.output, manifest)
-    assert_matching_prompt_manifests(a.reference, a.output, prompt_indices=range(5))
+    assert_matching_prompt_manifests(a.reference, a.output, prompt_indices=range(20))
     sys.path.insert(0, a.svg)
     from diffusers import AutoencoderKLWan, WanPipeline
     from diffusers.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler
     from diffusers.utils import export_to_video
     from analysis.benchmark_wan14b_720p_methods import (AttentionTimer, AttentionErrorStats,
                                                       NEGATIVE_PROMPT, configure_processors)
-    from attention.axis_current_c4_triton import AxisCurrentC4
+    import importlib
+    AxisCurrentC4 = importlib.import_module(gate['methods'][a.axes]['module']).AxisCurrentC4
+    os.environ.update(gate['methods'][a.axes]['environment'])
     random.seed(0); np.random.seed(0); torch.manual_seed(0); torch.cuda.manual_seed_all(0)
     torch.set_num_threads(1)
     torch.backends.cuda.preferred_linalg_library(backend='magma')
@@ -73,13 +78,42 @@ def main():
                 'block_j':int(os.environ.get('AXIS_C4_BLOCK_J','4')),
                 'probe_precompute':os.environ.get('AXIS_C4_PRECOMPUTE','0') == '1',
                 'fisher_precision':'float32',
-                'core_sha256':sha(root/'attention/axis_current_c4_triton.py'),
-                'validation':validation, 'fps':16}
+                'source_sha256':gate['source_sha256'], 'speed_gate':gate,
+                'validation':validation, 'fps':16, 'num_videos':20, 'first_quality_at':5}
     runtime_path = a.output/'runtime.json'
-    runtime = {'protocol':protocol, 'videos':[], 'generation_complete':False, 'quality_complete':False}
+    runtime = {'protocol':protocol, 'videos':[], 'generation_complete':False,
+               'first5_quality_complete':False, 'quality_complete':False}
     save(runtime_path, runtime)
+    def evaluate_count(count):
+        from analysis.evaluate_video_quality import main as evaluate
+        # Dedicated views keep the strict evaluator independent of how many
+        # later videos already exist. Both manifests are checked before linking.
+        reference_view=a.output/f'evaluation_{count}/reference'
+        method_view=a.output/f'evaluation_{count}/method'
+        subset=build_prompt_manifest(prompt_path,prompts,selected_count=count,seed=0,
+                                    num_samples=1,vbench_filenames=False,allow_noncanonical=False)
+        for source,target in ((a.reference,reference_view),(a.output,method_view)):
+            ensure_output_prompt_manifest(target,subset)
+            assert_matching_prompt_manifests(source,target,prompt_indices=range(count))
+            for index in range(count):
+                src=source/f'{index:03d}-00.mp4';dst=target/src.name
+                assert src.is_file()
+                if not dst.exists():dst.symlink_to(src.resolve())
+                assert dst.resolve()==src.resolve()
+        destination=a.output/('quality_first5.json' if count==5 else 'quality.json')
+        saved_argv=sys.argv
+        try:
+            sys.argv=['evaluate_video_quality','--reference_dir',str(reference_view),
+                      '--method_dir',str(method_view),'--method_name',f'q{a.axes[0]}_k{a.axes[1]}_c4_current',
+                      '--output',str(destination),'--max_videos',str(count),'--expected_videos',str(count),
+                      '--expected_frames','81','--lpips_batch_size','8']
+            evaluate()
+        finally:
+            sys.argv=saved_argv
+            gc.collect();torch.cuda.empty_cache()
+        print(json.dumps({'event':'quality_ready','axes':a.axes,'videos':count,'path':str(destination)}),flush=True)
     with torch.inference_mode():
-        for index in range(5):
+        for index in range(20):
             video_path = a.output/f'{index:03d}-00.mp4'
             if video_path.exists():
                 raise RuntimeError('Fresh run only; refusing to overwrite an existing video')
@@ -104,14 +138,13 @@ def main():
             runtime['videos'].append(record); save(runtime_path,runtime)
             print(json.dumps(record),flush=True)
             del frames
+            if index==4:
+                evaluate_count(5)
+                runtime['first5_quality_complete']=True;save(runtime_path,runtime)
     runtime['generation_complete'] = True; save(runtime_path,runtime)
     del pipe, vae, core, processor, invoke
     gc.collect(); torch.cuda.empty_cache()
-    from analysis.evaluate_video_quality import main as evaluate
-    sys.argv = ['evaluate_video_quality', '--reference_dir',str(a.reference),'--method_dir',str(a.output),
-                '--method_name',f'q{a.axes[0]}_k{a.axes[1]}_c4_current', '--output',str(a.output/'quality.json'),
-                '--max_videos','5','--expected_videos','5','--expected_frames','81','--lpips_batch_size','8']
-    evaluate()
+    evaluate_count(20)
     runtime['quality_complete'] = True; save(runtime_path,runtime)
 
 

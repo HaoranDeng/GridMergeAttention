@@ -33,7 +33,16 @@ def main():
             save(a.output/'process.json', {'parent_pid':os.getpid(), 'child_pid':child.pid, 'command':cmd})
             while child.poll() is None:
                 state = gpu_state(a.gpu)
-                foreign = set(state['pids']) - {child.pid}
+                # Profilers may launch the CUDA worker as a descendant. Only
+                # allow processes in the isolated session we created above.
+                owned = {child.pid}
+                for pid in state['pids']:
+                    try:
+                        if os.getsid(pid) == child.pid:
+                            owned.add(pid)
+                    except ProcessLookupError:
+                        pass
+                foreign = set(state['pids']) - owned
                 monitor.write(json.dumps({'time':time.time(), **state})+'\n'); monitor.flush()
                 if foreign:
                     raise RuntimeError(f'Foreign GPU process, timing invalid: {sorted(foreign)}')
