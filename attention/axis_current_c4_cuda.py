@@ -71,13 +71,15 @@ def merged_attention(q,k,v,*,head_start=0,head_count=None,audit=False,output=Non
         q,k,v,mk,mv,bias,bias,bias,bias,bias,out,
         Q_OUTER=o,K_OUTER=o,TOTAL_HEADS=h,ACTIVE_HEADS=ah,HEAD_START=head_start,
         D_HEAD=128,HEAD_MAJOR=False,OUTPUT_HEAD_MAJOR=False,ROWS=r,COLS=l,C=4,
-        BLOCK_I=triton.next_power_of_2(r),BLOCK_TOKENS=64,LOOP_STAGES=2,
+        BLOCK_I=triton.next_power_of_2(r),BLOCK_TOKENS=int(os.environ.get('AXIS_C4_ROUTE_TOKENS','64')),
+        LOOP_STAGES=int(os.environ.get('AXIS_C4_ROUTE_STAGES','2')),
         INPUT_PRECISION='ieee',EXACT_INTRA_FRAME=False,EXACT_NEIGHBOR_WINDOW_COLS=0,
         RECORD_DISTORTION=False,QUERY_OUTER_OFFSET=0,SINGLETON_TOP_R=0,
         SINGLETON_QUERY_COLUMN=False,SINGLETON_SECONDARY_FRAME_STRIDE=1,
         SINGLETON_PRIMARY_ROW_MOD4_OMIT2=False,QUERY_COLUMN_MAJOR=False,
         PACKED_SINGLETON_KV=False,SCALED_FP8_KV=False,COMPRESSED_FP8=False,
-        SCALE=128**-.5,num_warps=4,num_stages=2)
+        SCALE=128**-.5,num_warps=int(os.environ.get('AXIS_C4_ROUTE_WARPS','4')),
+        num_stages=int(os.environ.get('AXIS_C4_ROUTE_STAGES','2')))
     if os.environ.get('AXIS_C4_KERNEL_METADATA')=='1':
         print({'selector_resources':selector.resources(),'merge_resources':merge.resources()},flush=True)
     return (out,mk,mv,bias,seeds) if audit else out
@@ -89,7 +91,8 @@ class AxisCurrentC4:
         self.axes,self.grid=axes,grid
         self.qa,self.ka=['thw'.index(a) for a in axes]
         self.oa=next(a for a in range(3) if a not in (self.qa,self.ka))
-        self.chunk={'tw':4,'wh':8,'th':2}[axes]
+        self.chunk=int(os.environ.get('AXIS_C4_HEAD_CHUNK',str({'tw':4,'wh':8,'th':2}[axes])))
+        assert self.chunk>0
         self.calls=0
 
     def __call__(self,q,k,v):

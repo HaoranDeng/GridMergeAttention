@@ -57,10 +57,15 @@ def main():
         report['sdpa_ms']=statistics.median(report['sdpa_samples_ms'])
     print(json.dumps({'sdpa_ms':report['sdpa_ms']}),flush=True)
     for config in a.configs:
-        bj,warps,qog=map(int,config.split(':'))
+        pieces=list(map(int,config.split(':')))
+        bj,warps,qog=pieces[:3]
         os.environ.update(AXIS_C4_BLOCK_J=str(bj),AXIS_C4_MERGE_WARPS=str(warps),AXIS_C4_OUTER_GROUP=str(qog),AXIS_C4_PRECOMPUTE='0')
         if a.module.endswith('_cuda'):
             os.environ['AXIS_C4_CUDA_TILES']=str(qog)
+        if len(pieces)>3:
+            assert len(pieces)==7
+            os.environ.update(dict(zip(('AXIS_C4_ROUTE_TOKENS','AXIS_C4_ROUTE_WARPS',
+                                        'AXIS_C4_ROUTE_STAGES','AXIS_C4_HEAD_CHUNK'),map(str,pieces[3:]))))
         core=module.AxisCurrentC4(a.axes)
         started=time.monotonic()
         try:
@@ -71,7 +76,8 @@ def main():
             samples=[measure(lambda:core(*tensors))[0] for _ in range(a.repeats)]
             row={'config':config,'samples_ms':samples,'median_ms':statistics.median(samples),
                  'speedup_vs_sdpa':report['sdpa_ms']/statistics.median(samples),
-                 'compile_seconds':time.monotonic()-started}
+                 'compile_seconds':time.monotonic()-started,
+                 'environment':{key:value for key,value in os.environ.items() if key.startswith('AXIS_')}}
             if a.profile:
                 with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA]) as prof:
                     core(*tensors);torch.cuda.synchronize()

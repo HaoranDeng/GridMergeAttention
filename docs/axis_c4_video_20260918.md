@@ -58,6 +58,20 @@ No optimized video job is submitted without source-bound numerical validation,
 real captured QKV speed checks, and an exclusive-GPU receipt. The launch gate
 is enforced independently in both launcher and runner.
 
+W/H was submitted after the user explicitly authorized it to proceed first.
+The final real-QKV gate measured a median 168.1098 ms versus 322.1030 ms
+matched dense (1.916x), with seven repetitions. The corresponding mean is
+168.1416 ms and the mean-to-mean speedup is 1.9106x. Numerical validation
+found zero mismatches in sampled seed cells, preserved empty slots, and
+0.00165786 relative L2 against the independent frozen-QKV reference. The
+20-video job is `qw_kh_c4_current_cuda_fast_v1_20`, guarded on scai7 GPU4,
+using the frozen `axis_video_wh_fast20_source_20260918` source. Its first
+video has started. Later temporal-kernel edits only touch the separate
+`axis_video_source_20260918` checkout. A five-minute read-only heartbeat
+reports first-five metrics and final completion without changing the job.
+The launch/gate record is in row 1392 of `C:/GMA/tmp.xlsx`; its runtime
+columns currently refer to the QKV gate, pending actual video-run averages.
+
 The reused C8 video baseline is the existing standalone c79666e Hellinger
 RF0 implementation from 20260901; it is not a newly generated C8 r2 run.
 Verified prompt manifests establish first-five pairing. Baseline means:

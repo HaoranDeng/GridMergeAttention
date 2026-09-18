@@ -24,11 +24,14 @@ def main():
         assert b['complete'] and b['axes']==a.axes and b['input_kind']=='captured_real_qkv'
         assert json.loads((guard/'completion.json').read_text())['valid'] is True
         assert b['source_sha256']==v['source_sha256'] and b['module']==v['module']
-        for key in ('AXIS_C4_CHOLESKY','AXIS_C4_FAST_MATH','AXIS_C4_SELECTOR_WARPS'):
-            assert b['environment'].get(key)==v['environment'].get(key),key
         assert len(b['trials'])==1
         trial=b['trials'][0];assert trial['median_ms']<b['sdpa_ms']
-        current=dict(b['environment'],AXIS_C4_CUDA_TILES=trial['config'].split(':')[2])
+        current=dict(trial.get('environment',b['environment']),AXIS_C4_CUDA_TILES=trial['config'].split(':')[2])
+        defaults={'AXIS_C4_CHOLESKY':'0','AXIS_C4_FAST_MATH':'0','AXIS_C4_SELECTOR_WARPS':'4',
+                  'AXIS_C4_ROUTE_TOKENS':'64','AXIS_C4_ROUTE_WARPS':'4','AXIS_C4_ROUTE_STAGES':'2',
+                  'AXIS_C4_CUDA_TILES':'21','AXIS_C4_HEAD_CHUNK':str({'tw':4,'wh':8,'th':2}[a.axes])}
+        for key,default in defaults.items():
+            assert current.get(key,default)==v['environment'].get(key,default),key
         assert environment is None or environment==current
         environment=current
         samples.append({'input_kind':b['input_kind'],'capture':b['capture'],
