@@ -1,7 +1,10 @@
-"""Explicit, bounded-roundoff contract for named C8 arithmetic experiments.
+"""Historical bounded-error screen for C8 arithmetic experiments.
 
-All other sources continue to require bitwise identity. Thresholds are fixed
-before measurement, and cover the full intermediates and full H40 output.
+The source names below record the original experiment scope; they do not
+override the repository's default numerical-closeness policy. Bitwise identity
+is not required by default. These fixed thresholds remain available for
+reproducing the historical screen of full intermediates and full H40 output;
+they are not a universal user-specified tolerance.
 """
 import math
 
