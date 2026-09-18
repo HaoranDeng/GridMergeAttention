@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-VARIANTS = ("c4", "c8", "c8_r2", "c10", "fp8/c10")
+VARIANTS = ("c4", "c8", "c8_r2", "c10")
 
 
 def verify(package_file):

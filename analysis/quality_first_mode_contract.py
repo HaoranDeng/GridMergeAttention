@@ -12,8 +12,7 @@ from types import MappingProxyType
 _HELLINGER = "hellinger_span_alpha0p2_c32_p16_a2_j4_t1_rf0_u16_cg45"
 _MASS = "entropy_mass_span_c32_p16_g256_j4_t1_rf0_u16_cg45"
 _MASS_C10 = "entropy_mass_span_c32_p16_g256_j4_t1_rf0_u16_cg45_sq1_qm_skv_nl_ml1"
-FP8_C10_METHOD = "fisher_geometric_c10_rf0_fp8kv"
-C10_METHODS = ("fisher_geometric_c10_rf0", FP8_C10_METHOD)
+C10_METHODS = ("fisher_geometric_c10_rf0",)
 BF16_MODES = MappingProxyType({
     "hellinger_rf0": _HELLINGER,
     "mass_rf0": _MASS,
@@ -36,7 +35,6 @@ AXIS_METHODS = ()
 VIDEO_MODES = MappingProxyType(dict(BF16_MODES) | {
     "fisher_geometric_rf0": _MASS,
     "fisher_geometric_c10_rf0": _MASS_C10,
-    FP8_C10_METHOD: _MASS_C10,
     "fisher_full45_rf0": _MASS.replace("_c32_", "_c45_"),
     "fisher_anchor_full45_rf0": _MASS.replace("_c32_", "_c45_"),
     "fisher_anchor_rf0": _MASS, "fisher_antipodal_rf0": _MASS,
@@ -78,14 +76,6 @@ def method_contract(method: str) -> dict:
     """Return a fresh serializable declaration, not proof of actual execution."""
     if method not in VIDEO_MODES:
         raise ValueError(f"Unsupported quality-first RF0 method: {method!r}")
-    if method == FP8_C10_METHOD:
-        return method_contract("fisher_geometric_c10_rf0") | {
-            "method": method, "change_from_historical_control": "scaled_fp8_intermediate_kv_only",
-            "intermediate_kv_dtype": "float8_e4m3fn", "scaled_fp8_kv": True,
-            "kv_scale": "independent per-vector absmax/448, floor 1e-8, FP32; current tensors only",
-            "precision_scope": "BF16 QK/merge operands; FP32 merge accumulation, bias and scales; FP8 E4M3 intermediate bulk K/V; decode to BF16 for full route; original BF16 SQ1",
-            "merge_override": "analysis.fisher_c10_video_adapter.FisherC10MergeAdapter(scaled_fp8_kv=True)",
-        }
     if method == TEMPORAL_HEIGHT_METHOD:
         declaration = method_contract(TEMPORAL_KEY_METHOD)
         declaration.update(

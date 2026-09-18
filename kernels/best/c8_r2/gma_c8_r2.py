@@ -2,8 +2,7 @@
 
 This retained implementation fixes the measured merge tile span at 105 and
 uses the screened D13 fused-packed-argmax merge source.  The selector, probe,
-route, candidate table and buffer layout remain fixed.  Historical campaign
-arms are recorded in evidence.json but are not runtime choices.
+route, candidate table and buffer layout remain fixed.
 
 Each instance owns about 33 GiB of reusable GPU buffers and must be called
 serially on one CUDA stream.
@@ -57,7 +56,7 @@ class NativeC8R2:
         self.device = torch.empty(0, device=device).device
         with torch.cuda.device(self.device):
             if torch.cuda.get_device_capability(self.device) != (9, 0):
-                raise ValueError('This prototype requires Hopper SM90a')
+                raise ValueError('GMA-C8 r2 requires Hopper SM90a')
             self.probe = _extension('gma_c8_cuda_probe')
             self.gs = _extension('b1_gs_regpipe_v0')
             self.merge = _extension(MERGE_SOURCE, True)
@@ -81,7 +80,7 @@ class NativeC8R2:
             raise ValueError('Require contiguous BF16 [1,75600,40,128] or '
                              '[1,21,45,80,40,128] on the instance device')
         if x.requires_grad:
-            raise ValueError('This prototype supports inference only')
+            raise ValueError('GMA-C8 r2 supports inference only')
         return x.view(_SHAPE)
 
     @torch.no_grad()

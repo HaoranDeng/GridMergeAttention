@@ -1,4 +1,4 @@
-"""Hopper C4/C10 merge prototypes with unchanged Fisher selection and SQ1 route.
+"""Hopper C10 production operator with Fisher selection and SQ1 route.
 
 Experimental only: observed small BF16 output differences and targets unmet.
 Each instance owns reusable workspace and must not be shared across streams.

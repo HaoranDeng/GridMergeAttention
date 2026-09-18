@@ -1,27 +1,16 @@
 {
   "variant": "c10",
-  "scope": "One retained complete H40 attention implementation; only create() is supported.",
-  "original_sources": {
-    "operator.py": "2d2ac10208d7ef1e01e871aa52c92aa07b4e83f257c11ca63e00090eceb6831d",
-    "selector.py": "2c8c7af0d226ce9f08f13cce63122625539ebc6ea9a0793ce395994b743709ea",
-    "fisher_c10_long_tiles_tree.cu": "22008a819e5a9dac345444a0df2ba0d9d5b7efff8fcd8c8212075f02d4682704",
-    "fisher_gs_register_distribute.cu": "7709e24cea2836eb9a43078bb18d563ad450b44a4cbc3bd5f5a1a95677d748ec",
-    "attention/hard_c4_wan21_14b_720p_triton.py": "b9441cee9754725f749a30a7ee030f6e979f4daf47f0f29950d71bd9b9c0b1d1"
-  },
+  "scope": "Production BF16 C10 implementation.",
   "files": {
-    "operator.py": "894014bfc3362c3b14ea42d9ec52b82ff74e55923a9563e1c57640c2937cb408",
-    "selector.py": "2c8c7af0d226ce9f08f13cce63122625539ebc6ea9a0793ce395994b743709ea",
-    "fisher_c10_long_tiles_tree.cu": "22008a819e5a9dac345444a0df2ba0d9d5b7efff8fcd8c8212075f02d4682704",
-    "fisher_gs_register_distribute.cu": "49089d5e099dc2260c32d4148cffdac203f0a31b184fd2073693aebd40b937f9",
+    "__init__.py": "cf68dfa9d5359420773dbf30d6f21afc0474651f55147081cb67c4cd7520fa34",
+    "operator.py": "101a08e51326cdc3653d10fa6fd15964add2d4cd8f08985b045da5420c0555b0",
+    "selector.py": "fe68570630848b25e79704d5e982d1c4412cd14cccfe245181a7b344e4f9610d",
     "route_reference.py": "b9441cee9754725f749a30a7ee030f6e979f4daf47f0f29950d71bd9b9c0b1d1",
-    "evidence.json": "18d590fcc9c70f56dc5bf87c785781433c0869134be016fe86ca57f88019c38c"
+    "fisher_c10_long_tiles_tree.cu": "22008a819e5a9dac345444a0df2ba0d9d5b7efff8fcd8c8212075f02d4682704",
+    "fisher_gs_register_distribute.cu": "49089d5e099dc2260c32d4148cffdac203f0a31b184fd2073693aebd40b937f9"
   },
   "shared_dependencies": {
     "attention/adaptive_seed_pytorch.py": "ab288d3a1d70013f912a944f912337633cfc6fe2228b9ee4649febcb94c42e22",
     "attention/hard_route_pytorch.py": "eaa9dffada5f7eed2cab7457050c3cccd116b5e3fb705ea5b138eb67741e3ffa"
-  },
-  "packaging_changes": [
-    "operator.py: point route import at the frozen local module",
-    "fisher_gs_register_distribute.cu: restore benchmark LF line endings; matches recorded selector SHA256"
-  ]
+  }
 }

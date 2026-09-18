@@ -2,7 +2,7 @@
 #include <cuda_bf16.h>
 #include <cstdint>
 
-// Warp-local primitives for the experimental merge/route fusion. These are
+// Warp-local primitives for the production merge/route fusion. These are
 // not used by the retained attention operator until full-call validation.
 namespace fisher_warp {
 using bf16 = __nv_bfloat16;

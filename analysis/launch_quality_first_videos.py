@@ -170,9 +170,6 @@ def verify_completion(run_dir, method, checkpoint):
                        and proof.get("c4_prefix_exact") is True
                        and proof.get("nine_pivots_checked") is True,
                        "C10 native validation missing")
-        if method == worker.FP8_C10_METHOD:
-            worker.require(proof.get("fp8_kv", {}).get("valid") is True, "FP8 KV native proof missing")
-            worker.require(audit["first_call_metadata"]["intermediate_kv"]["scaled_fp8_kv"] is True, "FP8 adapter not active")
     if method == "fisher_geometric_c8_rf0":
         proof = json.loads((run_dir / "native_validation.json").read_text())
         worker.require(proof.get("valid") is True and proof.get("c") == 8

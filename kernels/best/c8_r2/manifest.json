@@ -1,46 +1,16 @@
 {
   "variant": "c8_r2",
-  "scope": "GMA-C8 r2 exact-capacity numerics-only campaign result. C8 is exactly eight merged K/V representatives and never an 8+1 route. One fixed merge source is retained over one selector, probe and route.",
-  "requires": {
-    "merge_tiles": 105,
-    "why": "merge.run must be called with this measured tile span. The retained c8 wrapper uses 21, which is output-identical but slower. NativeC8R2 fixes the value at 105 so it cannot silently drift.",
-    "arch": "Hopper SM90a (compute capability 9.0)",
-    "device_memory_gib": 33
-  },
-  "original_sources": {
-    "gma_c8_r2.py": "written for this package (numerics-only wrapper; fixes tiles at 105)",
-    "gma_c8_candidate_table.json": "kernels/best/c8/gma_c8_candidate_table.json",
-    "gma_c8_cuda_probe.cu": "kernels/best/c8/gma_c8_cuda_probe.cu",
-    "gma_c8_route_pipeline.cu": "kernels/best/c8/gma_c8_route_pipeline.cu",
-    "b1_gs_regpipe_v0.cu": "experiments/r2/base/gs_v11/b1_gs_regpipe_v0.cu",
-    "gma_c8_d10a_fused_argmax_v0.cu": "experiments/r2/base/stack_guarded_v19/gma_c8_d10a_fused_argmax_v0.cu"
-  },
+  "scope": "Production exact-capacity optimized C8 implementation.",
   "files": {
-    "gma_c8_r2.py": "065a8b1407826715b79643cf9ccd58d8fe145728faacd0113177e1d680f1e459",
+    "__init__.py": "b3588f170f0eecff654a0f10df6c4930a701b3acfc33440d49e18443024b5f01",
+    "gma_c8_r2.py": "1f5fd830f11f3bfcd858c343ede6cb1f4635f02176b1111fb0760cc66689c154",
     "gma_c8_candidate_table.json": "eeffd8d22084d68732d89291f753bf6a68721213ecc372cc66253e5c7cd8b873",
     "gma_c8_cuda_probe.cu": "2951e28d0e988b45024da8a3b34451088339ac339db49e52f543f21221235fd5",
-    "gma_c8_route_pipeline.cu": "7cd72aeed49c86b1a2044dda77531ea067d61d22099d8c7370041e59588e6c0c",
     "b1_gs_regpipe_v0.cu": "8d40219181ccfd214a6265e88d99eed854037af73c926045e5df40504b8802b4",
     "gma_c8_d10a_fused_argmax_v0.cu": "e842a82cb6d3e95672749f598fd7aca9781cc1f840b2d14058d6b8f9104cd486",
-    "evidence.json": "bbd477eeecb876bd972a116b72f945ab738b7c4a1add5c745c5c26a3f599d60b"
+    "gma_c8_route_pipeline.cu": "7cd72aeed49c86b1a2044dda77531ea067d61d22099d8c7370041e59588e6c0c"
   },
   "shared_dependencies": {
     "attention/capacity_contract.py": "adf40ac79e5f0a1ce08744e98e2e766b6e0736709b447d6a757db2c093d0e124"
-  },
-  "packaging_changes": [
-    "gma_c8_r2.py fixes the merge tile span at 105, loads only gma_c8_d10a_fused_argmax_v0.cu, and has no tier or overlap switches. Buffer shapes, dtypes, call order and input validation are unchanged.",
-    "Extension module names carry a _c8r2_20260912 suffix so this package and kernels/best/c8 cannot alias different sources onto one cached extension name.",
-    "The retained CUDA source is byte-identical to the screened campaign source; no kernel source was edited during packaging.",
-    "The public and runtime bitwise, numerics_v18 and overlap alternatives were removed. Their measurements remain in evidence.json and their deleted source files remain recoverable from git history."
-  ],
-  "retained_implementation": {
-    "name": "numerics",
-    "merge_source": "gma_c8_d10a_fused_argmax_v0.cu",
-    "merge_sha256": "e842a82cb6d3e95672749f598fd7aca9781cc1f840b2d14058d6b8f9104cd486",
-    "origin": "experiments/r2/base/stack_guarded_v19",
-    "entry_point": "kernels.best.c8_r2.create(device=...)",
-    "bitwise_equal_to_kernels_best_c8": false,
-    "seeds_equal_to_kernels_best_c8": true,
-    "note": "The algorithm is unchanged: same selector, C=8 hard clustering, C32/CG45 geometry and routing. The selected sparsity pattern is unchanged because seeds are bitwise identical. Merge arithmetic differs at the 1e-4 level; about 5.5 per million key-ownership near-ties resolve to the other seed. Three independent 20-video same-node paired screens passed. See evidence.json."
   }
 }

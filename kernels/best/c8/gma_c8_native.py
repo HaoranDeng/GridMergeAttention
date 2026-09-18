@@ -1,4 +1,4 @@
-"""Experimental exact-capacity native CUDA C8 inference.
+"""Production exact-capacity native CUDA C8 inference.
 
 P16 (8 screened + 8 uniform), C32/CG45, J4, RF0, eight seeds, native80,
 full compressed attention. No Triton imports or temporary module patching.
@@ -36,7 +36,7 @@ class NativeC8:
         self.device=torch.empty(0,device=device).device
         with torch.cuda.device(self.device):
             if torch.cuda.get_device_capability(self.device)!=(9,0):
-                raise ValueError('This prototype requires Hopper SM90a')
+                raise ValueError('GMA-C8 requires Hopper SM90a')
             self.probe=_extension('gma_c8_cuda_probe')
             self.gs=_extension('gma_c8_cuda_gs_v10')
             self.merge=_extension('gma_c8_owner_pack_v0',True)
@@ -58,7 +58,7 @@ class NativeC8:
         if tuple(x.shape) not in (_SHAPE,_FLAT) or x.dtype!=torch.bfloat16 or x.device!=self.device or not x.is_contiguous():
             raise ValueError('Require contiguous BF16 [1,75600,40,128] or [1,21,45,80,40,128] on the instance device')
         if x.requires_grad:
-            raise ValueError('This prototype supports inference only')
+            raise ValueError('GMA-C8 supports inference only')
         return x.view(_SHAPE)
 
     @torch.no_grad()

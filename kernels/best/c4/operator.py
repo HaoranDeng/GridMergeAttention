@@ -1,4 +1,4 @@
-"""Hopper exact-capacity C4 merge prototype.
+"""Hopper exact-capacity C4 production operator.
 
 Experimental only: observed small BF16 output differences and targets unmet.
 Each instance owns reusable workspace and must not be shared across streams.

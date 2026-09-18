@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from analysis.quality_first_mode_contract import (
-    VIDEO_MODES, C10_METHODS, FP8_C10_METHOD, STABLE_SQ1_METHODS, SPATIAL_TRANSPOSE_METHOD, TEMPORAL_KEY_METHOD,
+    VIDEO_MODES, C10_METHODS, STABLE_SQ1_METHODS, SPATIAL_TRANSPOSE_METHOD, TEMPORAL_KEY_METHOD,
     TEMPORAL_HEIGHT_METHOD, TEMPORAL_METHODS, AXIS_METHODS,
     method_contract, quality_first_token_merging_args,
     validate_token_merging_args,
@@ -39,7 +39,6 @@ PROMPTS = "prompts/MovieGenVideoBench_extended.txt"
 OWN_SOURCES = (
     "analysis/run_quality_first_videos.py", "analysis/quality_first_mode_contract.py",
     "analysis/fisher_c10_video_adapter.py",
-    "analysis/validate_fisher_c10_fp8_kv.py", "analysis/evaluate_fp8_video_psnr.py",
 )
 MERGE_SYMBOL = "hard_c4_720p_temporal_shared_seed_rows_singleton_leverage_attention_triton_blocks"
 SHAPE = (1, 75600, 40, 128)
@@ -661,8 +660,8 @@ def install_audit(stack, audit, wan, token, recorder, frozen):
     c8_adapter = None
     if audit.method in C10_METHODS:
         from analysis.fisher_c10_video_adapter import FisherC10MergeAdapter
-        c8_adapter = FisherC10MergeAdapter(scaled_fp8_kv=audit.method == FP8_C10_METHOD)
-        audit.first_call_metadata["intermediate_kv"] = {"scaled_fp8_kv": c8_adapter.scaled_fp8_kv, "dtype": "float8_e4m3fn" if c8_adapter.scaled_fp8_kv else "bfloat16"}
+        c8_adapter = FisherC10MergeAdapter()
+        audit.first_call_metadata["intermediate_kv"] = {"scaled_fp8_kv": False, "dtype": "bfloat16"}
         audit.identities["capacity_adapter"] = callable_identity(FisherC10MergeAdapter.__call__, frozen)
     if audit.method == "zero_fisher_rf0":
         from analysis.zero_anchor_video_adapter import ZeroSeedMergeAdapter
@@ -712,8 +711,6 @@ def install_audit(stack, audit, wan, token, recorder, frozen):
     def merge(*args, **kwargs):
         audit.enter_merge(args, kwargs)
         if c8_adapter is not None:
-            if audit.method in C10_METHODS:
-                require(c8_adapter.scaled_fp8_kv == (audit.method == FP8_C10_METHOD), "KV precision adapter changed")
             result = c8_adapter(*args, **kwargs)
             require(c8_adapter.calls == audit.merge_calls, "C8 adapter call missing")
             return result
@@ -836,9 +833,6 @@ def execute(run_dir, method, checkpoint, *, parent_purity_managed, spatial_nativ
         if method in C10_METHODS:
             from analysis.fisher_c10_video_adapter import validate_native
             proof = validate_native()
-            if method == FP8_C10_METHOD:
-                from analysis.validate_fisher_c10_fp8_kv import validate_fp8
-                proof["fp8_kv"] = validate_fp8()
             write_json(run_dir / "native_validation.json", proof, exclusive=True)
         if method in TEMPORAL_METHODS and native_path is None:
             # The parent already owns/monitors this single GPU. Validate new

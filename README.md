@@ -1,6 +1,6 @@
 # Grid Compressed Attention (GCA)
 
-Retained fastest measured C4/C8/C10 BF16 kernels and separately saved C10 FP8:
+Retained fastest measured C4/C8/C10 BF16 kernels:
 [kernel snapshots and usage](kernels/best/README.md).
 
 ## Default method

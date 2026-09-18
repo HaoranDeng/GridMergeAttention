@@ -27,7 +27,7 @@ class NativeFisherSelector:
         assert capacity in (4,10)
         from attention.adaptive_seed_pytorch import multiscale_candidate_table
         os.environ.setdefault('TORCH_CUDA_ARCH_LIST','9.0a');os.environ.setdefault('MAX_JOBS','2')
-        if layout not in ('candidate','probe4','probe8','probe16'):raise ValueError('Unknown experimental GS layout')
+        if layout not in ('candidate','probe4','probe8','probe16'):raise ValueError('Unsupported GS layout')
         self.probe_lanes=0 if layout=='candidate' else int(layout[5:])
         source='fisher_gs.cu' if layout=='candidate' else 'fisher_gs_distributed.cu'
         self.source_path=Path(source_path) if source_path is not None else Path(__file__).with_name(source)

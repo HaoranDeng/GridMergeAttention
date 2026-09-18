@@ -11,10 +11,7 @@ import types
 
 
 class FisherC10MergeAdapter:
-    def __init__(self, *, scaled_fp8_kv=False):
-        if type(scaled_fp8_kv) is not bool:
-            raise ValueError("scaled_fp8_kv must be bool")
-        self.scaled_fp8_kv = scaled_fp8_kv
+    def __init__(self):
         from attention import singleton_c4_wan21_14b_720p_triton as module
         original = module._hard_c4_720p_temporal_shared_global_mass_attention_triton_blocks
         namespace = dict(original.__globals__)
@@ -33,8 +30,6 @@ class FisherC10MergeAdapter:
                     "compressed_fp8_kv", "scaled_fp8_kv", "materialize_singleton"):
             if kwargs.get(key, False):
                 raise ValueError("C10 changes only capacity, not " + key)
-        if self.scaled_fp8_kv:
-            kwargs["scaled_fp8_kv"] = True
         self.calls += 1
         # Triton tiles are power-of-two. Duplicate the final real seed into
         # six trailing slots. Identical logits plus leftmost argmax assign

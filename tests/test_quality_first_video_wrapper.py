@@ -186,27 +186,6 @@ class QualityFirstVideoWrapperTests(unittest.TestCase):
                               "--seed_query_proj_checkpoint", "--gma_output_calibration_checkpoint"):
                 self.assertNotIn(forbidden, argv)
 
-    def test_fp8_15_video_count_and_precision_contract(self):
-        method = wrapper.FP8_C10_METHOD
-        audit = wrapper.DispatchAudit(method, num_videos=15)
-        self.assertTrue(audit.declaration["scaled_fp8_kv"])
-        self.assertEqual(wrapper.quality_first_token_merging_args(method),
-                         wrapper.quality_first_token_merging_args("fisher_geometric_c10_rf0"))
-        argv = wrapper.generation_argv(Path("stage"),
-                {"config": "frozen.json", "planned": {"num_videos": 15}}, "weights.pt")
-        self.assertEqual(argv[argv.index("--num_videos") + 1], "15")
-        audit.videos = 15
-        audit.calls = audit.core_calls = audit.selector_calls = 2400
-        audit.merge_calls = 24000
-        audit.layers = [60] * 40
-        self.assertTrue(audit.save(True)["complete"])
-        audit.merge_calls -= 1
-        with self.assertRaises(ValueError):
-            audit.save(True)
-        for n in (0, 21, True):
-            with self.assertRaises(ValueError):
-                wrapper.DispatchAudit(method, num_videos=n)
-
     def test_all_methods_accept_actual_merge_dispatch_metadata(self):
         for method in BF16_MODES:
             if method in wrapper.AXIS_METHODS:

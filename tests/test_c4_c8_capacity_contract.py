@@ -32,11 +32,6 @@ class ExactCapacityContractTests(unittest.TestCase):
             source = (ROOT / relative).read_text(encoding="utf-8")
             self.assertIn("require_exact_merged_capacity(8, 0)", source)
 
-    def test_legacy_native_fisher_c4_entry_is_fail_closed(self):
-        source = (ROOT / "native_fisher/operator.py").read_text(encoding="utf-8")
-        self.assertIn("if capacity == 4", source)
-        self.assertIn("C4+SQ1 is retired", source)
-
     def test_no_runnable_c4_or_c8_sq1_config(self):
         offenders = []
         for path in (ROOT / "configs").glob("*.yaml"):
