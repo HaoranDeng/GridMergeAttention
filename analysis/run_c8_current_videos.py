@@ -21,9 +21,12 @@ def main():
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--reference',type=Path,required=True)
     parser.add_argument('--evidence',type=Path,required=True)
+    parser.add_argument('--start',type=int,default=0,help='Inclusive canonical prompt index')
+    parser.add_argument('--stop',type=int,default=20,help='Exclusive canonical prompt index')
     parser.add_argument('--model',default='/home/denghaoran/wan_models/Wan2.1-T2V-14B-Diffusers')
     parser.add_argument('--svg',default='/local2/denghaoran/GridMergeAttention_worktrees/svg_official_20260906ch')
     a=parser.parse_args()
+    assert 0<=a.start<a.stop<=20
     root=Path(__file__).resolve().parents[1]
     assert not (a.output/'runtime.json').exists(), 'Fresh output required'
     a.output.mkdir(parents=True,exist_ok=True)
@@ -52,7 +55,8 @@ def main():
         root/'analysis/benchmark_wan14b_720p_methods.py',root/'analysis/evaluate_video_quality.py']
     hashes={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in source_paths}
     protocol={'method':'Q45K80 C8 Hellinger current-frame; no RF0 reuse','model':a.model,
-        'steps':50,'height':720,'width':1280,'frames':81,'fps':16,'seed':0,'num_videos':20,
+        'steps':50,'height':720,'width':1280,'frames':81,'fps':16,'seed':0,'num_videos':a.stop-a.start,
+        'canonical_total_videos':20,'prompt_indices':list(range(a.start,a.stop)),
         'guidance_scale':5.,'scheduler':'UniPC flow_shift=5','all_layers':40,'capacity':8,
         'singleton_routes':0,'expected_calls_per_video':4000,'dense_self_attention_calls':0,
         'seed_policy':'Each query frame independently selects C32/g45 Hellinger alpha=.2, A8U8 probes in every call',
@@ -103,30 +107,32 @@ def main():
 
     def evaluate(count):
         from analysis.evaluate_video_quality import main as evaluate_main
-        subset=build_prompt_manifest(prompt_path,prompts,selected_count=count,seed=0,
+        subset=build_prompt_manifest(prompt_path,prompts,selected_count=20,seed=0,
                                      num_samples=1,vbench_filenames=False,allow_noncanonical=False)
         paths=[]
         for name,source in [('reference',a.reference),('method',a.output)]:
             target=a.output/f'evaluation_{count}'/name
             ensure_output_prompt_manifest(target,subset)
-            assert_matching_prompt_manifests(source,target,prompt_indices=range(count))
-            for index in range(count):
+            assert_matching_prompt_manifests(source,target,prompt_indices=range(a.start,a.start+count))
+            for index in range(a.start,a.start+count):
                 src=source/f'{index:03d}-00.mp4';dst=target/src.name
                 assert src.is_file()
                 if not dst.exists():dst.symlink_to(src.resolve())
                 assert dst.resolve()==src.resolve()
+            expected={f'{index:03d}-00.mp4' for index in range(a.start,a.start+count)}
+            assert {p.name for p in target.glob('*.mp4')}==expected
             paths.append(target)
         old=sys.argv
         try:
             sys.argv=['evaluate_video_quality','--reference_dir',str(paths[0]),'--method_dir',str(paths[1]),
                 '--method_name','q45k80c8_current','--output',str(a.output/f'quality_{count}.json'),
-                '--max_videos',str(count),'--expected_videos',str(count),'--expected_frames','81','--lpips_batch_size','4']
+                '--max_videos',str(count),'--expected_frames','81','--lpips_batch_size','4']
             evaluate_main()
         finally:
             sys.argv=old;gc.collect();torch.cuda.empty_cache()
 
     with torch.inference_mode():
-        for index in range(20):
+        for index in range(a.start,a.stop):
             before=counts.copy();timer.reset();full_timer.reset();torch.cuda.reset_peak_memory_stats()
             torch.cuda.synchronize();started=time.perf_counter()
             def progress(pipeline,step,timestep,kwargs):
@@ -156,19 +162,20 @@ def main():
             runtime['videos'].append(record);save(a.output/'runtime.json',runtime)
             print(json.dumps({'event':'video_complete',**record}),flush=True)
             del frames
-            if index in (0,4):
-                try:evaluate(index+1)
+            completed=len(runtime['videos'])
+            if completed in (1,5):
+                try:evaluate(completed)
                 except Exception as exc:
-                    runtime['quality_failures'].append({'count':index+1,'error':repr(exc)})
+                    runtime['quality_failures'].append({'count':completed,'error':repr(exc)})
                     save(a.output/'runtime.json',runtime)
     runtime['generation_complete']=True;runtime['status']='evaluating';save(a.output/'runtime.json',runtime)
     del pipe,vae,core,processor,invoke
     gc.collect();torch.cuda.empty_cache()
-    evaluate(20)
+    evaluate(a.stop-a.start)
     for relative,digest in hashes.items():
         assert hashlib.sha256((root/relative).read_bytes()).hexdigest()==digest,relative
     runtime['quality_complete']=True;runtime['status']='complete';save(a.output/'runtime.json',runtime)
-    print(json.dumps({'event':'complete','videos':20}),flush=True)
+    print(json.dumps({'event':'complete','videos':a.stop-a.start}),flush=True)
 
 
 if __name__=='__main__':main()

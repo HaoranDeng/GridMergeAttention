@@ -169,8 +169,19 @@ canonical dense reference. These historical dense videos are a quality
 reference, not a matched runtime denominator. Any speed ratio using the
 earlier H40 replay timing is explicitly approximate. VBench is unmeasured.
 
-The September 19 run is stored on scai7 at
-`/local2/denghaoran/GridMergeAttention/experiments/c8_current_video20_20260919`.
+The user subsequently explicitly requested two GPUs. The initial single-GPU
+attempt was stopped before its first video completed; its logs remain in
+`c8_current_video20_20260919`, with `handoff.json` recording the reason.
+The two-GPU run uses GPU6 for prompts 0-9 and GPU5 for prompts 10-19, launched
+by `analysis/launch_c8_current_video_pair.py --gpus 6 5 --output <fresh-dir>`.
+Each shard retains an independent exclusive-GPU guard and evaluates its
+first 1, 5, and 10 videos against the corresponding canonical prompt indices.
+`analysis/collect_c8_current_video_pair.py` combines disjoint video records
+and frame-weighted metrics, checking prompt manifests, source hashes, and
+per-layer call counts. Both guards must pass for final completion to be valid.
+
+The active September 19 run is stored on scai7 at
+`/local2/denghaoran/GridMergeAttention/experiments/c8_current_video20_20260919_2gpu`.
 Local artifacts are mirrored to
-`C:/GMA/experiments/c8_current_video20_20260919`. Generation and final video
+`C:/GMA/experiments/c8_current_video20_20260919_2gpu`. Generation and final video
 quality results are pending; the QKV results above are not video metrics.
