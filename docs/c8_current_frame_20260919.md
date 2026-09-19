@@ -147,3 +147,30 @@ The exclusive GPU6 guard completed successfully. Raw evidence is `ear.json`
 and `ear_guard/` in the same canonical artifact directory. Compact evidence
 is `kernels/experimental/c8_current/ear_evidence.json`, and the replay script
 is `analysis/compare_ear_c8_current.py`. No video metrics were measured.
+
+## Twenty-video generation
+
+The user selected the current-frame C8 variant for a 20-video run. The
+runner is `analysis/run_c8_current_videos.py`; launch on an exclusively idle
+H200 with `analysis/launch_c8_current_videos.py --gpu 6 --output <fresh-dir>`.
+The launcher uses the existing continuous GPU guard and never queues.
+
+The run uses canonical prompts 0-19, seed 0 for every prompt, Wan2.1-14B,
+720p, 81 frames, 50 UniPC steps, guidance 5, and 16 fps. All 40 self-attention
+layers use current-frame C8 on every call: 4,000 calls per video, 100 per
+layer, with no dense fallback. A single kernel instance shares scratch across
+the serial layer calls. Timings include input/output layout conversion.
+
+Prompt validation runs before model loading and again inside the runner.
+Each completed video is published atomically; configuration, source hashes,
+step progress, per-layer call counts, timings, and video hashes are saved.
+PSNR/SSIM/LPIPS are evaluated after videos 1, 5, and 20 against the existing
+canonical dense reference. These historical dense videos are a quality
+reference, not a matched runtime denominator. Any speed ratio using the
+earlier H40 replay timing is explicitly approximate. VBench is unmeasured.
+
+The September 19 run is stored on scai7 at
+`/local2/denghaoran/GridMergeAttention/experiments/c8_current_video20_20260919`.
+Local artifacts are mirrored to
+`C:/GMA/experiments/c8_current_video20_20260919`. Generation and final video
+quality results are pending; the QKV results above are not video metrics.
