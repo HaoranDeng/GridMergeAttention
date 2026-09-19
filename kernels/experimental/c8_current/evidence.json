@@ -1,0 +1,140 @@
+{
+  "base_commit": "52a2b91",
+  "timing": {
+    "capture": "/local2/denghaoran/GridMergeAttention/experiments/gma_c8_cuda_150ms_20260908/real_full40_step0_layer00.pt",
+    "heads": 40,
+    "paired_ms": [
+      {
+        "dense": 328.5172119140625,
+        "r2_rf0": 158.29714965820312,
+        "current": 319.9162292480469
+      },
+      {
+        "current": 319.6622009277344,
+        "r2_rf0": 161.01913452148438,
+        "dense": 334.39459228515625
+      },
+      {
+        "dense": 339.4284973144531,
+        "r2_rf0": 163.01394653320312,
+        "current": 322.1243591308594
+      },
+      {
+        "current": 318.18597412109375,
+        "r2_rf0": 160.84249877929688,
+        "dense": 335.9913330078125
+      },
+      {
+        "dense": 339.7619323730469,
+        "r2_rf0": 160.90403747558594,
+        "current": 326.4792785644531
+      },
+      {
+        "current": 316.9164733886719,
+        "r2_rf0": 161.7190704345703,
+        "dense": 336.4707336425781
+      },
+      {
+        "dense": 340.9544372558594,
+        "r2_rf0": 160.72511291503906,
+        "current": 320.33343505859375
+      }
+    ],
+    "scope": "complete token-major attention including selector, pack, merge, route; dense output contiguous",
+    "mean_attention_ms": {
+      "dense": 336.502676827567,
+      "r2_rf0": 160.9315643310547,
+      "current": 320.51685006277904
+    },
+    "speedup_vs_sdpa": {
+      "dense": 1.0,
+      "r2_rf0": 2.090967537824602,
+      "current": 1.0498751524659524
+    },
+    "selector_current_ms": 162.29161071777344,
+    "selector_rf0_ms": 7.457727909088135,
+    "speed_gate_passed": true
+  },
+  "numerics": {
+    "rf0": {
+      "cases": 384,
+      "mean_relative_l2": 0.08246332090129727,
+      "pooled_relative_l2": 0.07776315658206585
+    },
+    "current": {
+      "cases": 384,
+      "mean_relative_l2": 0.07000760367858068,
+      "pooled_relative_l2": 0.0632783680379625
+    },
+    "current_wins": 319
+  },
+  "validation": {
+    "frame_permutation_equivariance": true,
+    "exact_capacity": 8,
+    "empty_slots_zero_kv_and_infinite_bias": true,
+    "finite_empty_case": true,
+    "reference_relative_l2": [
+      0.0019256067462265491,
+      0.001987967174500227,
+      0.0021075380500406027
+    ],
+    "reference_gate": 0.015,
+    "gate_note": "Engineering test threshold for BF16 merge/route, not a user-specified universal tolerance"
+  },
+  "rf0_vs_shipped_r2_relative_l2": 0.0,
+  "r2_vs_slow_reference_relative_l2": 0.00021986570209264755,
+  "layers": [
+    0,
+    5,
+    10,
+    15,
+    20,
+    25,
+    30,
+    35
+  ],
+  "heads": [
+    0,
+    10,
+    20,
+    30
+  ],
+  "samples": [
+    [
+      0,
+      10,
+      20
+    ],
+    [
+      0,
+      22,
+      44
+    ],
+    [
+      0,
+      40,
+      79
+    ]
+  ],
+  "gpu_guards": {
+    "timing": {
+      "valid": true,
+      "error": null,
+      "returncode": 0,
+      "finished_at": 1789814025.7145321
+    },
+    "quality": {
+      "valid": true,
+      "error": null,
+      "returncode": 0,
+      "finished_at": 1789814221.784464
+    }
+  },
+  "cuda_source_sha256": {
+    "merge.cu": "74b3f0ac388ff678d2b4d4296c606308648c3c7ac517ffd3fab04cd2aa046dc5",
+    "probe.cu": "44df5a858b3e294c3cf73bfd12deb2a91ac80267bd980c523e77ac49c096d60c",
+    "route.cu": "9b0009bf9cfefc6aef54c78ddbdb49a457e7760111c738b2f181a35a1e90b6c8",
+    "selector.cu": "b5f6426d8a00aba9ae809d5abe383bee0a902ff7329bbc38dd6e409bfdcbfcad"
+  },
+  "artifacts": "C:\\GMA\\experiments\\c8_current_20260919"
+}
