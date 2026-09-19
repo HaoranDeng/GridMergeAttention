@@ -1,4 +1,7 @@
-// Current-line exact-C8 anchor-Fisher: matched anchor plus seven GS pivots.
+// Q80K45 current-line exact-C8 anchor-Fisher: matched anchor plus seven GS
+// pivots. Query is the 80-wide axis (AXIS_ROWS), key/merge candidates are the
+// 45-wide axis (AXIS_COLS). Selection is fixed to query-outer frame qo=0 (see
+// run()'s launch grid below); the caller broadcasts across the real qo extent.
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAException.h>
@@ -326,7 +329,13 @@ void run(torch::Tensor q,torch::Tensor k,torch::Tensor candidates,torch::Tensor 
  TORCH_CHECK(hs>=0 && hs+AH<=H,"Head range invalid");
  constexpr int smem=(W*32+16)*136*2;
  C10_CUDA_CHECK(cudaFuncSetAttribute(fused_selector,cudaFuncAttributeMaxDynamicSharedMemorySize,smem));
- fused_selector<<<dim3(R*((L+W-1)/W)*AH,O),W*32,smem,at::cuda::getCurrentCUDAStream()>>>(
+ // Selection uses a single reference query-outer frame (qo=0), matching
+ // kernels/best/c8_r2's q[:, :1] probe: the 8-representative set is chosen
+ // once per key-outer frame and shared across all O query frames, not
+ // recomputed per (qo, ko) pair. Only launch blockIdx.y=0 so the kernel's
+ // internal qo=blockIdx.y is always 0; the caller broadcasts seeds[:, :1]
+ // across the full qo extent so merge's addressing is unchanged.
+ fused_selector<<<dim3(R*((L+W-1)/W)*AH,1),W*32,smem,at::cuda::getCurrentCUDAStream()>>>(
   (const bf16*)q.data_ptr(),(const bf16*)k.data_ptr(),candidates.data_ptr<int>(),anchors.data_ptr<int>(),
   seeds.data_ptr<uint8_t>(),hs,scale,nullptr);
  C10_CUDA_KERNEL_LAUNCH_CHECK();

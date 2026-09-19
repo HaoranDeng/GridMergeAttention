@@ -1,4 +1,11 @@
-"""W80/H45 exact C8: current-line selection, r2 packed merge, full compressed routing.
+"""Q80K45 exact C8 (axes='wh': query on the 80-wide W axis, key/merge candidates
+on the 45-wide H axis): current-line selection, r2 packed merge, full
+compressed routing.
+
+Selection uses a single reference query-outer frame (qo=0, matching
+kernels/best/c8_r2's q[:, :1] probe) instead of recomputing per (qo, ko) --
+see axis_current_c8_selector.cu. Merge tile count defaults to 105 (matched
+c8_r2's own resweep result over {21,42,105,210}).
 
 Instances share cached scratch on a device and must stay on one CUDA stream.
 All Q/K/V permutations, selection, merging and full routing are in __call__.
@@ -65,10 +72,14 @@ def merged_attention(q,k,v,*,head_start=0,head_count=None,audit=False,output=Non
     selector,merge=_compiled(o,r,l,h,ah,implementation)
     candidates,anchors,seeds,mk,mv,bias,empty=_workspace(o,r,l,h,ah,str(q.device))
     selector.run(q,k,candidates,anchors,seeds,head_start,128**-.5)
+    # Selector only computes the qo=0 reference frame (see axis_current_c8_selector.cu);
+    # broadcast it across the full qo extent so merge's unchanged addressing sees a
+    # complete seeds tensor. Cheap: seeds is uint8, no D_HEAD factor.
+    seeds.copy_(seeds[:,:1].expand_as(seeds))
     if packed_q is None:
         packed_q=torch.empty_like(q);merge.pack(q,packed_q)
     merge.run(packed_q,k,v,seeds,mk,mv,bias,head_start,ah,
-              int(os.environ.get('AXIS_C8_CUDA_TILES','21')),128**-.5,empty,0,1)
+              int(os.environ.get('AXIS_C8_CUDA_TILES','105')),128**-.5,empty,0,1)
     out=torch.empty_like(q) if output is None else output
     _hard_c4_720p_route_kernel[(1,b*ah,o*l)](
         q,k,v,mk,mv,bias,bias,bias,bias,bias,out,
