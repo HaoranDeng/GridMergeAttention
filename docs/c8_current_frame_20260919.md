@@ -102,3 +102,48 @@ Run the benchmark as a module under `analysis.guard_axis_job`. Use
 `--timing-only` for the H40 comparison, `--quality-only` for the complete
 eight-layer replay, or neither for both. Missing captures cause a hard error.
 The CUDA source builder preserves measured source bytes across platforms.
+
+## Matched SVG-EAR supplement
+
+SVG-EAR top_p=0.85 was replayed on the **same 96 captures and 384 head cases**,
+including layer 0. No layer or timestep uses a dense fallback. The comparison
+uses the same saved BF16 dense outputs and identical 27 query coordinates.
+
+| Method | Mean case relative L2 | Pooled relative L2 |
+|---|---:|---:|
+| Hellinger C8 r2 RF0 | 8.2463% | 7.7763% |
+| Hellinger C8 current-frame | 7.0008% | 6.3278% |
+| SVG-EAR p=0.85 | 6.8446% | 17.4802% |
+
+EAR has a 0.1561 percentage-point advantage in mean case error and wins
+298/384 cases against current-frame C8. Its pooled error is much higher:
+layer 0 accounts for 84.26% of EAR's total squared error. The largest
+energy-weighted errors are in head 30 of that layer, including a 45.81%
+relative-L2 case at prompt 1, step 2. These cases remain in every aggregate.
+Mean case error weights all cases equally; pooled relative L2 divides total
+squared error by total reference energy before taking the square root.
+
+EAR uses Q/K centroid counts 300/1000, 50 initial k-means iterations, two
+update iterations, and effective min_kc_ratio=0.05. It recomputes assignments
+and retained regions on each attention call, using the previous step's
+centroids as the starting point. It does not reuse RF0 query-row indices.
+There is one processor per sampled layer, reset for each prompt. Initial
+centroid RNG uses seed 0 per prompt and logical H40 draws; rows for heads
+0/10/20/30 are selected before gathering captured tensors. Clustering and
+its convergence test run on the four available heads, so this is a matched
+H4 numerical replay rather than an assertion of bitwise H40 clustering.
+
+Realized attention-map density is **28.1139%**, weighted by query/key cluster
+sizes; sparsity is 71.8861%. The value 0.85 is a mass threshold, not density.
+
+The supplement also measures **H4**, with three warmed paired CUDA-event
+repeats per capture and identical centroid/RNG state restored before each
+repeat. EAR mean_attention_ms is **29.930**, matched H4 Flash SDPA is
+**31.716**, and speedup_vs_sdpa is **1.060x**. Initial clustering is included
+on step 0, with centroid updates on steps 1-3. These H4 times **cannot be
+compared directly with the H40 C8 times above**.
+
+The exclusive GPU6 guard completed successfully. Raw evidence is `ear.json`
+and `ear_guard/` in the same canonical artifact directory. Compact evidence
+is `kernels/experimental/c8_current/ear_evidence.json`, and the replay script
+is `analysis/compare_ear_c8_current.py`. No video metrics were measured.
