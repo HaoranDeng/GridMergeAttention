@@ -19,7 +19,7 @@ def native_merge(t,h,ah):
     os.environ.setdefault('TORCH_CUDA_ARCH_LIST','9.0a');os.environ.setdefault('MAX_JOBS','2')
     os.environ.setdefault('TORCH_EXTENSIONS_DIR','/local2/denghaoran/GridMergeAttention/q90c12_cuda_extensions_20260920')
     source=Path(__file__).with_name('q90k80c12_merge.cu')
-    flags=['-O3','--expt-relaxed-constexpr','-lineinfo',f'-DAXIS_OUTER={t}','-DAXIS_ROWS=45','-DAXIS_COLS=80',f'-DAXIS_HEADS={h}',f'-DAXIS_ACTIVE_HEADS={ah}']
+    flags=['-O3','--expt-relaxed-constexpr','-lineinfo',f'-DAXIS_OUTER={t}','-DAXIS_ROWS=45','-DAXIS_COLS=80',f'-DAXIS_HEADS={h}',f'-DAXIS_ACTIVE_HEADS={ah}','-DAXIS_FAST_MATH=1']
     digest=hashlib.sha256(source.read_bytes()+' '.join(flags).encode()).hexdigest()[:16]
     cutlass=Path(torch.__file__).resolve().parent.parent/'flashinfer/data/cutlass/include'
     return load(name='q90c12_merge_'+digest,sources=[str(source)],extra_include_paths=[str(cutlass)],extra_cuda_cflags=flags,verbose=False)
@@ -132,7 +132,7 @@ def _route(Q,MK,MV,Bias,O,T:tl.constexpr,H:tl.constexpr,AH:tl.constexpr,HS,
 
 
 class Q90K80C12:
-    def __init__(self,head_chunk=4,merge_groups=4,merge_loop=1,route_m=64,route_n=64,merge_warps=4,route_warps=4,merge_backend='triton',native_tiles=105):
+    def __init__(self,head_chunk=4,merge_groups=4,merge_loop=1,route_m=64,route_n=64,merge_warps=4,route_warps=4,merge_backend='triton',native_tiles=35):
         self.hc=head_chunk;self.bg=merge_groups;self.kl=merge_loop;self.bm=route_m;self.bn=route_n;self.mw=merge_warps;self.rw=route_warps
         assert 40%merge_groups==0 and merge_groups in (1,2,4,8)
         self.cache=None
@@ -168,6 +168,6 @@ class Q90K80C12:
             ah=min(self.hc,h-hs)
             if self.backend=='cuda':native_merge(t,h,ah).run(packed,kp,vp,self.seeds,self.mk,self.mv,self.bias,hs,ah,self.nt)
             else:_merge[(tr.cdiv(t*45,self.kl),t*tr.cdiv(40,self.bg),ah)](qp,kp,vp,self.seeds,self.mk,self.mv,self.bias,t,h,ah,hs,self.bg,self.kl,num_warps=self.mw,num_stages=2)
-            _route[(t*40,ah,tr.cdiv(90,self.bm))](qp,self.mk,self.mv,self.bias,out,t,h,ah,hs,self.bm,self.bn,num_warps=self.rw,num_stages=2)
+            _route[(t*40,ah,tr.cdiv(90,self.bm))](qp,self.mk,self.mv,self.bias,out,t,h,ah,hs,self.bm,self.bn,num_warps=self.rw,num_stages=3)
         result=out.view(h,t,40,2,45,128).permute(1,4,2,3,0,5).reshape(1,t*3600,h,128).contiguous()
         return (result,self.seeds) if return_debug else result

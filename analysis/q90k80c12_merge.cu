@@ -108,7 +108,7 @@ __device__ __forceinline__ float dot80(float (&p)[KC/4],float (&x)[KC/4]){
   return sum4(sum);
 }
 template<int TILES,int TOTAL_HEADS>
-__global__ __launch_bounds__(128,2) void merge_kernel(
+__global__ __launch_bounds__(128,4) void merge_kernel(
  const bf16* __restrict__ q,const bf16* __restrict__ k,const bf16* __restrict__ v,
  const uint8_t* __restrict__ seeds,bf16* __restrict__ mk,bf16* __restrict__ mv,
  float* __restrict__ bias,int Q_arg,int KO_arg,int R_arg,int C_arg,int H_arg,int AH_arg,int HS,int RF_arg,float scale,
