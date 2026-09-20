@@ -1,0 +1,166 @@
+{
+  "protocol": {
+    "layers": [
+      0,
+      5,
+      10,
+      15,
+      20,
+      25,
+      30,
+      35
+    ],
+    "prompts": 3,
+    "steps": 4,
+    "numerical_heads": [
+      0,
+      10,
+      20,
+      30
+    ],
+    "numerical_cases": 384,
+    "speed_heads": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      39
+    ],
+    "speed_qkv_groups": 96,
+    "speed_repetitions": 3,
+    "shape": [
+      1,
+      75600,
+      40,
+      128
+    ],
+    "dtype": "bfloat16",
+    "speed_trajectory": "StepDistill; not native 50-step video timing",
+    "source_policy": "Exact bytes from validated native runs",
+    "training_free": true
+  },
+  "methods": [
+    {
+      "method": "Q90K80C12",
+      "source_sha256": {
+        "q90k80c12_kernel.py": "ea966bf8209e82b9c88deed7cc529e215f1e125123b7ac21f8469ba556a7ff17",
+        "q90k80c12_merge.cu": "11db655cc4b6fdaa15585f0cc299e73669c47509ced697bc4a2a6c5572a846fa"
+      },
+      "numerical": {
+        "cases": 384,
+        "mean_relative_l2_vs_operator": 0.0016974282149628077,
+        "max_relative_l2_vs_operator": 0.003058725968003273,
+        "mean_l2_to_dense": 0.0828469762915726,
+        "reference_mean_l2_to_dense": 0.08281786392277961,
+        "mean_seed_changed_fraction": 5.588011911565142e-06,
+        "pooled_l2_to_dense": 0.08320300401979962
+      },
+      "invariants": {
+        "rf0_reused": true,
+        "exact_distinct_capacity": 12,
+        "two_intersections_forced": true,
+        "empty_cluster_bias_negative_infinity": true,
+        "constant_value_preserved": true
+      },
+      "speed": {
+        "mean_attention_ms": 243.54426209131876,
+        "dense_mean_attention_ms": 325.3499174118042,
+        "speedup_vs_sdpa": 1.3358964593048461
+      },
+      "gpu": "NVIDIA H200"
+    },
+    {
+      "method": "Q90K80C14",
+      "source_sha256": {
+        "q90k80c14_kernel.py": "b0bcc45e03991276455ffe39a441b1e19acb568b9b73761deae4597b5b934625",
+        "q90k80c14_merge.cu": "d6ef8e94bff30ae27e0cb494d89aee5b4e4f8da00794e1263304feaf2ea34063"
+      },
+      "numerical": {
+        "cases": 384,
+        "mean_relative_l2_vs_operator": 0.001696721916232491,
+        "max_relative_l2_vs_operator": 0.003020587842911482,
+        "mean_l2_to_dense": 0.07570012510344289,
+        "reference_mean_l2_to_dense": 0.07566920407922832,
+        "mean_seed_changed_fraction": 7.02055511207315e-06,
+        "pooled_l2_to_dense": 0.07645236004728567
+      },
+      "invariants": {
+        "rf0_reused": true,
+        "exact_distinct_capacity": 14,
+        "two_intersections_forced": true,
+        "empty_cluster_bias_negative_infinity": true,
+        "constant_value_preserved": true
+      },
+      "speed": {
+        "mean_attention_ms": 267.8998851776123,
+        "dense_mean_attention_ms": 333.41100109948053,
+        "speedup_vs_sdpa": 1.2445358118703025
+      },
+      "gpu": "NVIDIA H200"
+    },
+    {
+      "method": "Q90K80C16",
+      "source_sha256": {
+        "q90k80c16_kernel.py": "56bb66ca3dfe615b0515f84157b2e915b877c8258355f9059aaeac3ecc88d8fb",
+        "q90k80c16_merge.cu": "92e7c208daee83acd7d36c58fc9901e09ad97a8c63250f88b0d77a3424a4b546"
+      },
+      "numerical": {
+        "cases": 384,
+        "mean_relative_l2_vs_operator": 0.0016984444061260244,
+        "max_relative_l2_vs_operator": 0.0030548875220119953,
+        "mean_l2_to_dense": 0.0700540254971808,
+        "reference_mean_l2_to_dense": 0.07001191093938057,
+        "mean_seed_changed_fraction": 8.61166218157905e-06,
+        "pooled_l2_to_dense": 0.07085222015582024
+      },
+      "invariants": {
+        "rf0_reused": true,
+        "exact_distinct_capacity": 16,
+        "two_intersections_forced": true,
+        "empty_cluster_bias_negative_infinity": true,
+        "constant_value_preserved": true
+      },
+      "speed": {
+        "mean_attention_ms": 256.9611627260844,
+        "dense_mean_attention_ms": 329.18757809533014,
+        "speedup_vs_sdpa": 1.2810791117342417
+      },
+      "gpu": "NVIDIA H200"
+    }
+  ]
+}
