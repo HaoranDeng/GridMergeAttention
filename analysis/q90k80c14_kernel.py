@@ -12,17 +12,37 @@ import triton as tr
 import triton.language as tl
 from triton.language.extra.cuda import libdevice as lib
 
-@functools.lru_cache(maxsize=8)
-def native_merge(t,h,ah):
+def _native(stem,flags):
+    """Build one of the native CUDA translation units beside this module.
+
+    The merge and route kernels build TMA descriptors with the driver API, so
+    every unit links libcuda. Each build is keyed by source bytes and flags."""
     from torch.utils.cpp_extension import load
     ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libstdc++.so.6',mode=ctypes.RTLD_GLOBAL)
     os.environ.setdefault('TORCH_CUDA_ARCH_LIST','9.0a');os.environ.setdefault('MAX_JOBS','2')
-    os.environ.setdefault('TORCH_EXTENSIONS_DIR','/local2/denghaoran/GridMergeAttention/q90c14_cuda_extensions_20260920')
-    source=Path(__file__).with_name('q90k80c14_merge.cu')
-    flags=['-O3','--expt-relaxed-constexpr','-lineinfo',f'-DAXIS_OUTER={t}','-DAXIS_ROWS=45','-DAXIS_COLS=80',f'-DAXIS_HEADS={h}',f'-DAXIS_ACTIVE_HEADS={ah}']
+    os.environ.setdefault('TORCH_EXTENSIONS_DIR','/local2/denghaoran/GridMergeAttention/q90c14_cuda_extensions_20260921')
+    source=Path(__file__).with_name(f'q90k80c14_{stem}.cu')
+    flags=['-O3','--expt-relaxed-constexpr','-lineinfo']+flags
     digest=hashlib.sha256(source.read_bytes()+' '.join(flags).encode()).hexdigest()[:16]
     cutlass=Path(torch.__file__).resolve().parent.parent/'flashinfer/data/cutlass/include'
-    return load(name='q90c14_merge_'+digest,sources=[str(source)],extra_include_paths=[str(cutlass)],extra_cuda_cflags=flags,verbose=False)
+    return load(name=f'q90c14_{stem}_'+digest,sources=[str(source)],extra_include_paths=[str(cutlass)],extra_cuda_cflags=flags,extra_ldflags=['-lcuda'],verbose=False)
+
+def _shape_flags(t,h,ah):
+    return [f'-DAXIS_OUTER={t}','-DAXIS_ROWS=45','-DAXIS_COLS=80',f'-DAXIS_HEADS={h}',f'-DAXIS_ACTIVE_HEADS={ah}']
+
+@functools.lru_cache(maxsize=8)
+def native_merge(t,h,ah):
+    # AXIS_FAST_MATH selects the kernel's approximate lg2/rcp path (final-output
+    # rel-L2 shift 6e-4 on random QKV, well inside the operator's own tolerance).
+    return _native('merge',_shape_flags(t,h,ah)+['-DAXIS_FAST_MATH=1'])
+
+@functools.lru_cache(maxsize=8)
+def native_route(t,h,ah):
+    return _native('route',_shape_flags(t,h,ah))
+
+@functools.lru_cache(maxsize=8)
+def native_select(t,h):
+    return _native('select',[f'-DAXIS_OUTER={t}',f'-DAXIS_HEADS={h}'])
 
 
 def candidate_table():
@@ -132,12 +152,20 @@ def _route(Q,MK,MV,Bias,O,T:tl.constexpr,H:tl.constexpr,AH:tl.constexpr,HS,
 
 
 class Q90K80C14:
-    def __init__(self,head_chunk=4,merge_groups=4,merge_loop=1,route_m=64,route_n=64,merge_warps=4,route_warps=4,merge_backend='triton',native_tiles=105):
-        self.hc=head_chunk;self.bg=merge_groups;self.kl=merge_loop;self.bm=route_m;self.bn=route_n;self.mw=merge_warps;self.rw=route_warps
+    """merge_backend='cuda' runs the native select, merge and route kernels;
+    select_backend/route_backend (None = follow merge_backend) allow mixing
+    the Triton kernels back in. The Triton route defaults (route_m=128,
+    route_warps=8, route_stages=3) are the fastest measured Triton configuration."""
+    def __init__(self,head_chunk=4,merge_groups=4,merge_loop=1,route_m=128,route_n=64,merge_warps=4,route_warps=8,merge_backend='triton',native_tiles=35,
+                 select_backend=None,route_backend=None,route_stages=3):
+        self.hc=head_chunk;self.bg=merge_groups;self.kl=merge_loop;self.bm=route_m;self.bn=route_n;self.mw=merge_warps;self.rw=route_warps;self.rs=route_stages
         assert 40%merge_groups==0 and merge_groups in (1,2,4,8)
         self.cache=None
         assert merge_backend in ('triton','cuda')
         self.backend=merge_backend;self.nt=native_tiles
+        self.select_backend=merge_backend if select_backend is None else select_backend
+        self.route_backend=merge_backend if route_backend is None else route_backend
+        assert self.select_backend in ('triton','cuda') and self.route_backend in ('triton','cuda')
 
     def prepare(self,q):
         b,n,h,d=q.shape;t=n//3600
@@ -161,13 +189,15 @@ class Q90K80C14:
         kp=k.view(t*45,80,h,128).permute(2,0,1,3).contiguous()
         vp=v.view(t*45,80,h,128).permute(2,0,1,3).contiguous()
         out=torch.empty_like(qp)
-        _select[(t*45,10,h)](qp,kp,self.table,self.seeds,t,h,4,num_warps=4,enable_fp_fusion=False)
+        if self.select_backend=='cuda':native_select(t,h).run(qp,kp,self.table,self.seeds)
+        else:_select[(t*45,10,h)](qp,kp,self.table,self.seeds,t,h,4,num_warps=4,enable_fp_fusion=False)
         if self.backend=='cuda':
             native=native_merge(t,h,min(h,self.hc));packed=torch.empty_like(qp);native.pack(qp,packed)
         for hs in range(0,h,self.hc):
             ah=min(self.hc,h-hs)
             if self.backend=='cuda':native_merge(t,h,ah).run(packed,kp,vp,self.seeds,self.mk,self.mv,self.bias,hs,ah,self.nt)
             else:_merge[(tr.cdiv(t*45,self.kl),t*tr.cdiv(40,self.bg),ah)](qp,kp,vp,self.seeds,self.mk,self.mv,self.bias,t,h,ah,hs,self.bg,self.kl,num_warps=self.mw,num_stages=2)
-            _route[(t*40,ah,tr.cdiv(90,self.bm))](qp,self.mk,self.mv,self.bias,out,t,h,ah,hs,self.bm,self.bn,num_warps=self.rw,num_stages=2)
+            if self.route_backend=='cuda':native_route(t,h,ah).run(qp,self.mk,self.mv,self.bias,out,hs,ah)
+            else:_route[(t*40,ah,tr.cdiv(90,self.bm))](qp,self.mk,self.mv,self.bias,out,t,h,ah,hs,self.bm,self.bn,num_warps=self.rw,num_stages=self.rs)
         result=out.view(h,t,40,2,45,128).permute(1,4,2,3,0,5).reshape(1,t*3600,h,128).contiguous()
         return (result,self.seeds) if return_debug else result

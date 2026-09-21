@@ -1,4 +1,19 @@
 // Q90/K80 exact C14. Hopper WGMMA; 14 representatives, two columns.
+// 2026-09-21 optimization: mk/mv leave through TMA tensor stores from a
+// 128B-swizzled staging buffer (the store drains asynchronously while the CTA
+// computes the next tile), the next tile's query fragments are prefetched into
+// the dead qreg registers right after the score WGMMA consumes them, and the
+// launch bound asks for 3 CTAs/SM (164 registers, no spills) instead of the
+// 128-register 4-CTA configuration, which spills and measures slower here.
+#ifndef MERGE_STAGE_BUFS
+#define MERGE_STAGE_BUFS 1
+#endif
+#ifndef MERGE_MINBLOCKS
+#define MERGE_MINBLOCKS 3
+#endif
+#ifndef MERGE_PREFETCH_Q
+#define MERGE_PREFETCH_Q 1
+#endif
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAException.h>
@@ -48,7 +63,10 @@ __device__ __forceinline__ int boff(int k,int n) {
 }
 __device__ __forceinline__ int col_for_row(int row) {return row/16;}
 __device__ __forceinline__ int seed_for_row(int row) {return row%16;}
-__device__ __forceinline__ int storeoff(int row,int d) {return row*128+(d^((row&7)*8));}
+// Staging layout matches a TMA SWIZZLE_128B box {64 d, rows}: two d-halves of
+// 64 rows x 128 B, 16-byte chunk index XOR (row & 7). Conflict-free for the
+// accumulator quad stores and 1024-byte aligned per 16-row column piece.
+__device__ __forceinline__ int storeoff(int row,int d) {return (d>>6)*4096+row*64+((d&63)^((row&7)*8));}
 __device__ __forceinline__ uint32_t load_query(const bf16* p,uint64_t policy) {
   uint32_t value;
   asm volatile("ld.global.L1::evict_last.L2::cache_hint.b32 %0,[%1],%2;":"=r"(value):"l"(p),"l"(policy));
@@ -108,11 +126,11 @@ __device__ __forceinline__ float dot80(float (&p)[KC/4],float (&x)[KC/4]){
   return sum4(sum);
 }
 template<int TILES,int TOTAL_HEADS>
-__global__ __launch_bounds__(128,2) void merge_kernel(
+__global__ __launch_bounds__(128,MERGE_MINBLOCKS) void merge_kernel(
  const bf16* __restrict__ q,const bf16* __restrict__ k,const bf16* __restrict__ v,
  const uint8_t* __restrict__ seeds,bf16* __restrict__ mk,bf16* __restrict__ mv,
  float* __restrict__ bias,int Q_arg,int KO_arg,int R_arg,int C_arg,int H_arg,int AH_arg,int HS,int RF_arg,float scale,
- int tile_count) {
+ int tile_count,const __grid_constant__ CUtensorMap map_k,const __grid_constant__ CUtensorMap map_v) {
   constexpr float* debug_scores=nullptr;
   constexpr int stop_after=0;
   constexpr int Q=AXIS_OUTER,KO=Q,R=AXIS_ROWS,C=AXIS_COLS,H=TOTAL_HEADS,AH=AXIS_ACTIVE_HEADS,RF=Q;
@@ -139,17 +157,18 @@ __global__ __launch_bounds__(128,2) void merge_kernel(
   // the issue cost.
   const uint64_t score_base=desc(sk,16,1024);
   const uint64_t merge_base_k=desc(sk,KC*128,1024),merge_base_v=desc(sv,KC*128,1024);
-  int total=Q*10,start=blockIdx.z*tile_count;
-  for(int tile=start;tile<min(start+tile_count,total);++tile) {
-    int qo=tile%Q,cb=tile/Q,rf=0;
-    int row0=warp*16+seed,col0=cb*4+col_for_row(row0);
+  int total=Q*10,start=blockIdx.z*tile_count,stop=min(start+tile_count,total);
+  const int row0=warp*16+seed;
+  uint32_t qreg[32];
+  auto gather=[&](int tile) {
+    int qo=tile%Q,cb=tile/Q;
+    int col0=cb*4+col_for_row(row0);
     int si0=((gh*40+col0)*(KO*R)+kb)*14+seed_for_row(row0);
     int col1=cb*4+col_for_row(row0+8);
     int si1=((gh*40+col1)*(KO*R)+kb)*14+seed_for_row(row0+8);
     int sr0=seeds[si0],sr1=seed_for_row(row0+8)<14?seeds[si1]:0;
     int qi0=(((gh*Q+qo)*40+col0)*90+sr0)*128+(lane&3)*8;
     int qi1=(((gh*Q+qo)*40+col1)*90+sr1)*128+(lane&3)*8;
-    uint32_t qreg[32];
     #pragma unroll
     for(int d=0;d<128;d+=32) {
       uint4 a=seed_for_row(row0)<14?query_vector(q+qi0+d,cache_last,lane):make_uint4(0,0,0,0),b=seed_for_row(row0+8)<14?query_vector(q+qi1+d,cache_last,lane):make_uint4(0,0,0,0);
@@ -157,6 +176,11 @@ __global__ __launch_bounds__(128,2) void merge_kernel(
       qreg[i]=a.x;qreg[i+1]=b.x;qreg[i+2]=a.y;qreg[i+3]=b.y;
       qreg[i+4]=a.z;qreg[i+5]=b.z;qreg[i+6]=a.w;qreg[i+7]=b.w;
     }
+  };
+  if(start<stop) gather(start);
+  for(int tile=start;tile<stop;++tile) {
+    int qo=tile%Q,cb=tile/Q,rf=0;
+    if(!MERGE_PREFETCH_Q && tile>start) gather(tile);
     #pragma unroll
     for(int i=0;i<32;++i) asm volatile("" : "+r"(qreg[i]) :: "memory");
     float s[KC/2];
@@ -169,6 +193,7 @@ __global__ __launch_bounds__(128,2) void merge_kernel(
     }
     asm volatile("wgmma.commit_group.sync.aligned;":::"memory");
     asm volatile("wgmma.wait_group.sync.aligned 0;":::"memory");
+    if(MERGE_PREFETCH_Q && tile+1<stop) gather(tile+1);
     #pragma unroll
     for(int i=0;i<KC/2;++i) {
       int kc=2*(lane&3)+8*(i>>2)+(i&1);
@@ -279,22 +304,42 @@ __global__ __launch_bounds__(128,2) void merge_kernel(
       asm volatile("wgmma.commit_group.sync.aligned;":::"memory");
       asm volatile("wgmma.wait_group.sync.aligned 0;":::"memory");
       if(stop_after==3) continue;
+      bf16* stage=temp+(MERGE_STAGE_BUFS==2?kind*64*128:0);
+      // The staging buffer is free once the bulk store that last read it has
+      // finished reading shared memory.
+      if(tid==0) {
+        if(MERGE_STAGE_BUFS==2) asm volatile("cp.async.bulk.wait_group.read 1;":::"memory");
+        else asm volatile("cp.async.bulk.wait_group.read 0;":::"memory");
+      }
+      __syncthreads();
       #pragma unroll
       for(int i=0;i<64;i+=2) {
         int row=warp*16+seed+8*((i&3)>>1);
         int d=2*(lane&3)+8*(i>>2);
-        *reinterpret_cast<__nv_bfloat162*>(temp+storeoff(row,d))=__floats2bfloat162_rn(acc[i],acc[i+1]);
+        *reinterpret_cast<__nv_bfloat162*>(stage+storeoff(row,d))=__floats2bfloat162_rn(acc[i],acc[i+1]);
       }
+      asm volatile("fence.proxy.async.shared::cta;":::"memory");
       __syncthreads();
-      bf16* dst=kind==0?mk:mv;
-      for(int vec=tid;vec<64*16;vec+=128) {
-        int row=vec/16,d=(vec%16)*8,col=cb*4+col_for_row(row),c=seed_for_row(row);
-        int64_t oi=((((int64_t(head)*Q+qo)*40+col)*(KO*R)+kb)*14+c)*128+d;
-        if(c<14)store_output(dst+oi,*reinterpret_cast<const uint4*>(temp+storeoff(row,d)),cache_first);
+      if(tid==0) {
+        const CUtensorMap* map=kind==0?&map_k:&map_v;
+        #pragma unroll
+        for(int col4=0;col4<4;++col4) {
+          int col=cb*4+col4;
+          int row=int(((int64_t(head)*Q+qo)*40+col)*(KO*R)+kb)*14;
+          #pragma unroll
+          for(int half=0;half<2;++half) {
+            uint32_t sp=__cvta_generic_to_shared(stage+half*4096+col4*16*64);
+            asm volatile("cp.async.bulk.tensor.2d.global.shared::cta.bulk_group [%0,{%1,%2}],[%3];"::"l"(map),"r"(half*64),"r"(row),"r"(sp):"memory");
+          }
+        }
+        asm volatile("cp.async.bulk.commit_group;":::"memory");
       }
-      __syncthreads();
     }
   }
+  // Wait for the bulk stores to complete (not just their shared-memory reads)
+  // so the merged tiles are visible to the route kernel that follows on the
+  // stream; waiting only on .read left a small fraction of tiles stale.
+  if(tid==0) asm volatile("cp.async.bulk.wait_group 0;":::"memory");
 }
 // Pack each 32-BF16 dimension slice into the exact four-lane WGMMA
 // register-fragment order. This is a lossless permutation of uint32 words.
@@ -326,18 +371,28 @@ void run(torch::Tensor q,torch::Tensor k,torch::Tensor v,torch::Tensor seeds,
  TORCH_CHECK(q.numel()==int64_t(AXIS_HEADS)*AXIS_OUTER*40*90*128,"Compiled shape mismatch");
  TORCH_CHECK(ah==AXIS_ACTIVE_HEADS && hs>=0 && hs+ah<=AXIS_HEADS && tiles>0,"Head/tile bounds");
  TORCH_CHECK(seeds.scalar_type()==at::kByte && seeds.numel()==int64_t(AXIS_HEADS)*40*AXIS_OUTER*45*14,"Exact C14 seed shape");
- constexpr int bytes=(KC*128*2+64*128)*2;
+ constexpr int bytes=(KC*128*2+MERGE_STAGE_BUFS*64*128)*2;
+ TORCH_CHECK(mk.is_contiguous() && mv.is_contiguous() && mk.numel()==int64_t(ah)*AXIS_OUTER*40*AXIS_OUTER*45*14*128 && mv.numel()==mk.numel(),"Workspace shape");
+ CUtensorMap map_k{},map_v{};
+ uint64_t rows=uint64_t(ah)*AXIS_OUTER*40*AXIS_OUTER*45*14;
+ uint64_t dims[2]={128,rows},strides[1]={256};
+ uint32_t box[2]={64,14},element_strides[2]={1,1};
+ auto encode=[&](CUtensorMap& map,torch::Tensor x) {
+  auto status=cuTensorMapEncodeTiled(&map,CU_TENSOR_MAP_DATA_TYPE_BFLOAT16,2,x.data_ptr(),dims,strides,box,element_strides,CU_TENSOR_MAP_INTERLEAVE_NONE,CU_TENSOR_MAP_SWIZZLE_128B,CU_TENSOR_MAP_L2_PROMOTION_NONE,CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE);
+  TORCH_CHECK(status==CUDA_SUCCESS,"Merge TMA encode failed: ",int(status));
+ };
+ encode(map_k,mk);encode(map_v,mv);
  C10_CUDA_CHECK(cudaFuncSetAttribute(merge_kernel<21,AXIS_HEADS>,cudaFuncAttributeMaxDynamicSharedMemorySize,bytes));
  dim3 grid(AXIS_OUTER*45,ah,(AXIS_OUTER*10+tiles-1)/tiles);
  merge_kernel<21,AXIS_HEADS><<<grid,128,bytes,at::cuda::getCurrentCUDAStream()>>>(
    (const bf16*)q.data_ptr(),(const bf16*)k.data_ptr(),(const bf16*)v.data_ptr(),seeds.data_ptr<uint8_t>(),
    (bf16*)mk.data_ptr(),(bf16*)mv.data_ptr(),bias.data_ptr<float>(),0,0,0,0,0,0,hs,0,
-   float(0.08838834764831845*1.4426950408889634),tiles);
+   float(0.08838834764831845*1.4426950408889634),tiles,map_k,map_v);
  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 std::vector<int> resources() {
  cudaFuncAttributes a{};C10_CUDA_CHECK(cudaFuncGetAttributes(&a,merge_kernel<21,AXIS_HEADS>));
- int active=0;constexpr int bytes=(KC*128*2+64*128)*2;
+ int active=0;constexpr int bytes=(KC*128*2+MERGE_STAGE_BUFS*64*128)*2;
  C10_CUDA_CHECK(cudaFuncSetAttribute(merge_kernel<21,AXIS_HEADS>,cudaFuncAttributeMaxDynamicSharedMemorySize,bytes));
  C10_CUDA_CHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&active,merge_kernel<21,AXIS_HEADS>,128,bytes));
  return {a.numRegs,int(a.localSizeBytes),bytes,active};
