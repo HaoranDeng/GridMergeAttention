@@ -83,13 +83,19 @@ against libcuda for TMA descriptors). The operator definition is unchanged:
 same RF0 candidate table, same fp64 Fisher selection, same exact-14 merge and
 full compressed route.
 
-- Selector: one warp per query group in native CUDA, fp64 greedy loop with the
-  reference formulas. Seeds are bitwise identical to the Triton selector on
-  the synthetic check below.
+- Selector: one warp per query group in native CUDA. The greedy Fisher loop
+  runs in FP32 (approved 2026-09-21; the C4 selector precedent) with a
+  REDUX-based argmax and balanced register sums; on random QKV 1.4e-6 of the
+  seed entries differ from the fp64 Triton selector. The previous fp64 native
+  selector (seeds bitwise identical, 19.8 ms) is in the git history.
 - Merge: the validated WGMMA kernel plus `AXIS_FAST_MATH` (approximate lg2/rcp),
   TMA tensor stores for mk/mv from a 128B-swizzled staging buffer, next-tile
   query prefetch, and a 3 CTA/SM launch bound (no register spills).
-  `native_tiles` default 105 -> 35.
+  `native_tiles` default 105 -> 35. `merge_fused_argmax=True` (opt-in, off by
+  default) enables the C8-style fused 32-bit ownership argmax: merge -4.6 ms,
+  but keys whose two best representatives score within 16 ulp of each other
+  may change owner (about 1e-3 of keys on random QKV; final-output rel-L2 to
+  the old build moves from 2.49e-3 to 2.55e-3).
 - Route: transposed formulation, S^T = K_tile . Q^T with WGMMA m64n96k16 (96
   query rows instead of 128), column softmax through shared memory, P^T fed to
   the PV WGMMA from shared memory, two consumer warpgroups on alternate key
@@ -99,12 +105,13 @@ full compressed route.
   `route_m=128, route_warps=8, route_stages=3` (fastest measured Triton config).
 
 Synthetic benchmark (random Gaussian QKV, [1, 75600, 40, 128] BF16, one H200,
-40 alternating full calls, mean): 283.4 ms -> 192.0 ms. Stage times:
-select 31.4 -> 19.9, merge 129.9 -> 97.4, route 118.9 -> 68.9 ms.
-Final output vs the pre-optimization build: rel-L2 2.5e-3 (bf16 rounding of
-the route accumulation order; fast-math alone is 6.5e-4), max-abs 3.8e-6,
-seeds identical. 100 consecutive pipeline calls are bitwise identical and 300
-back-to-back merge/route launches ran without fault.
+40 full calls, mean): 283.4 ms -> **182.0 ms** (177.9 ms with
+`merge_fused_argmax=True`). Stage times: select 31.4 -> 11.2, merge
+129.9 -> 97.4 (92.6 fused), route 118.9 -> 68.9 ms. Final output vs the
+pre-optimization build: rel-L2 2.5e-3 (bf16 rounding of the route accumulation
+order; fast-math alone is 6.5e-4), max-abs 3.8e-6. Consecutive pipeline calls
+are bitwise identical and hundreds of back-to-back merge/route launches ran
+without fault.
 
 Not done: the 384-case FP32-dense / StepDistill protocol above was not rerun,
 so the C14 rows of `q90k80_validation.json` still describe the earlier build.

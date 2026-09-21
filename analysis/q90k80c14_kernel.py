@@ -31,10 +31,12 @@ def _shape_flags(t,h,ah):
     return [f'-DAXIS_OUTER={t}','-DAXIS_ROWS=45','-DAXIS_COLS=80',f'-DAXIS_HEADS={h}',f'-DAXIS_ACTIVE_HEADS={ah}']
 
 @functools.lru_cache(maxsize=8)
-def native_merge(t,h,ah):
+def native_merge(t,h,ah,fused_argmax=False):
     # AXIS_FAST_MATH selects the kernel's approximate lg2/rcp path (final-output
     # rel-L2 shift 6e-4 on random QKV, well inside the operator's own tolerance).
-    return _native('merge',_shape_flags(t,h,ah)+['-DAXIS_FAST_MATH=1'])
+    # fused_argmax enables the C8-style fused 32-bit ownership argmax (merge
+    # -4.6 ms, ~1e-3 of key ownerships reassigned on random QKV; opt-in).
+    return _native('merge',_shape_flags(t,h,ah)+['-DAXIS_FAST_MATH=1',f'-DMERGE_FUSED_ARGMAX={int(fused_argmax)}'])
 
 @functools.lru_cache(maxsize=8)
 def native_route(t,h,ah):
@@ -42,6 +44,8 @@ def native_route(t,h,ah):
 
 @functools.lru_cache(maxsize=8)
 def native_select(t,h):
+    # FP32 Fisher selection (user-approved 2026-09-21): seeds differ from the
+    # fp64 Triton selector on ~1.4e-6 of entries on random QKV.
     return _native('select',[f'-DAXIS_OUTER={t}',f'-DAXIS_HEADS={h}'])
 
 
@@ -157,8 +161,9 @@ class Q90K80C14:
     the Triton kernels back in. The Triton route defaults (route_m=128,
     route_warps=8, route_stages=3) are the fastest measured Triton configuration."""
     def __init__(self,head_chunk=4,merge_groups=4,merge_loop=1,route_m=128,route_n=64,merge_warps=4,route_warps=8,merge_backend='triton',native_tiles=35,
-                 select_backend=None,route_backend=None,route_stages=3):
+                 select_backend=None,route_backend=None,route_stages=3,merge_fused_argmax=False):
         self.hc=head_chunk;self.bg=merge_groups;self.kl=merge_loop;self.bm=route_m;self.bn=route_n;self.mw=merge_warps;self.rw=route_warps;self.rs=route_stages
+        self.fused=bool(merge_fused_argmax)
         assert 40%merge_groups==0 and merge_groups in (1,2,4,8)
         self.cache=None
         assert merge_backend in ('triton','cuda')
@@ -192,10 +197,10 @@ class Q90K80C14:
         if self.select_backend=='cuda':native_select(t,h).run(qp,kp,self.table,self.seeds)
         else:_select[(t*45,10,h)](qp,kp,self.table,self.seeds,t,h,4,num_warps=4,enable_fp_fusion=False)
         if self.backend=='cuda':
-            native=native_merge(t,h,min(h,self.hc));packed=torch.empty_like(qp);native.pack(qp,packed)
+            native=native_merge(t,h,min(h,self.hc),self.fused);packed=torch.empty_like(qp);native.pack(qp,packed)
         for hs in range(0,h,self.hc):
             ah=min(self.hc,h-hs)
-            if self.backend=='cuda':native_merge(t,h,ah).run(packed,kp,vp,self.seeds,self.mk,self.mv,self.bias,hs,ah,self.nt)
+            if self.backend=='cuda':native_merge(t,h,ah,self.fused).run(packed,kp,vp,self.seeds,self.mk,self.mv,self.bias,hs,ah,self.nt)
             else:_merge[(tr.cdiv(t*45,self.kl),t*tr.cdiv(40,self.bg),ah)](qp,kp,vp,self.seeds,self.mk,self.mv,self.bias,t,h,ah,hs,self.bg,self.kl,num_warps=self.mw,num_stages=2)
             if self.route_backend=='cuda':native_route(t,h,ah).run(qp,self.mk,self.mv,self.bias,out,hs,ah)
             else:_route[(t*40,ah,tr.cdiv(90,self.bm))](qp,self.mk,self.mv,self.bias,out,t,h,ah,hs,self.bm,self.bn,num_warps=self.rw,num_stages=self.rs)

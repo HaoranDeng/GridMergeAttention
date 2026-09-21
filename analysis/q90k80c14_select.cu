@@ -1,9 +1,11 @@
-// Q90K80C14 native RF0 selector. One warp per (query group, key group, head):
-// lane c owns candidate c of the 32-candidate pool. Scores z (32 x 16 probes)
-// come from bf16 mma.sync with fp32 accumulation, are scaled in fp32 and then
-// promoted to fp64 exactly like the Triton reference; the 13-step greedy
-// Fisher residual selection runs in fp64 with the same formulas (no FMA
-// contraction, IEEE division/sqrt, libdevice exp).
+// Q90K80C14 native RF0 selector, FP32 tier (ported from the C4 v9c selector
+// lessons): the greedy Fisher residual loop runs in fp32, the cross-lane
+// argmax is one REDUX.MAX over the non-negative score bit patterns plus one
+// REDUX.MIN for the leftmost index, sums use balanced register trees, the
+// picked candidate's residual is broadcast with SHFL.IDX, and the basis norm
+// reuses the winning score instead of recomputing it. One warp per
+// (query group, key group, head); lane c owns candidate c. Scores z come from
+// bf16 mma.sync with fp32 accumulation exactly as before.
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAException.h>
@@ -14,32 +16,44 @@
 using bf16=__nv_bfloat16;
 constexpr int T=AXIS_OUTER,H=AXIS_HEADS,GROUPS=T*40,KG=T*45,C=14,NPROBE=16,NCAND=32;
 constexpr int KS_STRIDE=136,ZS_STRIDE=17;
+#ifndef SEL_MINBLOCKS
+#define SEL_MINBLOCKS 4
+#endif
 
 __device__ __forceinline__ void mma_bf16(float (&c)[4],const uint32_t (&a)[4],const uint32_t (&b)[2]) {
   asm volatile("mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 {%0,%1,%2,%3},{%4,%5,%6,%7},{%8,%9},{%0,%1,%2,%3};"
     :"+f"(c[0]),"+f"(c[1]),"+f"(c[2]),"+f"(c[3]):"r"(a[0]),"r"(a[1]),"r"(a[2]),"r"(a[3]),"r"(b[0]),"r"(b[1]));
 }
-__device__ __forceinline__ double shfl64(double v,int src) {
-  return __shfl_sync(0xffffffff,v,src);
+template<int N>
+__device__ __forceinline__ float sum_registers(float (&v)[N]) {
+  #pragma unroll
+  for(int d=N/2;d;d/=2){
+    #pragma unroll
+    for(int j=0;j<d;++j)v[j]=__fadd_rn(v[j],v[j+d]);
+  }
+  return v[0];
+}
+__device__ __forceinline__ float dot16(const float (&a)[16],const float (&b)[16]) {
+  float t[16];
+  #pragma unroll
+  for(int j=0;j<16;++j) t[j]=__fmul_rn(a[j],b[j]);
+  return sum_registers(t);
 }
 
-__global__ __launch_bounds__(128) void select_kernel(const bf16* __restrict__ q,const bf16* __restrict__ k,
+__global__ __launch_bounds__(128,SEL_MINBLOCKS) void select_kernel(const bf16* __restrict__ q,const bf16* __restrict__ k,
  const int* __restrict__ table,uint8_t* __restrict__ seeds) {
   __shared__ __align__(16) bf16 ks[NPROBE*KS_STRIDE];
   __shared__ int cids[NCAND];
   __shared__ __align__(16) float zs[4][NCAND*ZS_STRIDE];
-  __shared__ __align__(16) double bcast[4][NPROBE];
   const int kg=blockIdx.x,gb=blockIdx.y,head=blockIdx.z,row=kg%45;
   const int tid=threadIdx.x,lane=tid&31,warp=tid>>5,g=gb*4+warp;
   if(tid<NCAND) cids[tid]=table[row*NCAND+tid];
-  // Probe keys: 16 rows (0,5,...,75) of key group kg.
   for(int vec=tid;vec<NPROBE*16;vec+=128) {
     int p=vec/16,d=(vec%16)*8;
     uint4 value=*reinterpret_cast<const uint4*>(k+((int64_t(head)*KG+kg)*80+p*5)*128+d);
     *reinterpret_cast<uint4*>(ks+p*KS_STRIDE+d)=value;
   }
   __syncthreads();
-  // z = qs . ks^T for this warp's group: 32 candidate rows x 16 probes.
   float acc[2][2][4];
   #pragma unroll
   for(int mt=0;mt<2;++mt)
@@ -74,7 +88,6 @@ __global__ __launch_bounds__(128) void select_kernel(const bf16* __restrict__ q,
       mma_bf16(acc[mt][1],a,b[1]);
     }
   }
-  // Transpose through shared memory so lane c holds z[c][0..15].
   float* wz=zs[warp];
   #pragma unroll
   for(int mt=0;mt<2;++mt)
@@ -86,77 +99,69 @@ __global__ __launch_bounds__(128) void select_kernel(const bf16* __restrict__ q,
     }
   __syncwarp();
   const float scale=float(0.08838834764831845);
-  double z[NPROBE];
+  float z[NPROBE];
   #pragma unroll
-  for(int j=0;j<NPROBE;++j) z[j]=double(__fmul_rn(wz[lane*ZS_STRIDE+j],scale));
+  for(int j=0;j<NPROBE;++j) z[j]=__fmul_rn(wz[lane*ZS_STRIDE+j],scale);
   const int cid=cids[lane];
-  // Anchor row (candidate == row) and its softmax rho over probes.
   const int anchor=__ffs(__ballot_sync(0xffffffff,cid==row))-1;
-  double* wb=bcast[warp];
-  double za[NPROBE];
-  #pragma unroll
-  for(int j=0;j<NPROBE;++j) za[j]=shfl64(z[j],anchor);
-  double mx=za[0];
-  #pragma unroll
-  for(int j=1;j<NPROBE;++j) mx=fmax(mx,za[j]);
-  double ex=0.;
-  if(lane<NPROBE) ex=exp(__dsub_rn(za[lane],mx));
-  double exsum=ex;
-  #pragma unroll
-  for(int off=8;off>0;off>>=1) exsum=__dadd_rn(exsum,__shfl_xor_sync(0xffffffff,exsum,off,16));
-  double rho=__ddiv_rn(ex,exsum);
-  if(lane<NPROBE) wb[lane]=rho;
-  __syncwarp();
-  double rhos[NPROBE],srho[NPROBE];
-  #pragma unroll
-  for(int j=0;j<NPROBE;++j) {rhos[j]=wb[j];srho[j]=sqrt(rhos[j]);}
-  __syncwarp();
-  double delta[NPROBE],mean=0.;
-  #pragma unroll
-  for(int j=0;j<NPROBE;++j) {delta[j]=__dsub_rn(z[j],za[j]);mean=__dadd_rn(mean,__dmul_rn(delta[j],rhos[j]));}
-  double residual[NPROBE];
-  #pragma unroll
-  for(int j=0;j<NPROBE;++j) residual[j]=__dmul_rn(__dsub_rn(delta[j],mean),srho[j]);
-  bool used=cid==row;
-  uint8_t* out=seeds+(int64_t(head*40+g)*KG+kg)*C;
-  if(lane==0) out[0]=uint8_t(row);
   const int second=__ffs(__ballot_sync(0xffffffff,cid==row+45))-1;
+  // Anchor row softmax over probes: lanes 0..15 each own one probe.
+  float za[NPROBE];
+  #pragma unroll
+  for(int j=0;j<NPROBE;++j) za[j]=__shfl_sync(0xffffffff,z[j],anchor);
+  float mx=za[0];
+  #pragma unroll
+  for(int j=1;j<NPROBE;++j) mx=fmaxf(mx,za[j]);
+  float mine=0.f;
+  #pragma unroll
+  for(int j=0;j<NPROBE;++j) mine=(lane==j)?za[j]:mine;
+  float ex=expf(__fadd_rn(mine,-mx));
+  float den=ex;
+  #pragma unroll
+  for(int d=8;d>0;d>>=1) den=__fadd_rn(den,__shfl_xor_sync(0xffffffff,den,d,16));
+  float rho_own=__fdiv_rn(ex,den),root_own=sqrtf(rho_own);
+  float rho[NPROBE],root[NPROBE];
+  #pragma unroll
+  for(int j=0;j<NPROBE;++j) {rho[j]=__shfl_sync(0xffffffff,rho_own,j);root[j]=__shfl_sync(0xffffffff,root_own,j);}
+  float delta[NPROBE];
+  #pragma unroll
+  for(int j=0;j<NPROBE;++j) delta[j]=__fadd_rn(z[j],-za[j]);
+  float mean=dot16(delta,rho);
+  float res[NPROBE];
+  #pragma unroll
+  for(int j=0;j<NPROBE;++j) res[j]=__fmul_rn(__fadd_rn(delta[j],-mean),root[j]);
+  unsigned used=1u<<anchor;
+  uint8_t* out=seeds+(int64_t(head*40+g)*KG+kg)*C;
+  // Seeds are packed two per lane-owned 16-bit word: word w = (seed 2w, seed 2w+1).
+  unsigned packed=(unsigned)row;
   #pragma unroll 1
   for(int slot=1;slot<C;++slot) {
-    double score=0.;
-    #pragma unroll
-    for(int j=0;j<NPROBE;++j) score=__dadd_rn(score,__dmul_rn(residual[j],residual[j]));
-    if(used) score=-CUDART_INF;
-    double best=score;int bi=lane;
-    #pragma unroll
-    for(int off=16;off>0;off>>=1) {
-      double ob=__shfl_xor_sync(0xffffffff,best,off);int oi=__shfl_xor_sync(0xffffffff,bi,off);
-      if(ob>best || (ob==best && oi<bi)) {best=ob;bi=oi;}
-    }
-    int picked=slot==1?second:bi;
-    int chosen=__shfl_sync(0xffffffff,cid,picked);
-    if(lane==0) out[slot]=uint8_t(chosen);
-    used=used||(lane==picked);
+    float score=dot16(res,res);
+    // Scores are sums of squares (>= +0, never -0), so for non-NaN values the
+    // uint32 bit order is the float order; used candidates map to key 0.
+    bool valid=(((used>>lane)&1u)==0u)&(score==score);
+    unsigned key=valid?__float_as_uint(score):0u;
+    unsigned best_bits=__reduce_max_sync(0xffffffffu,key);
+    int picked=(int)__reduce_min_sync(0xffffffffu,(key==best_bits&&valid)?(unsigned)lane:32u);
+    if(slot==1) picked=second;
+    used|=1u<<picked;
+    unsigned chosen=(unsigned)__shfl_sync(0xffffffff,cid,picked)&0xffu;
+    if(slot&1) packed|=chosen<<8; else packed=chosen;
+    if((slot&1) && lane==0) *reinterpret_cast<uint16_t*>(out+slot-1)=(uint16_t)packed;
     if(slot<C-1) {
-      double dir[NPROBE];
+      float dir[NPROBE];
       #pragma unroll
-      for(int j=0;j<NPROBE;++j) dir[j]=shfl64(residual[j],picked);
-      double norm=0.;
+      for(int j=0;j<NPROBE;++j) dir[j]=__shfl_sync(0xffffffff,res[j],picked);
+      // ||direction||^2 is the winning score itself (or the forced second
+      // slot's own score), so no second reduction is needed.
+      float dnorm=slot==1?__shfl_sync(0xffffffff,score,picked):__uint_as_float(best_bits);
+      float inv=__fdiv_rn(1.f,sqrtf(__fadd_rn(dnorm,1.e-12f)));
+      float basis[NPROBE];
       #pragma unroll
-      for(int j=0;j<NPROBE;++j) norm=__dadd_rn(norm,__dmul_rn(dir[j],dir[j]));
-      // Reference: direction / sqrt(sum(direction^2) + 1e-12), reduced then added.
-      double den=sqrt(__dadd_rn(norm,1.e-12));
-      if(lane<NPROBE) wb[lane]=__ddiv_rn(dir[lane],den);
-      __syncwarp();
-      double basis[NPROBE];
+      for(int j=0;j<NPROBE;++j) basis[j]=__fmul_rn(dir[j],inv);
+      float proj=dot16(res,basis);
       #pragma unroll
-      for(int j=0;j<NPROBE;++j) basis[j]=wb[j];
-      __syncwarp();
-      double t=0.;
-      #pragma unroll
-      for(int j=0;j<NPROBE;++j) t=__dadd_rn(t,__dmul_rn(residual[j],basis[j]));
-      #pragma unroll
-      for(int j=0;j<NPROBE;++j) residual[j]=__dsub_rn(residual[j],__dmul_rn(t,basis[j]));
+      for(int j=0;j<NPROBE;++j) res[j]=__fmaf_rn(-proj,basis[j],res[j]);
     }
   }
 }

@@ -14,6 +14,16 @@
 #ifndef MERGE_PREFETCH_Q
 #define MERGE_PREFETCH_Q 1
 #endif
+// Fused 32-bit ownership argmax (ported from the C8 D10A kernel): the key
+// of a normalized score is bits(-s) with its four low mantissa bits replaced
+// by the owner id, so one unsigned MIN butterfly decides value and owner at
+// once. Exact ties still resolve to the smallest owner; only candidates within
+// 16 ulp of each other (about 2^-19 relative) can be reassigned.
+// Opt-in (Q90K80C14(merge_fused_argmax=True)): merge -4.6 ms, but on random
+// QKV about 1e-3 of key ownerships move, so it is off by default.
+#ifndef MERGE_FUSED_ARGMAX
+#define MERGE_FUSED_ARGMAX 0
+#endif
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAException.h>
@@ -111,6 +121,11 @@ __device__ __forceinline__ float reduce80(float (&p)[KC/4]) {
   #pragma unroll
   for(int i=1;i<KC/4;++i)sum+=p[i];
   return sum4(sum);
+}
+__device__ __forceinline__ uint32_t owner_key(float neg_s,uint32_t owner) {
+  uint32_t y;
+  asm("lop3.b32 %0,%1,0xfffffff0,%2,0xea;":"=r"(y):"r"(__float_as_uint(neg_s)),"r"(owner));
+  return y;
 }
 __device__ __forceinline__ float reciprocal(float x){float y;
   #if AXIS_FAST_MATH
@@ -253,6 +268,16 @@ __global__ __launch_bounds__(128,MERGE_MINBLOCKS) void merge_kernel(
     for(int i=0;i<KC/4;++i) {
       int ix=(i/2)*4+(i&1);
       float a=s[ix],b=owner1<14?s[ix+2]:-CUDART_INF_F;
+#if MERGE_FUSED_ARGMAX
+      // Normalized scores are <= 0, so -s >= +0 and the unsigned order of its
+      // bit pattern is the float order; -(-inf) = +inf never wins.
+      uint32_t key=min(owner_key(-a,owner0),owner_key(-b,owner1));
+      key=min(key,__shfl_xor_sync(0xffffffff,key,4));
+      key=min(key,__shfl_xor_sync(0xffffffff,key,8));
+      key=min(key,__shfl_xor_sync(0xffffffff,key,16));
+      labels[i]=(int)(key&15u);
+      continue;
+#endif
       float best=fmaxf(a,b);
       best=fmaxf(best,__shfl_xor_sync(0xffffffff,best,4));
       best=fmaxf(best,__shfl_xor_sync(0xffffffff,best,8));
