@@ -24,6 +24,16 @@
 #ifndef MERGE_FUSED_ARGMAX
 #define MERGE_FUSED_ARGMAX 0
 #endif
+// stmatrix staging: 8 stmatrix.x4 per kind instead of 32 STS.32 plus their
+// swizzled address arithmetic; same bytes land in the same staging layout.
+#ifndef MERGE_STMATRIX
+#define MERGE_STMATRIX 1
+#endif
+// Normalize with one FFMA (s*scale-norm) instead of FMUL+FADD: one rounding
+// instead of two (numerics tier, not bitwise).
+#ifndef MERGE_FFMA_NORM
+#define MERGE_FFMA_NORM 0
+#endif
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAException.h>
@@ -126,6 +136,12 @@ __device__ __forceinline__ uint32_t owner_key(float neg_s,uint32_t owner) {
   uint32_t y;
   asm("lop3.b32 %0,%1,0xfffffff0,%2,0xea;":"=r"(y):"r"(__float_as_uint(neg_s)),"r"(owner));
   return y;
+}
+__device__ __forceinline__ void stsm_x4(uint32_t addr,uint32_t r0,uint32_t r1,uint32_t r2,uint32_t r3) {
+  asm volatile("stmatrix.sync.aligned.m8n8.x4.shared.b16 [%0],{%1,%2,%3,%4};"::"r"(addr),"r"(r0),"r"(r1),"r"(r2),"r"(r3):"memory");
+}
+__device__ __forceinline__ uint32_t pack_bf162(float a,float b) {
+  union {__nv_bfloat162 v;uint32_t u;} p;p.v=__floats2bfloat162_rn(a,b);return p.u;
 }
 __device__ __forceinline__ float reciprocal(float x){float y;
   #if AXIS_FAST_MATH
@@ -258,7 +274,11 @@ __global__ __launch_bounds__(128,MERGE_MINBLOCKS) void merge_kernel(
       #pragma unroll
       for(int i=0;i<KC/4;++i) {
         int ix=(i/2)*4+half*2+(i&1);
+#if MERGE_FFMA_NORM
+        s[ix]=__fmaf_rn(s[ix],scale,-norm);
+#else
         s[ix]=__fadd_rn(__fmul_rn(s[ix],scale),-norm);
+#endif
       }
     }
     // Each warp is one paired-column group. Mask internal C16 padding.
@@ -337,12 +357,29 @@ __global__ __launch_bounds__(128,MERGE_MINBLOCKS) void merge_kernel(
         else asm volatile("cp.async.bulk.wait_group.read 0;":::"memory");
       }
       __syncthreads();
+#if MERGE_STMATRIX
+      {
+        // Instruction g stores the four 8x8 blocks (rows warp*16+8*(g>>2)..+7,
+        // d chunks 4*(g&3)+m, m=0..3). Lane l supplies the address of row
+        // (l&7) of block (l>>3): storeoff(row, 8*(4*(g&3)+(l>>3))).
+        const int r=lane&7,mb=lane>>3;
+        const uint32_t base=__cvta_generic_to_shared(stage)+2*((warp*16+r)*64);
+        #pragma unroll
+        for(int g=0;g<8;++g) {
+          int chunk=4*(g&3)+mb;
+          uint32_t addr=base+2*((chunk>>3)*4096+8*(g>>2)*64+(((chunk&7)^r)*8));
+          int i0=4*(4*(g&3)+0)+2*(g>>2),i1=4*(4*(g&3)+1)+2*(g>>2),i2=4*(4*(g&3)+2)+2*(g>>2),i3=4*(4*(g&3)+3)+2*(g>>2);
+          stsm_x4(addr,pack_bf162(acc[i0],acc[i0+1]),pack_bf162(acc[i1],acc[i1+1]),pack_bf162(acc[i2],acc[i2+1]),pack_bf162(acc[i3],acc[i3+1]));
+        }
+      }
+#else
       #pragma unroll
       for(int i=0;i<64;i+=2) {
         int row=warp*16+seed+8*((i&3)>>1);
         int d=2*(lane&3)+8*(i>>2);
         *reinterpret_cast<__nv_bfloat162*>(stage+storeoff(row,d))=__floats2bfloat162_rn(acc[i],acc[i+1]);
       }
+#endif
       asm volatile("fence.proxy.async.shared::cta;":::"memory");
       __syncthreads();
       if(tid==0) {

@@ -89,8 +89,9 @@ full compressed route.
   seed entries differ from the fp64 Triton selector. The previous fp64 native
   selector (seeds bitwise identical, 19.8 ms) is in the git history.
 - Merge: the validated WGMMA kernel plus `AXIS_FAST_MATH` (approximate lg2/rcp),
-  TMA tensor stores for mk/mv from a 128B-swizzled staging buffer, next-tile
-  query prefetch, and a 3 CTA/SM launch bound (no register spills).
+  TMA tensor stores for mk/mv from a 128B-swizzled staging buffer filled with
+  stmatrix, next-tile query prefetch, and a 3 CTA/SM launch bound (no
+  register spills).
   `native_tiles` default 105 -> 35. `merge_fused_argmax=True` (opt-in, off by
   default) enables the C8-style fused 32-bit ownership argmax: merge -4.6 ms,
   but keys whose two best representatives score within 16 ulp of each other
@@ -105,9 +106,9 @@ full compressed route.
   `route_m=128, route_warps=8, route_stages=3` (fastest measured Triton config).
 
 Synthetic benchmark (random Gaussian QKV, [1, 75600, 40, 128] BF16, one H200,
-40 full calls, mean): 283.4 ms -> **182.0 ms** (177.9 ms with
+30-40 full calls, mean): 283.4 ms -> **177.6 ms** (173.8 ms with
 `merge_fused_argmax=True`). Stage times: select 31.4 -> 11.2, merge
-129.9 -> 97.4 (92.6 fused), route 118.9 -> 68.9 ms. Final output vs the
+129.9 -> 94.2 (90.5 fused), route 118.9 -> 68.9 ms. Final output vs the
 pre-optimization build: rel-L2 2.5e-3 (bf16 rounding of the route accumulation
 order; fast-math alone is 6.5e-4), max-abs 3.8e-6. Consecutive pipeline calls
 are bitwise identical and hundreds of back-to-back merge/route launches ran
