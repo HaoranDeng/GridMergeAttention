@@ -291,9 +291,10 @@ __global__ __launch_bounds__(128,MERGE_MINBLOCKS) void merge_kernel(
       int ix=(i/2)*4+(i&1);
       float a=s[ix],b=owner1<14?s[ix+2]:-CUDART_INF_F;
 #if MERGE_FUSED_ARGMAX
-      // Normalized scores are <= 0, so -s >= +0 and the unsigned order of its
-      // bit pattern is the float order; -(-inf) = +inf never wins.
-      uint32_t key=min(owner_key(-a,owner0),owner_key(-b,owner1));
+      // Normalized scores are <= 0: for non-positive floats the unsigned bit
+      // pattern decreases as the value increases (+0 -> 0, -inf -> 0xff800000),
+      // so the unsigned minimum of the raw bits is the argmax with no negation.
+      uint32_t key=min(owner_key(a,owner0),owner_key(b,owner1));
       key=min(key,__shfl_xor_sync(0xffffffff,key,4));
       key=min(key,__shfl_xor_sync(0xffffffff,key,8));
       key=min(key,__shfl_xor_sync(0xffffffff,key,16));
