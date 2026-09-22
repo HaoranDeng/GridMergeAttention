@@ -17,7 +17,7 @@ using bf16=__nv_bfloat16;
 constexpr int T=AXIS_OUTER,H=AXIS_HEADS,GROUPS=T*40,KG=T*45,C=14,NPROBE=16,NCAND=32;
 constexpr int KS_STRIDE=136,ZS_STRIDE=17;
 #ifndef SEL_MINBLOCKS
-#define SEL_MINBLOCKS 4
+#define SEL_MINBLOCKS 8
 #endif
 
 __device__ __forceinline__ void mma_bf16(float (&c)[4],const uint32_t (&a)[4],const uint32_t (&b)[2]) {

@@ -107,7 +107,7 @@ full compressed route.
 
 Synthetic benchmark (random Gaussian QKV, [1, 75600, 40, 128] BF16, one H200,
 30-40 full calls, mean): 283.4 ms -> **173.8 ms** (177.6 ms with
-`merge_fused_argmax=False`). Stage times: select 31.4 -> 11.2, merge
+`merge_fused_argmax=False`). Stage times: select 31.4 -> 10.7, merge
 129.9 -> 90.5 (94.2 exact argmax), route 118.9 -> 68.9 ms. Final output vs the
 pre-optimization build: rel-L2 2.5e-3 (bf16 rounding of the route accumulation
 order; fast-math alone is 6.5e-4), max-abs 3.8e-6. Consecutive pipeline calls
