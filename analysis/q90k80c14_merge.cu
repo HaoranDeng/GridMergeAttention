@@ -19,10 +19,12 @@
 // by the owner id, so one unsigned MIN butterfly decides value and owner at
 // once. Exact ties still resolve to the smallest owner; only candidates within
 // 16 ulp of each other (about 2^-19 relative) can be reassigned.
-// Opt-in (Q90K80C14(merge_fused_argmax=True)): merge -4.6 ms, but on random
-// QKV about 1e-3 of key ownerships move, so it is off by default.
+// Default on (user decision 2026-09-21): merge -4.6 ms; on random QKV about
+// 1e-3 of key ownerships move to the other near-tied representative and the
+// final-output rel-L2 vs the exact-argmax build is ~1e-3 (bf16 rounding
+// level). Q90K80C14(merge_fused_argmax=False) restores the exact argmax.
 #ifndef MERGE_FUSED_ARGMAX
-#define MERGE_FUSED_ARGMAX 0
+#define MERGE_FUSED_ARGMAX 1
 #endif
 // stmatrix staging: 8 stmatrix.x4 per kind instead of 32 STS.32 plus their
 // swizzled address arithmetic; same bytes land in the same staging layout.

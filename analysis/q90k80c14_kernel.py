@@ -34,8 +34,9 @@ def _shape_flags(t,h,ah):
 def native_merge(t,h,ah,fused_argmax=False):
     # AXIS_FAST_MATH selects the kernel's approximate lg2/rcp path (final-output
     # rel-L2 shift 6e-4 on random QKV, well inside the operator's own tolerance).
-    # fused_argmax enables the C8-style fused 32-bit ownership argmax (merge
-    # -4.6 ms, ~1e-3 of key ownerships reassigned on random QKV; opt-in).
+    # fused_argmax (default on) selects the C8-style fused 32-bit ownership
+    # argmax: merge -4.6 ms, ~1e-3 of key ownerships reassigned on random QKV;
+    # pass merge_fused_argmax=False for the exact argmax.
     return _native('merge',_shape_flags(t,h,ah)+['-DAXIS_FAST_MATH=1',f'-DMERGE_FUSED_ARGMAX={int(fused_argmax)}'])
 
 @functools.lru_cache(maxsize=8)
@@ -161,7 +162,7 @@ class Q90K80C14:
     the Triton kernels back in. The Triton route defaults (route_m=128,
     route_warps=8, route_stages=3) are the fastest measured Triton configuration."""
     def __init__(self,head_chunk=4,merge_groups=4,merge_loop=1,route_m=128,route_n=64,merge_warps=4,route_warps=8,merge_backend='triton',native_tiles=35,
-                 select_backend=None,route_backend=None,route_stages=3,merge_fused_argmax=False):
+                 select_backend=None,route_backend=None,route_stages=3,merge_fused_argmax=True):
         self.hc=head_chunk;self.bg=merge_groups;self.kl=merge_loop;self.bm=route_m;self.bn=route_n;self.mw=merge_warps;self.rw=route_warps;self.rs=route_stages
         self.fused=bool(merge_fused_argmax)
         assert 40%merge_groups==0 and merge_groups in (1,2,4,8)
