@@ -194,4 +194,11 @@ Real-QKV protocol (96 cases: 3 prompts x 4 StepDistill steps x layers 0, 5,
 order, three repetitions): see `analysis/q90k80_even_real40.py` and the table
 below.
 
-(Run in progress at the time of this commit; the table follows in the next commit.)
+| Capacity | Cases | Full call (ms) | Paired dense (ms) | Speedup | Mean rel-L2 to bf16 dense (40 heads) | Faster than dense in every case |
+|---|---:|---:|---:|---:|---:|---|
+| C4 | 96 | 54.297 | 327.463 | 6.031x | 0.1913 | yes |
+| C6 | 96 | 83.616 | 325.383 | 3.891x | 0.1692 | yes |
+| C8 | 96 | 104.109 | 325.180 | 3.123x | 0.1535 | yes |
+| C10 | 96 | 133.767 | 326.533 | 2.441x | 0.1412 | yes |
+
+Run: scai7 GPU 4, NVIDIA H200, head_chunk 8, complete=True, LD_PRELOAD libstdc++ as in the video pipeline. Results: `/local2/denghaoran/GridMergeAttention/q90k80_even_real40_20260923/real40.json`. The relative L2 here is against the bf16 Flash SDPA output over all 40 heads, not the FP32 sampled-dense 4-head metric of the C12/C14/C16 table, so the two columns are not comparable. For reference the Q80K90 family measured 61.4 / 108.9 / 121.3 / 224.7 ms (C4 / C6 / C8 / C10) under the same protocol on 2026-09-22.
