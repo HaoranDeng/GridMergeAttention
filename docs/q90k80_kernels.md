@@ -150,7 +150,14 @@ Design (all derived from the 2026-09-21 C14 kernels):
   (64 % CAP != 0) a chunk is still 64 consecutive keys, fetched as a partial
   head key block, a run of whole key blocks and a partial tail block with
   exact-height boxes (the 60-key alternative costs 6 % of the route).
-- Selector: the C14 FP32 REDUX selector with CAP slots.
+- Selector: the C14 FP32 REDUX selector with CAP slots, restructured as a
+  frame loop: RF0 seeds and the 32 candidate queries depend on (head, group,
+  key row) only, so one CTA keeps its four groups' candidate queries in shared
+  memory and loops over the 21 frames, loading only the 16 probe keys per
+  frame (prefetched one frame ahead). Seeds are bitwise those of the per-kg
+  selector; 5 CTAs/SM instead of 8. C4 4.8 -> 3.2 ms, C6 5.4 -> 4.6,
+  C8 6.6 -> 6.0, C10 7.9 -> 7.5 (the greedy loop, not the prologue, dominates
+  at larger capacities and it is occupancy bound).
 - Layout: one fused kernel produces qp, the WGMMA-packed q, kp and vp from
   q/k/v (bitwise identical to the torch permutes plus the pack kernel), and one
   produces the token-major output; 4.6 ms -> 1.8 ms per call.
@@ -170,10 +177,13 @@ GPU 4, SW power cap active at 686 W so clocks moved between 1635 and 1980 MHz):
 
 | Capacity | Estimate before implementation | Full call mean / median (ms) | select | merge | route | layout |
 |---|---:|---:|---:|---:|---:|---:|
-| C4 | 53 | 53.3 / 52.5 | 4.8 | 25.8 | 20.1 | 1.8 |
-| C6 | 77 | 78.9 / 78.1 | 5.4 | 41.2 | 32.0 | 1.8 |
-| C8 | 96 | 98.1 / 96.7 | 6.6 | 49.0 | 41.2 | 1.8 |
-| C10 | 122 | 130.3 / 129.7 | 7.9 | 72.1 | 50.2 | 1.8 |
+| C4 | 53 | 52.2 / 51.4 | 3.2 | 25.8 | 20.1 | 1.8 |
+| C6 | 77 | 78.2 / 78.0 | 4.6 | 41.3 | 31.9 | 1.8 |
+| C8 | 96 | 98.0 / 97.3 | 6.0 | 48.9 | 41.6 | 1.8 |
+| C10 | 122 | 129.9 / 129.8 | 7.5 | 72.2 | 50.2 | 1.8 |
+
+(Before the frame-loop selector: 53.3 / 78.9 / 98.1 / 130.3 ms mean; the
+real-QKV table below was measured with the per-kg selector.)
 
 The C14 kernels measured on the same GPU the same day: merge 90.4, route 69.6,
 select 10.7 ms (172.5 ms shipped figure reproduced). Per merge tile the new
@@ -187,7 +197,13 @@ descriptors (neutral), the C14 frame-minor tile order (neutral), packing the
 straddling groups per warp pair to break the barrier chain (neutral: the
 exchange is instruction-throughput bound, not barrier bound; removing it
 entirely would give C10 about 6 %), DRAM write cost of the merge (about 13 %,
-the same share as C14).
+the same share as C14), the selector with candidate queries in registers
+(64 registers, 4 CTAs/SM: slower than the per-kg selector for C8/C10), a
+four-vectors-per-thread layout kernel (1.87 vs 1.82 ms). The C10 residual
+against the estimate (130 vs 122 ms) is the merge: the five-lane-pair
+ownership reduction (four index shuffles per column instead of two) and the
+cross-warp exchange of groups that straddle warps cost about 8 ms, and no
+64-row tiling of 10-row groups avoids them.
 
 Real-QKV protocol (96 cases: 3 prompts x 4 StepDistill steps x layers 0, 5,
 ..., 35, 40 real heads, dense Flash SDPA timed on the same QKV in alternating
