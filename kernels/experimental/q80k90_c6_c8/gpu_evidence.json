@@ -1,0 +1,210 @@
+{
+  "source_commit": "6e7824fc0bdfd81a63b639787788c311ab460ddd",
+  "measured_at_utc": "2026-09-23T03:44:01.391066+00:00",
+  "protocol": "3 prompts x 4 frozen StepDistill timesteps x 8 fixed layers x 40 real heads; 3 alternating timing repetitions per case",
+  "layers": [
+    0,
+    5,
+    10,
+    15,
+    20,
+    25,
+    30,
+    35
+  ],
+  "shape": [
+    1,
+    75600,
+    40,
+    128
+  ],
+  "dtype": "bfloat16",
+  "results": {
+    "C8": {
+      "complete": true,
+      "capacity": 8,
+      "target_ms": 100,
+      "mean_attention_ms": 139.5175281100803,
+      "dense_mean_attention_ms": 333.59810129801434,
+      "speedup_vs_sdpa": 2.391083800128706,
+      "target_met": false,
+      "numerical_passed": true,
+      "faster_than_dense_all_cases": true,
+      "config": {
+        "merge_backend": "cuda",
+        "head_chunk": 4,
+        "route_m": 128,
+        "route_n": 64,
+        "native_tiles": 63,
+        "seed_tile": 8,
+        "selector_precision": "fp32",
+        "selector_groups": 4,
+        "fast_math": true,
+        "direct_store": false,
+        "min_blocks": 2,
+        "fused_layout": true
+      },
+      "protocol": "3 prompts x 4 frozen timesteps x 8 fixed layers x 40 real heads",
+      "video_quality": "pending; no videos generated",
+      "source_sha256": {
+        "q80k90_kernel.py": "a93bff3fe0fa06936e7a02499ed81be8c9386c1c778ab31b5396f0faca64531d",
+        "q80k90_merge.cu": "5cdd6bba5c9f954388db38feefa444a60650790e8db7d50d189bc1afefef8501",
+        "run_gpu.py": "0301e7e4885154275b382081fc270f7864f3f137832cbdf278b65dcde42606a8",
+        "compare_block_extensions_rf0.py": "11a768b3d420803c90ddc8612a89403d7360c67a7f6c4bed0acfa533e18a7926",
+        "benchmark_q80k90c8.py": "b694519e72781b0062e19d719a51c4de22afa01f8db6924d09ec94ff1267a680",
+        "benchmark_q80_real40_c8.py": "f08230e3b3efb6b3e937c055bf344c64cce72c07b8050cdbb2a6d6169983ab90"
+      },
+      "numerical": {
+        "cases": 384,
+        "mean_relative_l2_vs_operator": 0.001700078467062364,
+        "max_relative_l2_vs_operator": 0.004576325416564941,
+        "mean_l2_to_dense": 0.10388767135494466,
+        "reference_mean_l2_to_dense": 0.10386846283896982,
+        "mean_seed_changed_fraction": 6.329571959895475e-06,
+        "pooled_l2_to_dense": 0.10786480613529159
+      },
+      "numerical_engineering_gate": {
+        "max_relative_l2_vs_operator": 0.02,
+        "max_mean_seed_changed_fraction": 0.005,
+        "max_absolute_mean_l2_regression": 0.0005
+      },
+      "preflight": {
+        "uuid": "GPU-4eca131f-0ba3-759d-bcb5-0418d6b7c68e",
+        "model": "NVIDIA H200",
+        "memory": 0,
+        "utilization": 0,
+        "pids": []
+      },
+      "monitor_samples": 492,
+      "foreign_compute_pids": [],
+      "real40_cases": 96,
+      "min_case_ms": 137.63605244954428,
+      "max_case_ms": 140.8656972249349,
+      "target_gap_ms": 39.51752811008029,
+      "tuning_conservative_mean_ms": 155.68065752301897,
+      "tuning_selected_mean_ms": 139.0083509172712,
+      "tuning_same_gpu_reduction_percent": 10.709298682967471,
+      "calculated_flops": {
+        "core_per_call": 27962081280000,
+        "selector_per_call": 198180864000,
+        "logical_major_matmul_per_call": 28160262144000,
+        "calls_per_standard_50_step_video": 4000,
+        "logical_major_matmul_50_step_pflops": 112.641048576,
+        "scope": "Calculated fixed 50-step, 40-layer CFG schedule, 4000 calls; not measured video generation. Excludes softmax, normalization, selector reductions, layout work, and padded tensor-core operations."
+      },
+      "mean_l2_deltas_vs_historical_baselines": {
+        "svg_ear_p085": {
+          "absolute": 0.038625678469543345,
+          "relative_percent": 59.18556385087599
+        },
+        "q45_k80_c8_center": {
+          "absolute": 0.015262580123817315,
+          "relative_percent": 17.221511325741478
+        }
+      }
+    },
+    "C6": {
+      "complete": true,
+      "capacity": 6,
+      "target_ms": 120,
+      "mean_attention_ms": 127.27386448118422,
+      "dense_mean_attention_ms": 323.2451119952732,
+      "speedup_vs_sdpa": 2.5397603295298756,
+      "target_met": false,
+      "numerical_passed": true,
+      "faster_than_dense_all_cases": true,
+      "config": {
+        "merge_backend": "cuda",
+        "head_chunk": 4,
+        "route_m": 128,
+        "route_n": 64,
+        "native_tiles": 63,
+        "seed_tile": 8,
+        "selector_precision": "fp32",
+        "selector_groups": 4,
+        "fast_math": true,
+        "direct_store": false,
+        "min_blocks": 2,
+        "fused_layout": true
+      },
+      "protocol": "3 prompts x 4 frozen timesteps x 8 fixed layers x 40 real heads",
+      "video_quality": "pending; no videos generated",
+      "source_sha256": {
+        "q80k90_kernel.py": "a93bff3fe0fa06936e7a02499ed81be8c9386c1c778ab31b5396f0faca64531d",
+        "q80k90_merge.cu": "5cdd6bba5c9f954388db38feefa444a60650790e8db7d50d189bc1afefef8501",
+        "run_gpu.py": "0301e7e4885154275b382081fc270f7864f3f137832cbdf278b65dcde42606a8",
+        "compare_block_extensions_rf0.py": "11a768b3d420803c90ddc8612a89403d7360c67a7f6c4bed0acfa533e18a7926",
+        "benchmark_q80k90c6.py": "13f041b4bdd2174a83aa10ab7f90d25381dd15767e547c881903ced13911bb79",
+        "benchmark_q80_real40_c6.py": "5d1c03d96c6d65e565c285bae05c6fe03979a9e6905e8f499bf6f7a3c426c6bc"
+      },
+      "numerical": {
+        "cases": 384,
+        "mean_relative_l2_vs_operator": 0.0016905232957166543,
+        "max_relative_l2_vs_operator": 0.0019990308210253716,
+        "mean_l2_to_dense": 0.12410760023340117,
+        "reference_mean_l2_to_dense": 0.12409045914682792,
+        "mean_seed_changed_fraction": 3.4446649503176254e-06,
+        "pooled_l2_to_dense": 0.12820871063686598
+      },
+      "numerical_engineering_gate": {
+        "max_relative_l2_vs_operator": 0.02,
+        "max_mean_seed_changed_fraction": 0.005,
+        "max_absolute_mean_l2_regression": 0.0005
+      },
+      "preflight": {
+        "uuid": "GPU-bf8f3ffe-1da0-7e2c-a98f-ccd994c0fee1",
+        "model": "NVIDIA H200",
+        "memory": 0,
+        "utilization": 0,
+        "pids": []
+      },
+      "monitor_samples": 485,
+      "foreign_compute_pids": [],
+      "real40_cases": 96,
+      "min_case_ms": 126.91677856445312,
+      "max_case_ms": 128.0839360555013,
+      "target_gap_ms": 7.273864481184219,
+      "tuning_conservative_mean_ms": 141.45093645368303,
+      "tuning_selected_mean_ms": 128.0542482648577,
+      "tuning_same_gpu_reduction_percent": 9.470908093430664,
+      "calculated_flops": {
+        "core_per_call": 20971560960000,
+        "selector_per_call": 198180864000,
+        "logical_major_matmul_per_call": 21169741824000,
+        "calls_per_standard_50_step_video": 4000,
+        "logical_major_matmul_50_step_pflops": 84.678967296,
+        "scope": "Calculated fixed 50-step, 40-layer CFG schedule, 4000 calls; not measured video generation. Excludes softmax, normalization, selector reductions, layout work, and padded tensor-core operations."
+      },
+      "mean_l2_deltas_vs_historical_baselines": {
+        "svg_ear_p085": {
+          "absolute": 0.05884560734799986,
+          "relative_percent": 90.16826600948504
+        },
+        "q45_k80_c8_center": {
+          "absolute": 0.03548250900227383,
+          "relative_percent": 40.03664031187082
+        }
+      }
+    }
+  },
+  "no_videos_generated": true,
+  "both_original_jobs_restored": true,
+  "baselines": {
+    "svg_ear_p085": {
+      "label": "SVG-EAR top_p=0.85",
+      "total_tflops": "48.75106610096",
+      "mean_relative_l2": "0.06526199288540131",
+      "cases": "384",
+      "hardware": "scai7 / NVIDIA H200",
+      "source": "svg_ear_rf0_8layers_20260920_v2"
+    },
+    "q45_k80_c8_center": {
+      "label": "Q45K80C8",
+      "total_tflops": "43.47592704",
+      "mean_relative_l2": "0.08862509123112734",
+      "cases": "384",
+      "hardware": "scai5.cs.ucla.edu / NVIDIA L40S",
+      "source": "block_extensions_rf0_8layers_20260920_v1"
+    }
+  }
+}
