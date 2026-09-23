@@ -1,0 +1,7 @@
+__pycache__/
+compile_checks/
+triton_compile_checks/
+*.log
+cpu_checks.json
+selector_cpu_probe.json
+*.cubin

@@ -1,0 +1,307 @@
+{
+  "gpu_execution": false,
+  "gpu_numerical_validation": "pending",
+  "gpu_latency": "pending",
+  "compiled_source_sha256": {
+    "q80k90_kernel.py": "a93bff3fe0fa06936e7a02499ed81be8c9386c1c778ab31b5396f0faca64531d",
+    "q80k90_merge.cu": "5cdd6bba5c9f954388db38feefa444a60650790e8db7d50d189bc1afefef8501"
+  },
+  "source_sha256_lf": {
+    "q80k90_kernel.py": "371977d76940a8c19e9488ab3d386b629b576155d097ff6c496a39ebf7219415",
+    "q80k90_merge.cu": "b9b8f0feeb728f5f69ff461f94135fc29c0e97ef593ec8ce4a39b8e96f1f8765"
+  },
+  "cpu_checks": {
+    "gpu_used": false,
+    "checks": {
+      "test_packing": "passed",
+      "test_output_coverage": "passed",
+      "test_winner_reduction": "passed"
+    },
+    "scope": "CPU address algebra and ownership checks; no compiled CUDA execution"
+  },
+  "native_variants": [
+    {
+      "capacity": 8,
+      "name": "conservative",
+      "compiled": true,
+      "fast_math": false,
+      "direct_store": false,
+      "min_blocks": 2,
+      "registers": 157,
+      "stack_bytes": 0,
+      "static_shared_bytes": 1024,
+      "local_bytes": 0,
+      "dynamic_shared_bytes": 65536
+    },
+    {
+      "capacity": 8,
+      "name": "fast_blocks2",
+      "compiled": true,
+      "fast_math": true,
+      "direct_store": false,
+      "min_blocks": 2,
+      "registers": 157,
+      "stack_bytes": 0,
+      "static_shared_bytes": 1024,
+      "local_bytes": 0,
+      "dynamic_shared_bytes": 65536
+    },
+    {
+      "capacity": 8,
+      "name": "fast_blocks3",
+      "compiled": true,
+      "fast_math": true,
+      "direct_store": false,
+      "min_blocks": 3,
+      "registers": 157,
+      "stack_bytes": 0,
+      "static_shared_bytes": 1024,
+      "local_bytes": 0,
+      "dynamic_shared_bytes": 65536
+    },
+    {
+      "capacity": 8,
+      "name": "direct_blocks3",
+      "compiled": true,
+      "fast_math": true,
+      "direct_store": true,
+      "min_blocks": 3,
+      "registers": 168,
+      "stack_bytes": 0,
+      "static_shared_bytes": 1024,
+      "local_bytes": 0,
+      "dynamic_shared_bytes": 49152
+    },
+    {
+      "capacity": 8,
+      "name": "direct_blocks4",
+      "compiled": true,
+      "fast_math": true,
+      "direct_store": true,
+      "min_blocks": 4,
+      "registers": 128,
+      "stack_bytes": 0,
+      "static_shared_bytes": 1024,
+      "local_bytes": 0,
+      "dynamic_shared_bytes": 49152
+    },
+    {
+      "capacity": 6,
+      "name": "conservative",
+      "compiled": true,
+      "fast_math": false,
+      "direct_store": false,
+      "min_blocks": 2,
+      "registers": 165,
+      "stack_bytes": 0,
+      "static_shared_bytes": 1024,
+      "local_bytes": 0,
+      "dynamic_shared_bytes": 65536
+    },
+    {
+      "capacity": 6,
+      "name": "fast_blocks2",
+      "compiled": true,
+      "fast_math": true,
+      "direct_store": false,
+      "min_blocks": 2,
+      "registers": 165,
+      "stack_bytes": 0,
+      "static_shared_bytes": 1024,
+      "local_bytes": 0,
+      "dynamic_shared_bytes": 65536
+    },
+    {
+      "capacity": 6,
+      "name": "fast_blocks3",
+      "compiled": true,
+      "fast_math": true,
+      "direct_store": false,
+      "min_blocks": 3,
+      "registers": 161,
+      "stack_bytes": 0,
+      "static_shared_bytes": 1024,
+      "local_bytes": 0,
+      "dynamic_shared_bytes": 65536
+    },
+    {
+      "capacity": 6,
+      "name": "direct_blocks3",
+      "compiled": true,
+      "fast_math": true,
+      "direct_store": true,
+      "min_blocks": 3,
+      "registers": 168,
+      "stack_bytes": 0,
+      "static_shared_bytes": 1024,
+      "local_bytes": 0,
+      "dynamic_shared_bytes": 49152
+    },
+    {
+      "capacity": 6,
+      "name": "direct_blocks4",
+      "compiled": true,
+      "fast_math": true,
+      "direct_store": true,
+      "min_blocks": 4,
+      "registers": 128,
+      "stack_bytes": 0,
+      "static_shared_bytes": 1024,
+      "local_bytes": 0,
+      "dynamic_shared_bytes": 49152
+    }
+  ],
+  "triton_variants": [
+    {
+      "name": "pack",
+      "compiled": true,
+      "shared_bytes": 0
+    },
+    {
+      "name": "c6_select_fp64_g4",
+      "compiled": true,
+      "shared_bytes": 36864
+    },
+    {
+      "name": "c6_select_fp32_g1",
+      "compiled": true,
+      "shared_bytes": 12288
+    },
+    {
+      "name": "c6_select_fp32_g2",
+      "compiled": true,
+      "shared_bytes": 20480
+    },
+    {
+      "name": "c6_select_fp32_g4",
+      "compiled": true,
+      "shared_bytes": 36864
+    },
+    {
+      "name": "c6_select_fp32_g8",
+      "compiled": true,
+      "shared_bytes": 69632
+    },
+    {
+      "name": "c6_route_m128_n64",
+      "compiled": true,
+      "shared_bytes": 49408
+    },
+    {
+      "name": "c6_route_m128_n128",
+      "compiled": true,
+      "shared_bytes": 66048
+    },
+    {
+      "name": "c6_route_m64_n64",
+      "compiled": true,
+      "shared_bytes": 33024
+    },
+    {
+      "name": "c6_route_m32_n64",
+      "compiled": true,
+      "shared_bytes": 28928
+    },
+    {
+      "name": "c6_triton_merge",
+      "compiled": true,
+      "shared_bytes": 65536
+    },
+    {
+      "name": "c8_select_fp64_g4",
+      "compiled": true,
+      "shared_bytes": 36864
+    },
+    {
+      "name": "c8_select_fp32_g1",
+      "compiled": true,
+      "shared_bytes": 12288
+    },
+    {
+      "name": "c8_select_fp32_g2",
+      "compiled": true,
+      "shared_bytes": 20480
+    },
+    {
+      "name": "c8_select_fp32_g4",
+      "compiled": true,
+      "shared_bytes": 36864
+    },
+    {
+      "name": "c8_select_fp32_g8",
+      "compiled": true,
+      "shared_bytes": 69632
+    },
+    {
+      "name": "c8_route_m128_n64",
+      "compiled": true,
+      "shared_bytes": 49408
+    },
+    {
+      "name": "c8_route_m128_n128",
+      "compiled": true,
+      "shared_bytes": 66048
+    },
+    {
+      "name": "c8_route_m64_n64",
+      "compiled": true,
+      "shared_bytes": 33024
+    },
+    {
+      "name": "c8_route_m32_n64",
+      "compiled": true,
+      "shared_bytes": 28928
+    },
+    {
+      "name": "c8_triton_merge",
+      "compiled": true,
+      "shared_bytes": 65536
+    }
+  ],
+  "selector_probe": {
+    "complete": true,
+    "gpu_used": false,
+    "prompt": 0,
+    "step": 0,
+    "layers": [
+      0,
+      5,
+      10,
+      15,
+      20,
+      25,
+      30,
+      35
+    ],
+    "heads": [
+      0,
+      10,
+      20,
+      30
+    ],
+    "query_groups": [
+      0,
+      22,
+      44
+    ],
+    "key_groups": [
+      0,
+      40,
+      420,
+      839
+    ],
+    "scope": "CPU FP32 vs FP64 selector arithmetic on sampled chunks; no GPU execution, full numerical gate still required",
+    "summary": {
+      "6": {
+        "cases": 384,
+        "changed_cases": 0,
+        "changed_seed_fraction": 0.0
+      },
+      "8": {
+        "cases": 384,
+        "changed_cases": 0,
+        "changed_seed_fraction": 0.0
+      }
+    }
+  }
+}
