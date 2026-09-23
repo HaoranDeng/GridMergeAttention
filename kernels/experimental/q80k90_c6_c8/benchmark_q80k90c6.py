@@ -20,6 +20,14 @@ def main():
     reference=load('frozen_ref',a.reference);mathref=load('frozen_op',a.operator)
     r=dict(complete=False,phase=a.phase,layers=[0,5,10,15,20,25,30,35],gpu=torch.cuda.get_device_name(),torch=torch.__version__,triton=__import__('triton').__version__,source_sha256={n:hashlib.sha256(Path(__file__).with_name(n).read_bytes()).hexdigest() for n in ('q80k90_kernel.py','q80k90_merge.cu') if Path(__file__).with_name(n).exists()},numerical=[],timing=[])
     config=json.loads(a.config.read_text()) if a.config else {}
+    if config.get('pipeline',False):
+        from check_pipeline_gpu import check
+        r['pipeline_checks']=check(6,config,a.data/'captures/p000_s0_l00.pt')
+        save(a.root/f'{a.phase}.json',r)
+    if a.phase=='validate':
+        from check_selected_gpu import check as check_selected
+        r['selected_configuration_checks']=check_selected(6,config)
+        save(a.root/f'{a.phase}.json',r)
     core=Q80K90C6(**config)
     # The candidate pool must match the frozen Q80K90C6 scan operator.
     table=mathref.chunk_metadata(21,80,45,1,2,0,reference,'cpu',32)[0]

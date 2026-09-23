@@ -1,0 +1,14 @@
+{
+  "merge_backend": "cuda",
+  "head_chunk": 4,
+  "route_m": 128,
+  "route_n": 64,
+  "native_tiles": 63,
+  "seed_tile": 8,
+  "selector_precision": "fp32",
+  "selector_groups": 4,
+  "fast_math": true,
+  "direct_store": false,
+  "min_blocks": 2,
+  "fused_layout": true
+}

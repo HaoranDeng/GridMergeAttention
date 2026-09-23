@@ -8,7 +8,7 @@ from q80k90c6_kernel import Q80K90C6
 LAYERS=[0,5,10,15,20,25,30,35]
 def save(p,x):p.write_text(json.dumps(x,indent=2)+'\n')
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--repo',type=Path,required=True);p.add_argument('--checkpoint',type=Path,required=True);p.add_argument('--root',type=Path,required=True);p.add_argument('--config',type=Path,required=True);p.add_argument('--prompts',type=int,default=3);a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--repo',type=Path,required=True);p.add_argument('--checkpoint',type=Path,default=Path('/xuanwu-tank/east/zrl/MonarchRT/wan_models/Wan2.1-T2V-14B-StepDistill-CfgDistill/distill_model.pt'));p.add_argument('--root',type=Path,required=True);p.add_argument('--config',type=Path,required=True);p.add_argument('--prompts',type=int,default=3);a=p.parse_args()
     os.environ['WAN_MODEL_ROOT']=str(a.checkpoint.parent.parent);os.environ['WAN_SDPA_BACKEND']='flash'
     sys.path.insert(0,str(a.repo))
     print('real40: loading Python model dependencies',flush=True)

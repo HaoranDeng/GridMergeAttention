@@ -8,6 +8,8 @@
 #include <cute/arch/mma_sm90_gmma.hpp>
 #include <cute/arch/mma_sm90_gmma_ext.hpp>
 #include <cstdint>
+#include <mutex>
+#include <unordered_set>
 
 using bf16 = __nv_bfloat16;
 #ifndef AXIS_CAPACITY
@@ -19,10 +21,42 @@ using bf16 = __nv_bfloat16;
 #ifndef AXIS_DIRECT_STORE
 #define AXIS_DIRECT_STORE 0
 #endif
+#ifndef AXIS_OWNER_MODE
+#define AXIS_OWNER_MODE 0
+#endif
+#ifndef AXIS_FUSED_KV
+#define AXIS_FUSED_KV 0
+#endif
+#ifndef AXIS_WARP_GROUPS
+#define AXIS_WARP_GROUPS 1
+#endif
+#ifndef AXIS_CARVEOUT
+#define AXIS_CARVEOUT -1
+#endif
+#ifndef AXIS_VECTOR_STORE
+#define AXIS_VECTOR_STORE 0
+#endif
+#ifndef AXIS_SHARED_Q
+#define AXIS_SHARED_Q 0
+#endif
+#ifndef AXIS_HOIST_SEEDS
+#define AXIS_HOIST_SEEDS 0
+#endif
+#ifndef AXIS_CONFIGURE_ONCE
+#define AXIS_CONFIGURE_ONCE 0
+#endif
+#ifndef AXIS_REUSE_EXP
+#define AXIS_REUSE_EXP 0
+#endif
+#ifndef AXIS_SUM_GROUPS
+#define AXIS_SUM_GROUPS 1
+#endif
 constexpr int CAPACITY=AXIS_CAPACITY;
 static_assert(CAPACITY==6 || CAPACITY==8);
 static_assert(AXIS_SEED_TILE==8 || AXIS_SEED_TILE==16);
-constexpr int GROUPS_PER_TILE=64/AXIS_SEED_TILE;
+constexpr int BLOCK_THREADS=128*AXIS_WARP_GROUPS;
+constexpr int ROWS_PER_TILE=64*AXIS_WARP_GROUPS;
+constexpr int GROUPS_PER_TILE=ROWS_PER_TILE/AXIS_SEED_TILE;
 constexpr int COLUMN_TILES=(45+GROUPS_PER_TILE-1)/GROUPS_PER_TILE;
 constexpr int KC=(AXIS_COLS+15)/16*16;
 using namespace cute::SM90::GMMA;
@@ -35,14 +69,18 @@ using namespace cute::SM90::GMMA;
 #if AXIS_COLS <= 48
 #define ES(a) E24(a)
 #define SCORE_OP MMA_64x48x16_F32BF16BF16_RS
+#define SCORE_SS_OP MMA_64x48x16_F32BF16BF16_SS
 #elif AXIS_COLS <= 80
 #define ES(a) E40(a)
 #define SCORE_OP MMA_64x80x16_F32BF16BF16_RS
+#define SCORE_SS_OP MMA_64x80x16_F32BF16BF16_SS
 #else
 #define ES(a) E48(a)
 #define SCORE_OP MMA_64x96x16_F32BF16BF16_RS
+#define SCORE_SS_OP MMA_64x96x16_F32BF16BF16_SS
 #endif
 #define E64(a) E32(a),E8(a,32),E8(a,40),E8(a,48),E8(a,56)
+#define E128(a) E64(a),E8(a,64),E8(a,72),E8(a,80),E8(a,88),E8(a,96),E8(a,104),E8(a,112),E8(a,120)
 
 __device__ __forceinline__ uint64_t desc(const bf16* p,int lead,int stride) {
   uint64_t s=__cvta_generic_to_shared(p);
@@ -88,6 +126,10 @@ __device__ __forceinline__ uint4 fragment_transpose(uint4 a,int lane) {
 __device__ __forceinline__ void store_output(bf16* p,uint4 value,uint64_t policy) {
   asm volatile("st.global.L1::evict_first.L2::cache_hint.v4.b32 [%0],{%1,%2,%3,%4},%5;"::"l"(p),"r"(value.x),"r"(value.y),"r"(value.z),"r"(value.w),"l"(policy):"memory");
 }
+__device__ __forceinline__ uint32_t pack_pair(float a,float b) {
+  union {__nv_bfloat162 pair;uint32_t bits;} value;
+  value.pair=__floats2bfloat162_rn(a,b);return value.bits;
+}
 __device__ __forceinline__ float ex2(float x) {
   float y; asm("ex2.approx.ftz.f32 %0,%1;":"=f"(y):"f"(x)); return y;
 }
@@ -107,9 +149,18 @@ __device__ __forceinline__ float max4(float x) {
   return fmaxf(x,__shfl_xor_sync(0xffffffff,x,2,4));
 }
 __device__ __forceinline__ float reduce80(float (&p)[KC/4]) {
+  #if AXIS_SUM_GROUPS > 1
+  float sums[AXIS_SUM_GROUPS]={};
+  #pragma unroll
+  for(int i=0;i<KC/4;++i)sums[i%AXIS_SUM_GROUPS]+=p[i];
+  float sum=sums[0];
+  #pragma unroll
+  for(int i=1;i<AXIS_SUM_GROUPS;++i)sum+=sums[i];
+  #else
   float sum=p[0];
   #pragma unroll
   for(int i=1;i<KC/4;++i)sum+=p[i];
+  #endif
   return sum4(sum);
 }
 __device__ __forceinline__ float reciprocal(float x){float y;
@@ -126,7 +177,7 @@ __device__ __forceinline__ float dot80(float (&p)[KC/4],float (&x)[KC/4]){
   return sum4(sum);
 }
 template<int TILES,int TOTAL_HEADS>
-__global__ __launch_bounds__(128,AXIS_MIN_BLOCKS) void merge_kernel(
+__global__ __launch_bounds__(BLOCK_THREADS,AXIS_MIN_BLOCKS) void merge_kernel(
  const bf16* __restrict__ q,const bf16* __restrict__ k,const bf16* __restrict__ v,
  const uint8_t* __restrict__ seeds,bf16* __restrict__ mk,bf16* __restrict__ mv,
  float* __restrict__ bias,int Q_arg,int KO_arg,int R_arg,int C_arg,int H_arg,int AH_arg,int HS,int RF_arg,float scale,
@@ -143,7 +194,7 @@ __global__ __launch_bounds__(128,AXIS_MIN_BLOCKS) void merge_kernel(
   int kb=block,ko=kb/R,kr=kb%R;
   uint64_t cache_last,cache_first=0;
   asm volatile("createpolicy.fractional.L2::evict_last.b64 %0,1.0;":"=l"(cache_last));
-  for(int vec=tid;vec<KC*16;vec+=128) {
+  for(int vec=tid;vec<KC*16;vec+=BLOCK_THREADS) {
     int ki=vec/16,d=(vec%16)*8;
     int src=((gh*KO*R+kb)*C+ki)*128+d;
     *reinterpret_cast<uint4*>(sk+boff(ki,d))=ki<C?*reinterpret_cast<const uint4*>(k+src):make_uint4(0,0,0,0);
@@ -157,10 +208,49 @@ __global__ __launch_bounds__(128,AXIS_MIN_BLOCKS) void merge_kernel(
   // the issue cost.
   const uint64_t score_base=desc(sk,16,1024);
   const uint64_t merge_base_k=desc(sk,KC*128,1024),merge_base_v=desc(sv,KC*128,1024);
+  #if AXIS_SHARED_Q
+  const uint64_t query_base=desc(temp+(warp/4)*64*128,16,1024);
+  #endif
   // Query-column tile count is independent of exact representative capacity.
   int total=Q*COLUMN_TILES,start=blockIdx.z*tile_count;
+  #if AXIS_HOIST_SEEDS
+  const int fixed_cb=blockIdx.z;
+  const int row0=warp*16+seed;
+  const int col0=fixed_cb*GROUPS_PER_TILE+col_for_row(row0);
+  const int col1=fixed_cb*GROUPS_PER_TILE+col_for_row(row0+8);
+  const int si0=((gh*45+col0)*(KO*R)+kb)*CAPACITY+seed_for_row(row0);
+  const int si1=((gh*45+col1)*(KO*R)+kb)*CAPACITY+seed_for_row(row0+8);
+  const int sr0=col0<45 && seed_for_row(row0)<CAPACITY?seeds[si0]:0;
+  const int sr1=col1<45 && seed_for_row(row0+8)<CAPACITY?seeds[si1]:0;
+  const int query_base0=((gh*Q*45+col0)*80+sr0)*128+(lane&3)*8;
+  const int query_base1=((gh*Q*45+col1)*80+sr1)*128+(lane&3)*8;
+  #endif
   for(int tile=start;tile<min(start+tile_count,total);++tile) {
+    #if AXIS_HOIST_SEEDS
+    int qo=tile-start,cb=fixed_cb,rf=0;
+    #else
     int qo=tile%Q,cb=tile/Q,rf=0;
+    #endif
+    #if AXIS_SHARED_Q
+    #if AXIS_DIRECT_STORE
+    __syncthreads();
+    #endif
+    for(int vec=tid;vec<ROWS_PER_TILE*16;vec+=BLOCK_THREADS) {
+      int row=vec/16,d=(vec%16)*8;
+      int col=cb*GROUPS_PER_TILE+col_for_row(row),c=seed_for_row(row);
+      bool valid=col<45 && c<CAPACITY;
+      int sr=valid?seeds[((gh*45+col)*(KO*R)+kb)*CAPACITY+c]:0;
+      int64_t qi=(((int64_t(gh)*Q+qo)*45+col)*80+sr)*128+d;
+      int shared=(row/64)*64*128+aoff(row%64,d);
+      *reinterpret_cast<uint4*>(temp+shared)=valid?*reinterpret_cast<const uint4*>(q+qi):make_uint4(0,0,0,0);
+    }
+    __syncthreads();
+    asm volatile("fence.proxy.async.shared::cta;":::"memory");
+    #else
+    #if AXIS_HOIST_SEEDS
+    const int qi0=query_base0+qo*45*80*128;
+    const int qi1=query_base1+qo*45*80*128;
+    #else
     int row0=warp*16+seed,col0=cb*GROUPS_PER_TILE+col_for_row(row0);
     int si0=((gh*45+col0)*(KO*R)+kb)*CAPACITY+seed_for_row(row0);
     int col1=cb*GROUPS_PER_TILE+col_for_row(row0+8);
@@ -168,6 +258,7 @@ __global__ __launch_bounds__(128,AXIS_MIN_BLOCKS) void merge_kernel(
     int sr0=col0<45 && seed_for_row(row0)<CAPACITY?seeds[si0]:0,sr1=col1<45 && seed_for_row(row0+8)<CAPACITY?seeds[si1]:0;
     int qi0=(((gh*Q+qo)*45+col0)*80+sr0)*128+(lane&3)*8;
     int qi1=(((gh*Q+qo)*45+col1)*80+sr1)*128+(lane&3)*8;
+    #endif
     uint32_t qreg[32];
     #pragma unroll
     for(int d=0;d<128;d+=32) {
@@ -178,13 +269,22 @@ __global__ __launch_bounds__(128,AXIS_MIN_BLOCKS) void merge_kernel(
     }
     #pragma unroll
     for(int i=0;i<32;++i) asm volatile("" : "+r"(qreg[i]) :: "memory");
+    #endif
     float s[KC/2];
     asm volatile("wgmma.fence.sync.aligned;":::"memory");
+    #if AXIS_SHARED_Q
+    using Score=SCORE_SS_OP<Major::K,Major::K>;
+    #else
     using Score=SCORE_OP<Major::K,Major::K>;
+    #endif
     #pragma unroll
     for(int d=0;d<128;d+=16) {
       int i=d/4;
+      #if AXIS_SHARED_Q
+      Score::fma(desc_at(query_base,aoff(0,d)),desc_at(score_base,boff(0,d)),ES(s),d==0?ScaleOut::Zero:ScaleOut::One);
+      #else
       Score::fma(qreg[i],qreg[i+1],qreg[i+2],qreg[i+3],desc_at(score_base,boff(0,d)),ES(s),d==0?ScaleOut::Zero:ScaleOut::One);
+      #endif
     }
     asm volatile("wgmma.commit_group.sync.aligned;":::"memory");
     asm volatile("wgmma.wait_group.sync.aligned 0;":::"memory");
@@ -203,13 +303,20 @@ __global__ __launch_bounds__(128,AXIS_MIN_BLOCKS) void merge_kernel(
       return;
     }
     if(stop_after==1) continue;
+    #if AXIS_REUSE_EXP
+    float saved_exp[KC/2],norm_recip[2];
+    #endif
     float norm_max[2],norm_sum[2];
     #pragma unroll
     for(int half=0;half<2;++half) {
       float direct[KC/4];
       #pragma unroll
-      for(int i=0;i<KC/4;++i)
+      for(int i=0;i<KC/4;++i) {
         direct[i]=ex2(__fmul_rn(s[4*(i/2)+2*half+(i&1)],scale));
+        #if AXIS_REUSE_EXP
+        saved_exp[4*(i/2)+2*half+(i&1)]=direct[i];
+        #endif
+      }
       float sum=reduce80(direct);
       // A full-warp vote keeps the fallback's full-mask shuffles converged.
       // If any row needs the stable path, every lane in this warp takes it.
@@ -223,8 +330,12 @@ __global__ __launch_bounds__(128,AXIS_MIN_BLOCKS) void merge_kernel(
       mx=max4(mx);
       float bs[KC/4];
       #pragma unroll
-      for(int i=0;i<KC/4;++i)
+      for(int i=0;i<KC/4;++i) {
         bs[i]=ex2(__fmaf_rn(s[4*(i/2)+2*half+(i&1)],scale,-mx));
+        #if AXIS_REUSE_EXP
+        saved_exp[4*(i/2)+2*half+(i&1)]=bs[i];
+        #endif
+      }
       norm_max[half]=mx;norm_sum[half]=reduce80(bs);
       }
     }
@@ -234,6 +345,9 @@ __global__ __launch_bounds__(128,AXIS_MIN_BLOCKS) void merge_kernel(
     #pragma unroll
     for(int half=0;half<2;++half) {
       float norm=__fadd_rn(norm_max[half],__shfl_sync(0xffffffff,norm_log,(lane&~1)+half));
+      #if AXIS_REUSE_EXP
+      norm_recip[half]=reciprocal(norm_sum[half]);
+      #endif
       #pragma unroll
       for(int i=0;i<KC/4;++i) {
         int ix=(i/2)*4+half*2+(i&1);
@@ -260,25 +374,61 @@ __global__ __launch_bounds__(128,AXIS_MIN_BLOCKS) void merge_kernel(
           a=owner0<CAPACITY?s[ix]:-CUDART_INF_F;
           b=owner1<CAPACITY?s[ix+2]:-CUDART_INF_F;
         }
+        #if AXIS_OWNER_MODE == 2
+        // Eight seed lanes for one key have a strided participation mask.
+        // Ordered IEEE bits preserve finite float ordering, including signs.
+        // Compare floats in the ballot so +0/-0 remain tied.
+        const unsigned key_mask=0x11111111u<<(lane&3);
+        unsigned bits=__float_as_uint(a);
+        unsigned ordered=bits^((bits&0x80000000u)?0xffffffffu:0x80000000u);
+        unsigned largest=__reduce_max_sync(key_mask,ordered);
+        unsigned decoded=largest^((largest&0x80000000u)?0x80000000u:0xffffffffu);
+        float best=__uint_as_float(decoded);
+        unsigned winners=__ballot_sync(0xffffffff,a==best)&key_mask;
+        unsigned label=unsigned(__ffs(winners)-1)>>2;
+        #else
         float best=fmaxf(a,b);
         best=fmaxf(best,__shfl_xor_sync(0xffffffff,best,4));
         best=fmaxf(best,__shfl_xor_sync(0xffffffff,best,8));
         best=fmaxf(best,__shfl_xor_sync(0xffffffff,best,16));
+        #if AXIS_OWNER_MODE == 1
+        unsigned winners=__ballot_sync(0xffffffff,a==best)&(0x11111111u<<(lane&3));
+        unsigned label=unsigned(__ffs(winners)-1)>>2;
+        #else
         unsigned label=min(a==best?owner0:16u,b==best?owner1:16u);
         label=min(label,__shfl_xor_sync(0xffffffff,label,4));
         label=min(label,__shfl_xor_sync(0xffffffff,label,8));
         label=min(label,__shfl_xor_sync(0xffffffff,label,16));
+        #endif
+        #endif
         bool valid=2*(lane&3)+8*(i/2)+(i&1)<C;
+        #if AXIS_REUSE_EXP
+        // Reuse the first stable exponential and its full-row normalizer,
+        // avoiding another SFU exponential for every ownership candidate.
+        probabilities[i]=(valid && label==owner)?__fmul_rn(saved_exp[ix+2*half],norm_recip[half]):0.f;
+        #else
         probabilities[i]=(valid && label==owner)?ex2(s[ix+2*half]):0.f;
+        #endif
       }
       float sum=reduce80(probabilities),safe=sum>0?sum:1.f;
       float inv=reciprocal(safe),expected=0.f;
+      #if AXIS_SUM_GROUPS > 1
+      float expected_parts[AXIS_SUM_GROUPS]={};
+      #endif
       #pragma unroll
       for(int i=0;i<KC/4;++i) {
         int ix=(i/2)*4+(i&1)+2*half;
         bool valid=2*(lane&3)+8*(i/2)+(i&1)<C;
+        #if AXIS_SUM_GROUPS > 1
+        expected_parts[i%AXIS_SUM_GROUPS]=fmaf(probabilities[i],valid?s[ix]:0.f,expected_parts[i%AXIS_SUM_GROUPS]);
+        #else
         expected=fmaf(probabilities[i],valid?s[ix]:0.f,expected);
+        #endif
       }
+      #if AXIS_SUM_GROUPS > 1
+      #pragma unroll
+      for(int i=0;i<AXIS_SUM_GROUPS;++i)expected+=expected_parts[i];
+      #endif
       expected=sum4(expected);
       float correction=__fmul_rn(__fadd_rn(__fmul_rn(expected,inv),-lg2(safe)),0.6931471805599453f);
       int out=(((head*Q+qo)*45+col)*(KO*R)+kb)*CAPACITY+owner;
@@ -292,8 +442,26 @@ __global__ __launch_bounds__(128,AXIS_MIN_BLOCKS) void merge_kernel(
       }
     }
     if(stop_after==2) continue;
+    #if AXIS_FUSED_KV
+    // K and V already occupy adjacent 128-column tiles of one MN descriptor.
+    // One wider WGMMA reuses the weights and removes the second fence/wait.
+    float both_acc[128];
+    asm volatile("wgmma.fence.sync.aligned;":::"memory");
+    using MergeBoth=MMA_64x256x16_F32BF16BF16_RS<Major::K,Major::MN>;
+    #pragma unroll
+    for(int ki=0;ki<KC;ki+=16) {
+      int wi=(ki/8)*2;
+      MergeBoth::fma(packed_weights[wi],packed_weights[wi+1],packed_weights[wi+2],packed_weights[wi+3],
+        desc_at(merge_base_k,boff(ki,0)),E128(both_acc),ki==0?ScaleOut::Zero:ScaleOut::One);
+    }
+    asm volatile("wgmma.commit_group.sync.aligned;":::"memory");
+    asm volatile("wgmma.wait_group.sync.aligned 0;":::"memory");
+    #endif
     #pragma unroll
     for(int kind=0;kind<2;++kind) {
+      #if AXIS_FUSED_KV
+      float* acc=both_acc+kind*64;
+      #else
       asm volatile("wgmma.fence.sync.aligned;":::"memory");
       float acc[64];
       using Merge=MMA_64x128x16_F32BF16BF16_RS<Major::K,Major::MN>;
@@ -305,11 +473,30 @@ __global__ __launch_bounds__(128,AXIS_MIN_BLOCKS) void merge_kernel(
       }
       asm volatile("wgmma.commit_group.sync.aligned;":::"memory");
       asm volatile("wgmma.wait_group.sync.aligned 0;":::"memory");
+      #endif
       if(stop_after==3) continue;
       #if AXIS_DIRECT_STORE
       // Optional barrier-free register-to-global path. Exact same BF16 pairs
       // as the shared staging path; GPU timing decides the store tradeoff.
       bf16* dst=kind==0?mk:mv;
+      #if AXIS_VECTOR_STORE
+      // Transpose a 4x4 matrix of BF16 pairs in registers. The four lanes
+      // then write adjacent 16-byte vectors, with no shared-memory staging.
+      #pragma unroll
+      for(int half=0;half<2;++half) {
+        #pragma unroll
+        for(int block=0;block<4;++block) {
+          int i=16*block+2*half;
+          uint4 a={pack_pair(acc[i],acc[i+1]),pack_pair(acc[i+4],acc[i+5]),
+                   pack_pair(acc[i+8],acc[i+9]),pack_pair(acc[i+12],acc[i+13])};
+          uint4 b=fragment_transpose(a,lane);
+          int row=warp*16+seed+8*half,d=block*32+(lane&3)*8;
+          int col=cb*GROUPS_PER_TILE+col_for_row(row),c=seed_for_row(row);
+          int64_t oi=((((int64_t(head)*Q+qo)*45+col)*(KO*R)+kb)*CAPACITY+c)*128+d;
+          if(c<CAPACITY && col<45)store_output(dst+oi,b,cache_first);
+        }
+      }
+      #else
       #pragma unroll
       for(int i=0;i<64;i+=2) {
         int row=warp*16+seed+8*((i&3)>>1);
@@ -319,6 +506,7 @@ __global__ __launch_bounds__(128,AXIS_MIN_BLOCKS) void merge_kernel(
         if(c<CAPACITY && col<45)
           *reinterpret_cast<__nv_bfloat162*>(dst+oi)=__floats2bfloat162_rn(acc[i],acc[i+1]);
       }
+      #endif
       #else
       #pragma unroll
       for(int i=0;i<64;i+=2) {
@@ -328,7 +516,7 @@ __global__ __launch_bounds__(128,AXIS_MIN_BLOCKS) void merge_kernel(
       }
       __syncthreads();
       bf16* dst=kind==0?mk:mv;
-      for(int vec=tid;vec<64*16;vec+=128) {
+      for(int vec=tid;vec<ROWS_PER_TILE*16;vec+=BLOCK_THREADS) {
         int row=vec/16,d=(vec%16)*8,col=cb*GROUPS_PER_TILE+col_for_row(row),c=seed_for_row(row);
         int64_t oi=((((int64_t(head)*Q+qo)*45+col)*(KO*R)+kb)*CAPACITY+c)*128+d;
         if(c<CAPACITY && col<45)store_output(dst+oi,*reinterpret_cast<const uint4*>(temp+storeoff(row,d)),cache_first);
@@ -362,16 +550,37 @@ void pack(torch::Tensor input,torch::Tensor output) {
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
+static void configure_merge() {
+ #if AXIS_CONFIGURE_ONCE
+ static std::mutex mutex;
+ static std::unordered_set<int> configured;
+ int device=0;C10_CUDA_CHECK(cudaGetDevice(&device));
+ std::lock_guard<std::mutex> guard(mutex);
+ if(configured.count(device))return;
+ #endif
+ constexpr int bytes=(KC*128*2+((AXIS_DIRECT_STORE && !AXIS_SHARED_Q)?0:ROWS_PER_TILE*128))*2;
+ C10_CUDA_CHECK(cudaFuncSetAttribute(merge_kernel<21,AXIS_HEADS>,cudaFuncAttributeMaxDynamicSharedMemorySize,bytes));
+ #if AXIS_CARVEOUT >= 0
+ C10_CUDA_CHECK(cudaFuncSetAttribute(merge_kernel<21,AXIS_HEADS>,cudaFuncAttributePreferredSharedMemoryCarveout,AXIS_CARVEOUT));
+ #endif
+ #if AXIS_CONFIGURE_ONCE
+ configured.insert(device);
+ #endif
+}
+
 void run(torch::Tensor q,torch::Tensor k,torch::Tensor v,torch::Tensor seeds,
  torch::Tensor mk,torch::Tensor mv,torch::Tensor bias,int hs,int ah,int tiles) {
  TORCH_CHECK(q.is_cuda() && q.scalar_type()==at::kBFloat16 && q.is_contiguous(),"Contiguous CUDA BF16 Q required");
  TORCH_CHECK(q.numel()==int64_t(AXIS_HEADS)*AXIS_OUTER*45*80*128,"Compiled shape mismatch");
  TORCH_CHECK(ah==AXIS_ACTIVE_HEADS && hs>=0 && hs+ah<=AXIS_HEADS && tiles>0,"Head/tile bounds");
+ #if AXIS_HOIST_SEEDS
+ TORCH_CHECK(tiles==AXIS_OUTER,"Seed hoisting requires one complete time loop per CTA");
+ #endif
  TORCH_CHECK(seeds.scalar_type()==at::kByte && seeds.numel()==int64_t(AXIS_HEADS)*45*AXIS_OUTER*40*CAPACITY,"Exact capacity seed shape");
- constexpr int bytes=(KC*128*2+(AXIS_DIRECT_STORE?0:64*128))*2;
- C10_CUDA_CHECK(cudaFuncSetAttribute(merge_kernel<21,AXIS_HEADS>,cudaFuncAttributeMaxDynamicSharedMemorySize,bytes));
+ constexpr int bytes=(KC*128*2+((AXIS_DIRECT_STORE && !AXIS_SHARED_Q)?0:ROWS_PER_TILE*128))*2;
+ configure_merge();
  dim3 grid(AXIS_OUTER*40,ah,(AXIS_OUTER*COLUMN_TILES+tiles-1)/tiles);
- merge_kernel<21,AXIS_HEADS><<<grid,128,bytes,at::cuda::getCurrentCUDAStream()>>>(
+ merge_kernel<21,AXIS_HEADS><<<grid,BLOCK_THREADS,bytes,at::cuda::getCurrentCUDAStream()>>>(
    (const bf16*)q.data_ptr(),(const bf16*)k.data_ptr(),(const bf16*)v.data_ptr(),seeds.data_ptr<uint8_t>(),
    (bf16*)mk.data_ptr(),(bf16*)mv.data_ptr(),bias.data_ptr<float>(),0,0,0,0,0,0,hs,0,
    float(0.08838834764831845*1.4426950408889634),tiles);
@@ -379,9 +588,9 @@ void run(torch::Tensor q,torch::Tensor k,torch::Tensor v,torch::Tensor seeds,
 }
 std::vector<int> resources() {
  cudaFuncAttributes a{};C10_CUDA_CHECK(cudaFuncGetAttributes(&a,merge_kernel<21,AXIS_HEADS>));
- int active=0;constexpr int bytes=(KC*128*2+(AXIS_DIRECT_STORE?0:64*128))*2;
+ int active=0;constexpr int bytes=(KC*128*2+((AXIS_DIRECT_STORE && !AXIS_SHARED_Q)?0:ROWS_PER_TILE*128))*2;
  C10_CUDA_CHECK(cudaFuncSetAttribute(merge_kernel<21,AXIS_HEADS>,cudaFuncAttributeMaxDynamicSharedMemorySize,bytes));
- C10_CUDA_CHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&active,merge_kernel<21,AXIS_HEADS>,128,bytes));
+ C10_CUDA_CHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&active,merge_kernel<21,AXIS_HEADS>,BLOCK_THREADS,bytes));
  return {a.numRegs,int(a.localSizeBytes),bytes,active};
 }
 PYBIND11_MODULE(TORCH_EXTENSION_NAME,m) {m.def("run",&run);m.def("pack",&pack);m.def("resources",&resources);}
