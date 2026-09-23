@@ -180,7 +180,9 @@ class Q90K80Even:
     1.63 GB of workspace (C10: 32.6 GB); head_chunk=4 halves it for about one
     millisecond of route time. merge_packed: 1 packs groups across warps
     (default), 0 keeps every group inside one warp, 2 packs per warp pair.
-    fused_layout runs the native layout kernels instead of torch permutes."""
+    fused_layout runs the native layout kernels instead of torch permutes; the
+    operator then owns its layout buffers and the returned tensor is reused by
+    the next call (clone it if it must outlive the next call)."""
     def __init__(self,cap,head_chunk=8,merge_groups=4,merge_loop=1,route_m=128,route_n=64,merge_warps=4,route_warps=8,merge_backend='cuda',native_tiles=None,
                  select_backend=None,route_backend=None,route_stages=3,merge_fused_argmax=True,merge_packed=True,merge_minblocks=3,merge_flags=(),route_flags=(),fused_layout=True):
         assert cap in (4,6,8,10)
@@ -206,7 +208,8 @@ class Q90K80Even:
             self.seeds=torch.empty((h,40,t*45,cap),device=q.device,dtype=torch.uint8)
             self.mk=torch.empty((ah,t*45,t*40,cap,128),device=q.device,dtype=torch.bfloat16);self.mv=torch.empty_like(self.mk)
             self.bias=torch.empty((ah,t,40,t*45,cap),device=q.device,dtype=torch.float32)
-            self.tiles=self.nt if self.nt is not None else max(1,(merge_tiles(t,cap,self.packed)+5)//6)
+            self.tiles=self.nt if self.nt is not None else max(1,(merge_tiles(t,cap,self.packed)+3)//4)
+            self.buffers=None
             self.cache=key
         return t,h
 
@@ -219,14 +222,17 @@ class Q90K80Even:
         assert k.shape==v.shape==q.shape and k.dtype==v.dtype==q.dtype
         fused=self.fused_layout and self.backend=='cuda'
         if fused:
-            qp=torch.empty((h,t,40,2,45,128),device=q.device,dtype=q.dtype);packed=torch.empty_like(qp)
-            kp=torch.empty((h,t*45,80,128),device=q.device,dtype=q.dtype);vp=torch.empty_like(kp)
+            if self.buffers is None:
+                qp=torch.empty((h,t,40,2,45,128),device=q.device,dtype=q.dtype)
+                self.buffers=(qp,torch.empty_like(qp),torch.empty((h,t*45,80,128),device=q.device,dtype=q.dtype),torch.empty((h,t*45,80,128),device=q.device,dtype=q.dtype),
+                              torch.empty_like(qp),torch.empty_like(q))
+            qp,packed,kp,vp,out,result=self.buffers
             native_layout(t,h).forward(q,k,v,qp,packed,kp,vp)
         else:
             qp=q.view(t,45,40,2,h,128).permute(4,0,2,3,1,5).contiguous()
             kp=k.view(t*45,80,h,128).permute(2,0,1,3).contiguous()
             vp=v.view(t*45,80,h,128).permute(2,0,1,3).contiguous()
-        out=torch.empty_like(qp)
+            out=torch.empty_like(qp)
         if self.select_backend=='cuda':native_select(t,h,cap).run(qp,kp,self.table,self.seeds)
         else:_select[(t*45,10,h)](qp,kp,self.table,self.seeds,t,h,4,cap,num_warps=4,enable_fp_fusion=False)
         if self.backend=='cuda' and not fused:
@@ -238,7 +244,7 @@ class Q90K80Even:
             if self.route_backend=='cuda':native_route(t,h,ah,cap,self.route_flags).run(qp,self.mk,self.mv,self.bias,out,hs,ah)
             else:_route[(t*40,ah,tr.cdiv(90,self.bm))](qp,self.mk,self.mv,self.bias,out,t,h,ah,hs,self.bm,self.bn,cap,num_warps=self.rw,num_stages=self.rs)
         if fused:
-            result=torch.empty_like(q);native_layout(t,h).backward(out,result)
+            native_layout(t,h).backward(out,result)
         else:
             result=out.view(h,t,40,2,45,128).permute(1,4,2,3,0,5).reshape(1,t*3600,h,128).contiguous()
         return (result,self.seeds) if return_debug else result

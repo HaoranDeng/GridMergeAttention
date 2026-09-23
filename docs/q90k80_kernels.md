@@ -185,6 +185,24 @@ GPU 4, SW power cap active at 686 W so clocks moved between 1635 and 1980 MHz):
 (Before the frame-loop selector: 53.3 / 78.9 / 98.1 / 130.3 ms mean; the
 real-QKV table below was measured with the per-kg selector.)
 
+Later the same day: four merge tile slices per (kb, head) instead of six
+(merge 25.8/41.3/48.9/72.2 -> 25.3/40.5/48.3/69.4 ms in isolation) and the
+operator reusing its layout buffers across calls; full call medians
+50.7 / 77.1 / 96.1 / 130.5 ms (means are 1-3 ms higher because of the power
+cap; per-call spread is about 20 %). The user's follow-up targets were
+50 / 70 / 90 / 110 ms. The DRAM floor of the merged K/V round trip alone
+(written once by the merge, read once by the route, 2 x cap x 16.3 GB per
+call at 4.4 TB/s) is 30 / 44 / 59 / 74 ms; with select and layout that
+leaves at most 15 / 20 / 24 / 27 ms for all merge and route compute, which
+neither kernel approaches (merge is scalar-issue bound at about 38 % tensor
+utilization, the route is shared-memory bound about 30 % above its DRAM
+time). Architectures that would remove the round trip were re-derived and
+rejected: a fused merge+route per group needs the route to attend cap-wide
+key tiles (n16 WGMMA, 2.7x the tensor time) and either reload every group's
+queries per key block or keep 64x more rows than the register file holds;
+keeping the intermediate L2 resident needs a route unit of at most one
+group per head, far below the 132 CTAs the route needs in flight.
+
 The C14 kernels measured on the same GPU the same day: merge 90.4, route 69.6,
 select 10.7 ms (172.5 ms shipped figure reproduced). Per merge tile the new
 kernel spends 7.5k CTA cycles against C14's 6.9k, but all 64 rows are real
@@ -199,7 +217,11 @@ exchange is instruction-throughput bound, not barrier bound; removing it
 entirely would give C10 about 6 %), DRAM write cost of the merge (about 13 %,
 the same share as C14), the selector with candidate queries in registers
 (64 registers, 4 CTAs/SM: slower than the per-kg selector for C8/C10), a
-four-vectors-per-thread layout kernel (1.87 vs 1.82 ms). The C10 residual
+four-vectors-per-thread layout kernel (1.87 vs 1.82 ms), two frames per
+selector iteration with interleaved greedy loops (slower: 6.8/8.5 ms for
+C8/C10 at 4 CTAs/SM), xor-butterfly reductions instead of REDUX in the
+selector (slower), rsqrtf for the basis norm (-0.2 ms, 2.5e-7 of seeds
+change; not adopted). The C10 residual
 against the estimate (130 vs 122 ms) is the merge: the five-lane-pair
 ownership reduction (four index shuffles per column instead of two) and the
 cross-warp exchange of groups that straddle warps cost about 8 ms, and no
