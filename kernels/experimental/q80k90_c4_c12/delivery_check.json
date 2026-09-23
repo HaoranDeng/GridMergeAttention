@@ -1,0 +1,36 @@
+{
+  "passed": true,
+  "gpu_used": false,
+  "selected_constructors": [
+    {
+      "capacity": 4,
+      "seed_tile": 4,
+      "head_chunk": 8,
+      "selector_fp64": false
+    },
+    {
+      "capacity": 6,
+      "seed_tile": 8,
+      "head_chunk": 4,
+      "selector_fp64": false
+    },
+    {
+      "capacity": 8,
+      "seed_tile": 8,
+      "head_chunk": 8,
+      "selector_fp64": false
+    },
+    {
+      "capacity": 10,
+      "seed_tile": 16,
+      "head_chunk": 4,
+      "selector_fp64": false
+    },
+    {
+      "capacity": 12,
+      "seed_tile": 16,
+      "head_chunk": 4,
+      "selector_fp64": false
+    }
+  ]
+}
