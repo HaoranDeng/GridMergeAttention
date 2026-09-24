@@ -221,7 +221,18 @@ four-vectors-per-thread layout kernel (1.87 vs 1.82 ms), two frames per
 selector iteration with interleaved greedy loops (slower: 6.8/8.5 ms for
 C8/C10 at 4 CTAs/SM), xor-butterfly reductions instead of REDUX in the
 selector (slower), rsqrtf for the basis norm (-0.2 ms, 2.5e-7 of seeds
-change; not adopted). The C10 residual
+change; not adopted). A further merge round against the same targets, all
+measured on C8 and all closed: reusing the softmax exponentials as bf16 in
+shared memory instead of a second ex2 per (row, key) (merge 48.0 -> 51.2 ms
+and rel-L2 2.6e-3 -> 5.3e-3), pre-multiplying the merge's packed queries by
+scale*log2e in the layout kernel to drop one FMUL per (row, key) (48.0 ->
+48.05, rel-L2 2.65e-3), FFMA normalization (48.03), and four CTAs/SM through
+an 8 KB two-round staging buffer (the half staging alone costs 2 ms at
+3 CTAs; at 4 CTAs the kernel spills 72-80 B and measures 53.7-55.6 ms; the
+query prefetch is worth 2 ms at 3 CTAs). Removing instructions from the
+scalar phase does not move the merge, so it is latency bound at three warps
+per scheduler, and every route to more warps costs registers it does not
+have. The C10 residual
 against the estimate (130 vs 122 ms) is the merge: the five-lane-pair
 ownership reduction (four index shuffles per column instead of two) and the
 cross-warp exchange of groups that straddle warps cost about 8 ms, and no

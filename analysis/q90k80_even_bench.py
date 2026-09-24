@@ -32,7 +32,7 @@ args=ap.parse_args()
 
 T,H=21,40;cap=args.cap;AH=args.hc
 mflags=tuple(args.merge_flags.split());rflags=tuple(args.route_flags.split())
-tiles=args.tiles if args.tiles>0 else max(1,(merge_tiles(T,cap,args.packed)+5)//6)
+tiles=args.tiles if args.tiles>0 else max(1,(merge_tiles(T,cap,args.packed)+3)//4)
 t0=time.time()
 mmod=native_merge(T,H,AH,cap,bool(args.fused),args.packed,args.minblocks,mflags)
 rmod=native_route(T,H,AH,cap,rflags)
