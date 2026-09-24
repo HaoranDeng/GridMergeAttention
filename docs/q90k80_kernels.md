@@ -232,7 +232,17 @@ an 8 KB two-round staging buffer (the half staging alone costs 2 ms at
 query prefetch is worth 2 ms at 3 CTAs). Removing instructions from the
 scalar phase does not move the merge, so it is latency bound at three warps
 per scheduler, and every route to more warps costs registers it does not
-have. The C10 residual
+have. Route: a query-split variant (four consumer warpgroups of 24 query
+columns each, all consuming every 64-key chunk from one shared 4-stage ring,
+four threads per query in the softmax, 96 registers, no cross-warpgroup
+merge) ran correctly (rel-L2 to the reference 1.46e-3) but at 55.9 ms
+against 40.0 ms for C8: with N=24 every WGMMA reads a 2 KB A operand for a
+quarter of the work, so the K and V tiles cross the shared-memory port four
+times per chunk and the tensor pipe becomes operand bound. (Lesson recorded:
+setmaxnreg draws from a per-CTA pool, so consumers can only request what the
+producer releases; an unbalanced request deadlocks the CTA.) Register caps
+of 160/152/144 on the two-warpgroup route spill 192 B and run at 64 ms, so
+three warpgroups holding all 96 columns are out of reach. The C10 residual
 against the estimate (130 vs 122 ms) is the merge: the five-lane-pair
 ownership reduction (four index shuffles per column instead of two) and the
 cross-warp exchange of groups that straddle warps cost about 8 ms, and no
