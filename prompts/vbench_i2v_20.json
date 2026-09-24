@@ -1,0 +1,240 @@
+{
+  "schema_version": 1,
+  "name": "vbench_i2v_20_sparkler_v1",
+  "default_since": "2026-09-24",
+  "user_authorized_default": true,
+  "selection": "Fixed20 user-selected suite: historical stratified000-018 plus same-category replacement019. No further sampling.",
+  "selection_history": {
+    "post_hoc_replacement": true,
+    "replaced_index": 19,
+    "old_prompt": "a shadow of a hand reaching for a leaf",
+    "old_image_sha256": "a07b8838c2e1f6039c32f2cc5cdb84e31d2bee77ce48cd7b076d8b20bd6645e4",
+    "replacement_source_index": 956,
+    "candidate_selection": "Single candidate from previously saved stratified Random(0) proposal; no resampling after quality measurement.",
+    "original_selection": "one base prompt (no camera-motion suffix) per distinct image, stratified across image_type by largest remainder, file order within type",
+    "note": "The replacement followed inspection of original results. Later adoption as the default does not make that historical comparison prespecified."
+  },
+  "source": {
+    "metadata_sha256": "8cf4d34dc11779a336c216a1a71d482927cfa24a1bf736ab5c92425609f129f8",
+    "metadata_entries": 1118,
+    "dataset": "dc-ai/vbench_i2v",
+    "dataset_revision": "e3d5ecd4b92dda5c0a842e9b8bc04e7a2d6630ac",
+    "crop": "16-9",
+    "replacement_image_url": "https://huggingface.co/datasets/dc-ai/vbench_i2v/resolve/e3d5ecd4b92dda5c0a842e9b8bc04e7a2d6630ac/crop/16-9/a%20person%20holding%20a%20sparkler%20in%20their%20hand.jpg"
+  },
+  "prompt_text": "Raw English prompt_en, no prompt extension",
+  "seed_policy": "base_seed0 + prompt_index",
+  "protocol": {
+    "model": "Wan2.1-I2V-14B-720P",
+    "frames": 81,
+    "steps": 50,
+    "height": 720,
+    "width": 1280,
+    "sampler": "FlowUniPC",
+    "flow_shift": 5.0,
+    "guidance_scale": 5.0,
+    "attention_calls_per_video": 4000
+  },
+  "items": [
+    {
+      "index": 0,
+      "prompt_en": "an astronaut floating in space with the earth in the background",
+      "image_name": "an astronaut floating in space with the earth in the background.jpg",
+      "image_type": "single-human",
+      "seed": 0,
+      "prompt_sha256": "6bd63b5bee7ec7e96a085a883aa9c9d1ea7f40b6119e212ab8c8bc243149f9a6",
+      "image_sha256": "823c008b3d36bc17c276feaf30fdf23fd06f17d3f1333f6a5cf89e3f07b2a22a",
+      "source_index": 972
+    },
+    {
+      "index": 1,
+      "prompt_en": "A little girl, lost in thought, is quietly sitting on the bus",
+      "image_name": "A little girl, lost in thought, is quietly sitting on the bus.jpg",
+      "image_type": "single-human",
+      "seed": 1,
+      "prompt_sha256": "228795ab14aab4d774702da5abc4b7b914a0ed9dfca9bb2d726ea7820673671e",
+      "image_sha256": "df478c34492d93f27c220d3bab554c70297ecbf35b0a929ae6a7ab4a839520ee",
+      "source_index": 973
+    },
+    {
+      "index": 2,
+      "prompt_en": "a man holding a tray in front of a brick wall",
+      "image_name": "a man holding a tray in front of a brick wall.jpg",
+      "image_type": "single-human",
+      "seed": 2,
+      "prompt_sha256": "e6e0654e6380ab3cdfee366ce40b7bb4e1d37079829ed5c043076f94a38c454a",
+      "image_sha256": "de69ea707b12676dd58c5c45ea12bb6fb0b4b4e775605e241cabed469722d522",
+      "source_index": 974
+    },
+    {
+      "index": 3,
+      "prompt_en": "an older man playing a saxophone on the street",
+      "image_name": "an older man playing a saxophone on the street.jpg",
+      "image_type": "single-human",
+      "seed": 3,
+      "prompt_sha256": "8d354996d5a6c95f12861eca449a99b852bb419bb5168c7fc1af3c7ff44e4759",
+      "image_sha256": "d5ea92bca65e1c2ea3cc6a84bd83cf544d0e6eb140c07ba58ecc24816f7cda5c",
+      "source_index": 975
+    },
+    {
+      "index": 4,
+      "prompt_en": "a brown bear in the water with a fish in its mouth",
+      "image_name": "a brown bear in the water with a fish in its mouth.jpg",
+      "image_type": "animal",
+      "seed": 4,
+      "prompt_sha256": "e11ffd1fbbce9c3408c9f4259ef309a2a659c2fcbf4f42ef8e001b2f6261c640",
+      "image_sha256": "bbcf851ef52d17f8e1eccce9d449109e61a35d5548d1556d3b8f57e9830b23df",
+      "source_index": 872
+    },
+    {
+      "index": 5,
+      "prompt_en": "a close-up of a hippopotamus eating grass in a field",
+      "image_name": "a close-up of a hippopotamus eating grass in a field.jpg",
+      "image_type": "animal",
+      "seed": 5,
+      "prompt_sha256": "bc8c93f2d434b6de4bf00df1695136b2b2ac40e053c18a6b2a74c948bbd1f95f",
+      "image_sha256": "a36db0ce7deee9e3db53e8af67c19189bf8366221239de1d0829c349e68bfea1",
+      "source_index": 873
+    },
+    {
+      "index": 6,
+      "prompt_en": "a sea turtle swimming in the ocean under the water",
+      "image_name": "a sea turtle swimming in the ocean under the water.jpg",
+      "image_type": "animal",
+      "seed": 6,
+      "prompt_sha256": "db64c33396c73edc9a0e16ea006d14cb552ffc612f336a1507332e18b2bfbfcd",
+      "image_sha256": "d5a383c998e54616f5bc224bee0d9ccd8dd1418164ee7a7914e82a62a1d97285",
+      "source_index": 874
+    },
+    {
+      "index": 7,
+      "prompt_en": "an aerial view of a small town on the edge of the ocean",
+      "image_name": "an aerial view of a small town on the edge of the ocean.jpg",
+      "image_type": "architecture",
+      "seed": 7,
+      "prompt_sha256": "a37ea2e01f336f4b7f97ab7f6ff9bd8f5da1250304feb87fb7f0c2f39f7421f5",
+      "image_sha256": "6c1e3a9d4c9b89fe5ecc2f8df80791e634094f522b7fba5ad8aacb6458abdfde",
+      "source_index": 64
+    },
+    {
+      "index": 8,
+      "prompt_en": "Colorful buildings on the seaside cliffs",
+      "image_name": "Colorful buildings on the seaside cliffs.jpg",
+      "image_type": "architecture",
+      "seed": 8,
+      "prompt_sha256": "193eeb4d35a15fd568728057432ab17d4134ac15146333dcb84d9959a991399e",
+      "image_sha256": "9a487eeda0799fbf808270e70d9cf4be895f7914bb991107965b4045eace90f6",
+      "source_index": 72
+    },
+    {
+      "index": 9,
+      "prompt_en": "two people in a canoe on a lake with mountains in the background",
+      "image_name": "two people in a canoe on a lake with mountains in the background.jpg",
+      "image_type": "scenery",
+      "seed": 9,
+      "prompt_sha256": "49c5c313f1d53c4c8b2254e8b29ced0a98bec11ee289f83aaee6b941521267d3",
+      "image_sha256": "be9d17077882a36e92a2d69f37770ecf1019177aa87c4b93b0cc3130847daa0c",
+      "source_index": 552
+    },
+    {
+      "index": 10,
+      "prompt_en": "an aerial view of a snowy road in a forest",
+      "image_name": "an aerial view of a snowy road in a forest.jpg",
+      "image_type": "scenery",
+      "seed": 10,
+      "prompt_sha256": "5b2ecba65991b3177c448079a48cad75a365897bb7811f18e202afa18327d5d4",
+      "image_sha256": "461fdcfb1082159ea7199b327b4039b49cc0bdaf2f488734e42b22b32a1fcf60",
+      "source_index": 560
+    },
+    {
+      "index": 11,
+      "prompt_en": "tangerines in a metal bowl on a table",
+      "image_name": "tangerines in a metal bowl on a table.jpg",
+      "image_type": "food",
+      "seed": 11,
+      "prompt_sha256": "0810cd62b19c98529bca6ccabe12af022506fc9a661f12f33787069c0854f93f",
+      "image_sha256": "d6cb3edbc100c6c02896d44d9deb576144015ddf6b3ef12f6738ebac5690c16b",
+      "source_index": 949
+    },
+    {
+      "index": 12,
+      "prompt_en": "a person is cooking meat on a grill with flames",
+      "image_name": "a person is cooking meat on a grill with flames.jpg",
+      "image_type": "food",
+      "seed": 12,
+      "prompt_sha256": "a09fb21dadcc34c05f181936b211131ae846e1324c1a8779f8dbaa3f85fca5b6",
+      "image_sha256": "b7d59840c57d357b534a3a05a194e7ac23857e2db63a7fbfb4910bb762fe66b2",
+      "source_index": 954
+    },
+    {
+      "index": 13,
+      "prompt_en": "two people performing a sword fight in front of a forest",
+      "image_name": "two people performing a sword fight in front of a forest.jpg",
+      "image_type": "multiple-human",
+      "seed": 13,
+      "prompt_sha256": "a1d5cf87d2af36957ef2b705d2b0742ec352a59e88d97b4e5d98409086f5f855",
+      "image_sha256": "63950197b55e76a3174677b1f0b38b01e61559806b0f7f7a692f038d072182fd",
+      "source_index": 1026
+    },
+    {
+      "index": 14,
+      "prompt_en": "A group of people in a yellow raft is rowing through turbulent waters",
+      "image_name": "A group of people in a yellow raft is rowing through turbulent waters.jpg",
+      "image_type": "multiple-human",
+      "seed": 14,
+      "prompt_sha256": "e773ceefe8ae29fa3bb1cdb564d604670c08412ffae192187bd5e47ea99bb7fc",
+      "image_sha256": "3fa285b66235ee23b9c8ba89c1c10f1bfad2f4de857fab6ecdca1fb5fd139040",
+      "source_index": 1037
+    },
+    {
+      "index": 15,
+      "prompt_en": "cars are driving down a street lined with tall trees",
+      "image_name": "cars are driving down a street lined with tall trees.jpg",
+      "image_type": "transportation",
+      "seed": 15,
+      "prompt_sha256": "a6ec630dee2d9190b34e25152507f25d4bc02827046f536a18034db6c1e09bf8",
+      "image_sha256": "957ec58089bfc5d608d44fe283ff584d290a247638c54fc7e9f3d7f5388b232f",
+      "source_index": 918
+    },
+    {
+      "index": 16,
+      "prompt_en": "the cars on the street are waiting for the traffic lights",
+      "image_name": "the cars on the street are waiting for the traffic lights.jpg",
+      "image_type": "transportation",
+      "seed": 16,
+      "prompt_sha256": "97c8a4677e58dc257d0ac94556bacd6117c0b10b01b7f151b03dd6ae694cf68d",
+      "image_sha256": "6e3d42f0cfaedc38159eeb7af158e5e75c8e7c7e1a510c73b61467e918da64c2",
+      "source_index": 919
+    },
+    {
+      "index": 17,
+      "prompt_en": "a close-up of a pink rose with water droplets on it",
+      "image_name": "a close-up of a pink rose with water droplets on it.jpg",
+      "image_type": "plant",
+      "seed": 17,
+      "prompt_sha256": "7bcf5e03d9669fc9589bed8f1ea006fa469d62db2c4a84b9662ca9d3d9c7df0d",
+      "image_sha256": "6e6edb62891c61c48231c3733bc83e2bb42707f9eeb37ce6138cc3fdde2c5224",
+      "source_index": 953
+    },
+    {
+      "index": 18,
+      "prompt_en": "a bar with chairs and a television on the wall",
+      "image_name": "a bar with chairs and a television on the wall.jpg",
+      "image_type": "indoor",
+      "seed": 18,
+      "prompt_sha256": "07d0e0e5ea23e04acf75ba07824a3d0e258a69dcfb0dd2a8eab99db6c83b7423",
+      "image_sha256": "15219291d4d33f12900292ad221f7f256f4de0e2c2d767dc7569d20043ab611f",
+      "source_index": 384
+    },
+    {
+      "index": 19,
+      "prompt_en": "a person holding a sparkler in their hand",
+      "image_name": "a person holding a sparkler in their hand.jpg",
+      "image_type": "other",
+      "seed": 19,
+      "prompt_sha256": "93f8ddea3f6296b0639542fe6b10426cc22b655a65b8ca230df8c02a47e2a1fc",
+      "image_sha256": "000b6789d7f7157187fa2729624c38750e95a5648d968dda36c9bb6fa9e12ef6",
+      "source_index": 956
+    }
+  ]
+}

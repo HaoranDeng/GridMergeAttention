@@ -1,0 +1,5 @@
+# Frozen experiment sources must retain their measured byte hashes.
+*.json text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+campaigns/** -text whitespace=cr-at-eol
