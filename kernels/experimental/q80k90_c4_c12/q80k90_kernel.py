@@ -63,12 +63,15 @@ def candidate_table():
 
 
 @tr.jit
-def _pack_inputs(Q,K,V,QP,KP,VP,Packed,T:tl.constexpr,H:tl.constexpr,B:tl.constexpr):
+def _pack_inputs(Q,K,V,QP,KP,VP,Packed,T:tl.constexpr,H:tl.constexpr,
+                 QS:tl.constexpr,QH:tl.constexpr,QD:tl.constexpr,
+                 KS:tl.constexpr,KH:tl.constexpr,KD:tl.constexpr,
+                 VS:tl.constexpr,VH:tl.constexpr,VD:tl.constexpr,B:tl.constexpr):
     x=tl.program_id(0)*B+tl.arange(0,B)
     total=H*T*3600*128
     d=x%128;token=x//128;head=token//(T*3600)
     pos=token%(T*3600)
-    src=((pos*H+head)*128+d).to(tl.int64)
+    src=pos.to(tl.int64)*QS+head.to(tl.int64)*QH+d*QD
     q=tl.load(Q+src,x<total,0)
     tl.store(QP+x,q,x<total)
     # Involution: transpose the 4x4 uint32 words in each 32-BF16 slice.
@@ -76,9 +79,18 @@ def _pack_inputs(Q,K,V,QP,KP,VP,Packed,T:tl.constexpr,H:tl.constexpr,B:tl.conste
     tl.store(Packed+(token*128+pd).to(tl.int64),q,x<total)
     frame=pos//3600;within=pos%3600;pair=within//90;j=within%90
     original=((frame*45+j%45)*80+pair*2+j//45)
-    kvsrc=((original*H+head)*128+d).to(tl.int64)
-    tl.store(KP+x,tl.load(K+kvsrc,x<total,0),x<total)
-    tl.store(VP+x,tl.load(V+kvsrc,x<total,0),x<total)
+    ksrc=original.to(tl.int64)*KS+head.to(tl.int64)*KH+d*KD
+    vsrc=original.to(tl.int64)*VS+head.to(tl.int64)*VH+d*VD
+    tl.store(KP+x,tl.load(K+ksrc,x<total,0),x<total)
+    tl.store(VP+x,tl.load(V+vsrc,x<total,0),x<total)
+
+
+def _pack_inputs_into(q,k,v,qp,kp,vp,packed,t,h):
+    # Diffusers supplies head-major storage through token-major views. Read
+    # each input's actual strides instead of materializing three full copies.
+    _pack_inputs[(tr.cdiv(q.numel(),1024),)](
+        q,k,v,qp,kp,vp,packed,t,h,
+        *q.stride()[1:],*k.stride()[1:],*v.stride()[1:],1024)
 
 @tr.jit
 def _select(Q,K,Table,Seeds,T:tl.constexpr,H:tl.constexpr,BG:tl.constexpr,CAP:tl.constexpr,FP64:tl.constexpr):
@@ -374,9 +386,8 @@ class Q80K90:
         with torch.cuda.device(q.device):
             t,h=self.prepare(q)
             if self.fl:
-                q,k,v=[x.contiguous() for x in (q,k,v)]
                 qp,kp,vp,packed=self.qp,self.kp,self.vp,self.packed
-                _pack_inputs[(tr.cdiv(q.numel(),1024),)](q,k,v,qp,kp,vp,packed,t,h,1024)
+                _pack_inputs_into(q,k,v,qp,kp,vp,packed,t,h)
             else:
                 qp=q.reshape(t,45,80,h,128).permute(3,0,1,2,4).contiguous()
                 kp=k.reshape(t,45,40,2,h,128).permute(4,0,2,3,1,5).reshape(h,t*40,90,128).contiguous()

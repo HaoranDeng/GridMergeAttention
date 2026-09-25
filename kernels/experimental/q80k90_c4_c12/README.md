@@ -63,3 +63,25 @@ output = attention(q, k, v)
 Memory tradeoff: selected C4 and C8 use head_chunk=8. Their merged K/V workspace is twice the corresponding head_chunk=4 workspace. C8 improves latency only about 0.4%; the previous v3 HC4 implementation and configuration remain available when lower workspace use matters.
 
 Published text uses LF line endings. gpu_evidence.json retains both measured source hashes and published source hashes; normalization changes no operators or configuration values. Raw measured sources remain with the experiment artifacts.
+
+## Strided input packing (2026-09-25)
+
+The fused-layout path now reads the actual strides of Q, K and V. Diffusers
+passes token-major views backed by head-major storage; the previous path
+materialized three contiguous tensors before packing them again. Removing
+those copies leaves selection, merge weights, entropy bias and routing
+unchanged. The `fused_layout=False` reference path is unchanged.
+
+`check_input_layouts.py` validates all packed tensors against independent
+PyTorch layout operations, including mixed strides, nonzero storage offsets,
+tail heads and the full `[1,75600,40,128]` shape. All 16 cases passed exactly
+on an exclusively idle L40S. With a frozen original v4 packer as the baseline,
+head-major input packing decreased from 15.527 to 8.445 ms and eliminated
+2,322,432,000 bytes of temporary allocations. Contiguous token-major input
+packing was 8.609 versus 8.626 ms. These are packing-stage L40S results only;
+they do not establish a new H200 attention or full-video latency.
+
+Evidence: `input_layout_validation_20260925.json`. The historical H200 timing
+tables above remain unchanged. See
+[`docs/q80k90_c4_c12_kernels.md`](../../../docs/q80k90_c4_c12_kernels.md)
+for the 61.4/67.3/72.1 ms timing audit and remaining H200 validation.
