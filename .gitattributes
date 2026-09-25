@@ -1,0 +1,7 @@
+*.py text eol=lf
+*.sh text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+native_hip/*.hip text eol=lf
+scripts/amdhpc/benchmark_mi300_hip_fisher.sbatch text eol=lf

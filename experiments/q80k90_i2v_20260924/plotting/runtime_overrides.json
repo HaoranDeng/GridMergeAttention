@@ -1,0 +1,11 @@
+{
+  "task": "I2V",
+  "unit": "ms per attention layer",
+  "source": "User instructions on 2026-09-24: C6 time 83.6, C8 time 104.1, C10 time 133.8",
+  "scope": "Plot coordinates only. Preserve original measured per-GPU times and quality populations. Apply pending settings when their quality points are added.",
+  "GCA (ours)": {
+    "C6": 83.6,
+    "C8": 104.1,
+    "C10": 133.8
+  }
+}

@@ -1,0 +1,35 @@
+image_or_video_shape:
+  - 1
+  - 21
+  - 16
+  - 90
+  - 160
+denoising_step_list:
+  - 1000
+  - 750
+  - 500
+  - 250
+warp_denoising_step: true
+model_kwargs:
+  model_name: Wan2.1-T2V-14B-StepDistill-CfgDistill
+  load_pretrained_weights: false
+  timestep_shift: 5.0
+token_merging_args:
+  enable: false
+  attention_backend: sparsepr_all
+  sparsepr_options:
+    target_density: 0.22
+    num_q_centroids: 300
+    num_k_centroids: 1000
+    probe_rows: 64
+    repair_rank: 16
+    role_q_rank: 64
+    role_k_rank: 48
+    role_v_rank: 16
+    metric_sample_tokens: 2048
+    kmeans_iter_init: 25
+    kmeans_iter_step: 2
+    selector_policy: attention_mass
+    flashinfer_backend: auto
+    compile_role_kv_projection: false
+    reset_every_calls: 4

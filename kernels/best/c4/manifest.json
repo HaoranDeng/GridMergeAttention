@@ -1,0 +1,19 @@
+{
+  "variant": "c4",
+  "scope": "Production exact-capacity C4 implementation.",
+  "files": {
+    "__init__.py": "e9d0c8fd61aaf7ab417f045620bec37dc7d6dcff75824542e2c36aabaa57d699",
+    "optimized_c4.py": "9ea629c0966ca1702f248e98e8c2e363d1d295e1e2631030a9dfdff670431cfe",
+    "operator.py": "20207853c01f8bea26061d9e9d1db3b4447c455727fd55d2bbeea6740903098f",
+    "fused_selector.py": "3b91ef84f9aa47e91f020ba05482fadce3cba143bef431c36c379f51af9c6671",
+    "route_reference.py": "6a62c06dd4ea1d6dc45b34be2e01548a5b8a65493597db9a1f1a4ede87df3f8f",
+    "fisher_c4_desc_select.cu": "182d1d7e635c05d91fb447f2386025d5d5600954f1da9d2287876cf666cac566",
+    "fisher_c4_selector_v9c_halving_mxredux.cu": "aed1e0536e9cf94a4d3774b6cd2dd266b20d38bbddd37233814bca9c4f8ace53",
+    "warp_mma.cuh": "3c2335479a4fef87e677693c7f3bcdb90c3c82101bca0479b6bd03cef48f2fd2"
+  },
+  "shared_dependencies": {
+    "attention/capacity_contract.py": "adf40ac79e5f0a1ce08744e98e2e766b6e0736709b447d6a757db2c093d0e124",
+    "attention/adaptive_seed_pytorch.py": "ab288d3a1d70013f912a944f912337633cfc6fe2228b9ee4649febcb94c42e22",
+    "attention/hard_route_pytorch.py": "eaa9dffada5f7eed2cab7457050c3cccd116b5e3fb705ea5b138eb67741e3ffa"
+  }
+}

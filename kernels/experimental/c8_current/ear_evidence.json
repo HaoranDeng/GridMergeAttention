@@ -1,0 +1,72 @@
+{
+  "summary": {
+    "cases": 384,
+    "mean_relative_l2": 0.06844640658285546,
+    "pooled_relative_l2": 0.17480155469367,
+    "ear_wins_vs_current": 298,
+    "realized_density": 0.281138614463007,
+    "mean_attention_ms": 29.92980511652099,
+    "mean_sdpa_attention_ms": 31.715580423672993,
+    "speedup_vs_sdpa": 1.0596654505500362,
+    "timing_heads": 4
+  },
+  "layers": [
+    0,
+    5,
+    10,
+    15,
+    20,
+    25,
+    30,
+    35
+  ],
+  "heads": [
+    0,
+    10,
+    20,
+    30
+  ],
+  "samples": [
+    [
+      0,
+      10,
+      20
+    ],
+    [
+      0,
+      22,
+      44
+    ],
+    [
+      0,
+      40,
+      79
+    ]
+  ],
+  "layer_means": {
+    "0": 0.10022405945346691,
+    "5": 0.025626684092761327,
+    "10": 0.058040230379750334,
+    "15": 0.05057126008129368,
+    "20": 0.06343887144854914,
+    "25": 0.09347838823062678,
+    "30": 0.09573102917056531,
+    "35": 0.06046072980583025
+  },
+  "layer0_fraction_squared_error": 0.8425718761344678,
+  "source_sha256": {
+    "/local2/denghaoran/GridMergeAttention/q45k80c8_no_rf0_20260919/analysis/compare_ear_c8_current.py": "dbb8bcec9953c090af6cb1ba22ba9a234ef68ac6ce0359b55196d11eb7eb67f1",
+    "/local2/denghaoran/GridMergeAttention/experiments/wan14b_720p_50step_svg_ear_density25_rerun_20260917/svg_runtime/svg/models/wan/attention.py": "b3899c3f06df58822899ecc4f83335df1adf8f7c2983661295c3ba5182d11c9c",
+    "/local2/denghaoran/GridMergeAttention/experiments/wan14b_720p_50step_svg_ear_density25_rerun_20260917/svg_runtime/svg/kmeans_utils.py": "7169fd4db968a55c2ffe67bcf19aeebdc3ca0620a9cf18a12c93365a67b07e4d",
+    "/local2/denghaoran/GridMergeAttention/experiments/c8_current_20260919/quality.json": "8cf78cf40820a4a74010a31170361a228ec3a05afb360772fd7cbab55fe7aa5f"
+  },
+  "guard": {
+    "valid": true,
+    "error": null,
+    "returncode": 0,
+    "finished_at": 1789814810.5635483
+  },
+  "seed_policy": "EAR initialization seed 0 per prompt, logical H40 random centroid indices selected at heads 0/10/20/30",
+  "state_policy": "one processor per layer, reset each prompt, advance once per denoising step",
+  "timing_scope": "H4 diagnostic only; three warmed paired complete EAR/SDPA calls per capture with centroid and RNG state restored; not comparable to H40 C8 timing"
+}

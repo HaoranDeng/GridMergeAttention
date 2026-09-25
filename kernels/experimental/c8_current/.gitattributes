@@ -1,0 +1,2 @@
+# Keep the measured CUDA source hashes identical on Windows and Linux.
+*.cu -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

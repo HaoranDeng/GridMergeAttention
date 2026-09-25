@@ -1,0 +1,57 @@
+# Importance-weighted response-span seeds for hard C4.
+#   alpha = 0.3   candidate pool = 30 query rows   grid 45 x 80 (720x1280)
+#
+# alpha is the exponent on exp(alpha * z), z being a candidate query row's
+# z-scored log attention mass. alpha=0 is pure diversity (the control);
+# 0.3 was the measured optimum at a full 30-row pool. Do not read the
+# filename as 0.03.
+#
+# Screened on Wan2.1-1.3B base at 480p, 20 steps, layers 0/10/20/29,
+# heads 0/6, rel-L2 vs dense: fixed local seeds 0.0713, alpha=0.3 pool=30
+# 0.0466 (-34.6%). The 720p variant is untested; the 45-row grid there
+# means pool=30 is a partial window, not every row.
+#
+# Checkpoint: pass the 14B distilled model that lives inside the model dir,
+#   --checkpoint $WAN_MODEL_ROOT/Wan2.1-T2V-14B-StepDistill-CfgDistill/distill_model.pt
+# NOT self_forcing_dmd.pt. Self-Forcing is a different, causal generation path
+# (token_merging_self_forcing_causal.yaml) and does not belong on this config.
+# The repo's 720p launchers guard this with MIN_CHECKPOINT_BYTES=28e9.
+#
+# Backend: hard_c4 runs the merge and route stages in Triton and is both
+# slightly faster and slightly more accurate than sdpa. Both are correct; sdpa
+# is the readable reference.
+#
+# COST WARNING. Seed selection runs in PyTorch and is 99% of this path's
+# runtime (12.07 s of 12.23 s per call, 480p 21 frames 12 heads, A100). The
+# Triton merge/route buys only 1.08x at 480p and 1.11x at 720p, because merge
+# and route are ~1% of the work. This configuration is for measuring quality,
+# not speed; a fair speed comparison needs a selector kernel, which upstream
+# already has for its own span mode.
+image_or_video_shape:
+  - 1
+  - 21
+  - 16
+  - 90
+  - 160
+denoising_step_list:
+  - 1000
+  - 750
+  - 500
+  - 250
+warp_denoising_step: true
+model_kwargs:
+  model_name: Wan2.1-T2V-14B-StepDistill-CfgDistill
+  load_pretrained_weights: false
+  timestep_shift: 5.0
+token_merging_args:
+  enable: true
+  f_tied: 1
+  h_reduce: 1
+  w_reduce: 1
+  layout: hard_route
+  query_outer_chunk: 1
+  head_chunk: 2
+  num_merge_tokens: 4
+  seed_mode: weighted_span_alpha0p3_pool30
+  seed: 0
+  hard_route_backend: hard_c4

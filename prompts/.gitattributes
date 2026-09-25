@@ -1,0 +1,3 @@
+# Paired input lists and manifests must match on Windows and Linux.
+vbench_i2v_20.* text eol=lf
+i2v/* text eol=lf

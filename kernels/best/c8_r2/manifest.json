@@ -1,0 +1,16 @@
+{
+  "variant": "c8_r2",
+  "scope": "Production exact-capacity optimized C8 implementation.",
+  "files": {
+    "__init__.py": "b3588f170f0eecff654a0f10df6c4930a701b3acfc33440d49e18443024b5f01",
+    "gma_c8_r2.py": "1f5fd830f11f3bfcd858c343ede6cb1f4635f02176b1111fb0760cc66689c154",
+    "gma_c8_candidate_table.json": "eeffd8d22084d68732d89291f753bf6a68721213ecc372cc66253e5c7cd8b873",
+    "gma_c8_cuda_probe.cu": "2951e28d0e988b45024da8a3b34451088339ac339db49e52f543f21221235fd5",
+    "b1_gs_regpipe_v0.cu": "8d40219181ccfd214a6265e88d99eed854037af73c926045e5df40504b8802b4",
+    "gma_c8_d10a_fused_argmax_v0.cu": "e842a82cb6d3e95672749f598fd7aca9781cc1f840b2d14058d6b8f9104cd486",
+    "gma_c8_route_pipeline.cu": "7cd72aeed49c86b1a2044dda77531ea067d61d22099d8c7370041e59588e6c0c"
+  },
+  "shared_dependencies": {
+    "attention/capacity_contract.py": "adf40ac79e5f0a1ce08744e98e2e766b6e0736709b447d6a757db2c093d0e124"
+  }
+}

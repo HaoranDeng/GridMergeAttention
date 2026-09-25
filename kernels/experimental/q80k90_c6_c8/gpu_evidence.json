@@ -1,0 +1,338 @@
+{
+  "revision": "v3",
+  "protocol": "3 prompts x 4 frozen StepDistill timesteps x 8 fixed layers x 40 independent heads; 96 cases, 3 alternating repeats",
+  "layers": [
+    0,
+    5,
+    10,
+    15,
+    20,
+    25,
+    30,
+    35
+  ],
+  "shape": [
+    1,
+    75600,
+    40,
+    128
+  ],
+  "dtype": "bfloat16",
+  "runs": {
+    "C8": {
+      "complete": true,
+      "capacity": 8,
+      "target_ms": 100,
+      "mean_attention_ms": 122.21195499102275,
+      "dense_mean_attention_ms": 333.27775213453504,
+      "speedup_vs_sdpa": 2.7270470565585536,
+      "target_met": false,
+      "numerical_passed": true,
+      "faster_than_dense_all_cases": true,
+      "config": {
+        "merge_backend": "cuda",
+        "head_chunk": 4,
+        "route_m": 128,
+        "route_n": 128,
+        "native_tiles": 42,
+        "seed_tile": 8,
+        "selector_precision": "fp32",
+        "selector_groups": 2,
+        "fast_math": true,
+        "direct_store": true,
+        "min_blocks": 4,
+        "fused_layout": true,
+        "owner_mode": 1,
+        "vector_store": true,
+        "route_stages": 3,
+        "route_warps": 8,
+        "sum_groups": 2
+      },
+      "gpu": "NVIDIA H200",
+      "protocol": "3 prompts x 4 frozen timesteps x 8 fixed layers x 40 real heads",
+      "video_quality": "pending; no videos generated",
+      "source_sha256": {
+        "q80k90_kernel.py": "fd3b2fdb46ba1210c6ba06c44c1ff0db6151a21ad16445a04dab8b84f645e802",
+        "q80k90_merge.cu": "253f3b3130da3bda0c45ae6e51dfe05b511931e387ba5adf2c6be70d17bf2b70"
+      },
+      "numerical_path": "018_numerical/validate.json",
+      "real40_path": "019_real40/real40.json",
+      "numerical_gate": {
+        "approved": true,
+        "summary": {
+          "cases": 384,
+          "mean_relative_l2_vs_operator": 0.0017001754440570949,
+          "max_relative_l2_vs_operator": 0.004576325416564941,
+          "mean_l2_to_dense": 0.10388787417226315,
+          "reference_mean_l2_to_dense": 0.10386846283896982,
+          "mean_seed_changed_fraction": 6.329571959895475e-06,
+          "pooled_l2_to_dense": 0.1078649853387146
+        },
+        "invariants": {
+          "rf0_reused": true,
+          "exact_distinct_capacity": 8,
+          "two_intersections_forced": true,
+          "empty_cluster_bias_negative_infinity": true,
+          "constant_value_preserved": true
+        },
+        "selected_configuration_checks": {
+          "passed": true,
+          "shape": [
+            1,
+            7200,
+            5,
+            128
+          ],
+          "all_output_positions_checked": true,
+          "partial_head_chunk_covered": true,
+          "relative_l2_vs_independent_triton": 0.001585809513926506,
+          "rf0_seed_reuse": true,
+          "exact_distinct_capacity": 8,
+          "two_intersection_anchors": true,
+          "empty_cluster_zero_kv_negative_infinity_bias": true,
+          "constant_value_preserved": true
+        },
+        "thresholds_owner": "implementation review, not user universal tolerance",
+        "engineering_thresholds": {
+          "max_relative_l2_vs_operator": 0.02,
+          "max_mean_seed_changed_fraction": 0.005,
+          "max_absolute_mean_l2_regression": 0.0005
+        },
+        "source_sha256": {
+          "q80k90_kernel.py": "fd3b2fdb46ba1210c6ba06c44c1ff0db6151a21ad16445a04dab8b84f645e802",
+          "q80k90_merge.cu": "253f3b3130da3bda0c45ae6e51dfe05b511931e387ba5adf2c6be70d17bf2b70"
+        }
+      },
+      "previous_v2_ms": 139.5175281100803,
+      "latency_reduction_vs_v2_pct": 12.403870218660495,
+      "tuning_attempts": 102,
+      "tuning_valid": 98,
+      "monitor_samples": 2018,
+      "foreign_compute_samples": 0,
+      "logical_full50_major_pflops": 112.641048576,
+      "baseline_l2_increase_pct": {
+        "SVG-EAR top_p=0.85": 59.1858746248987,
+        "original Q45K80C8": 17.221740174420486
+      }
+    },
+    "C6": {
+      "complete": true,
+      "capacity": 6,
+      "target_ms": 120,
+      "mean_attention_ms": 108.70809525913663,
+      "dense_mean_attention_ms": 326.8664124806722,
+      "speedup_vs_sdpa": 3.0068267841644474,
+      "target_met": true,
+      "numerical_passed": true,
+      "faster_than_dense_all_cases": true,
+      "config": {
+        "merge_backend": "cuda",
+        "head_chunk": 4,
+        "route_m": 128,
+        "route_n": 128,
+        "native_tiles": 42,
+        "seed_tile": 8,
+        "selector_precision": "fp32",
+        "selector_groups": 2,
+        "fast_math": true,
+        "direct_store": true,
+        "min_blocks": 4,
+        "fused_layout": true,
+        "owner_mode": 1,
+        "vector_store": true,
+        "route_stages": 3,
+        "route_warps": 8,
+        "sum_groups": 2
+      },
+      "gpu": "NVIDIA H200",
+      "protocol": "3 prompts x 4 frozen timesteps x 8 fixed layers x 40 real heads",
+      "video_quality": "pending; no videos generated",
+      "source_sha256": {
+        "q80k90_kernel.py": "fd3b2fdb46ba1210c6ba06c44c1ff0db6151a21ad16445a04dab8b84f645e802",
+        "q80k90_merge.cu": "253f3b3130da3bda0c45ae6e51dfe05b511931e387ba5adf2c6be70d17bf2b70"
+      },
+      "numerical_path": "018_numerical/validate.json",
+      "real40_path": "019_real40/real40.json",
+      "numerical_gate": {
+        "approved": true,
+        "summary": {
+          "cases": 384,
+          "mean_relative_l2_vs_operator": 0.0016905372873831463,
+          "max_relative_l2_vs_operator": 0.002000659704208374,
+          "mean_l2_to_dense": 0.12410683797982831,
+          "reference_mean_l2_to_dense": 0.12409045914682792,
+          "mean_seed_changed_fraction": 3.4446649503176254e-06,
+          "pooled_l2_to_dense": 0.12820807006727852
+        },
+        "invariants": {
+          "rf0_reused": true,
+          "exact_distinct_capacity": 6,
+          "two_intersections_forced": true,
+          "empty_cluster_bias_negative_infinity": true,
+          "constant_value_preserved": true
+        },
+        "selected_configuration_checks": {
+          "passed": true,
+          "shape": [
+            1,
+            7200,
+            5,
+            128
+          ],
+          "all_output_positions_checked": true,
+          "partial_head_chunk_covered": true,
+          "relative_l2_vs_independent_triton": 0.001617393339984119,
+          "rf0_seed_reuse": true,
+          "exact_distinct_capacity": 6,
+          "two_intersection_anchors": true,
+          "empty_cluster_zero_kv_negative_infinity_bias": true,
+          "constant_value_preserved": true
+        },
+        "thresholds_owner": "implementation review, not user universal tolerance",
+        "engineering_thresholds": {
+          "max_relative_l2_vs_operator": 0.02,
+          "max_mean_seed_changed_fraction": 0.005,
+          "max_absolute_mean_l2_regression": 0.0005
+        },
+        "source_sha256": {
+          "q80k90_kernel.py": "fd3b2fdb46ba1210c6ba06c44c1ff0db6151a21ad16445a04dab8b84f645e802",
+          "q80k90_merge.cu": "253f3b3130da3bda0c45ae6e51dfe05b511931e387ba5adf2c6be70d17bf2b70"
+        }
+      },
+      "previous_v2_ms": 127.27386448118422,
+      "latency_reduction_vs_v2_pct": 14.587259762818228,
+      "tuning_attempts": 102,
+      "tuning_valid": 98,
+      "monitor_samples": 2018,
+      "foreign_compute_samples": 0,
+      "logical_full50_major_pflops": 84.678967296,
+      "baseline_l2_increase_pct": {
+        "SVG-EAR top_p=0.85": 90.16709801945493,
+        "original Q45K80C8": 40.03578022414174
+      }
+    }
+  },
+  "baselines": {
+    "SVG-EAR top_p=0.85": {
+      "mean_l2_to_dense": 0.0652619928854,
+      "historical_four_step_major_tflops": 48.75106610096,
+      "gpu": "H200"
+    },
+    "original Q45K80C8": {
+      "mean_l2_to_dense": 0.0886250912311,
+      "historical_four_step_major_tflops": 43.47592704,
+      "gpu": "L40S"
+    }
+  },
+  "baseline_matching_real40_latency": "pending",
+  "video_quality": "PSNR/SSIM/LPIPS pending; no videos generated or inspected",
+  "restoration": {
+    "checked_at": 1790141141.795333,
+    "slots": [
+      {
+        "gpu": 0,
+        "uuid": "GPU-4eca131f-0ba3-759d-bcb5-0418d6b7c68e",
+        "tag": "p50_svg_s035",
+        "restoration": {
+          "phase": "original_running",
+          "pid": 3217446,
+          "child_pid": 3217529,
+          "gpu": 0,
+          "tag": "p50_svg_s035",
+          "time": 1790141068.6810195,
+          "command": [
+            "bash",
+            "h200_run/111_paper_svg.sh",
+            "50"
+          ]
+        },
+        "matching_generation_processes": [
+          {
+            "uuid": "GPU-4eca131f-0ba3-759d-bcb5-0418d6b7c68e",
+            "pid": 3229081,
+            "memory_mib": "43756",
+            "executable": "python",
+            "args": {
+              "--output_dir": "/xuanwu-tank/east/zrl/exp-gridmergeattn/h200_run/videos_p50/p50_svg_s035",
+              "--runtime_json": "/xuanwu-tank/east/zrl/exp-gridmergeattn/h200_run/runtime_p50/p50_svg_s035.json",
+              "--seed": "0",
+              "--config": "configs/base50_svg_unipc.yaml"
+            },
+            "skip_existing": true
+          }
+        ],
+        "gpu_process_count": 1,
+        "preexisting_outputs_preserved": true,
+        "preexisting_video_count": 16,
+        "current_video_count": 16,
+        "queue_owner": "scai7 3217446 gpu0 2026-09-22T22:24:28.633780-07:00",
+        "failure_count": "1",
+        "original_failure_count": "1",
+        "tmux_pane": "20-gen:0.0"
+      },
+      {
+        "gpu": 4,
+        "uuid": "GPU-bf8f3ffe-1da0-7e2c-a98f-ccd994c0fee1",
+        "tag": "n50_p50i_fisher_c8f",
+        "restoration": {
+          "phase": "original_running",
+          "pid": 3217690,
+          "child_pid": 3217749,
+          "gpu": 4,
+          "tag": "n50_p50i_fisher_c8f",
+          "time": 1790141069.064604,
+          "command": [
+            "bash",
+            "h200_run/116_paper_i2v.sh",
+            "50",
+            "fisher_c8f"
+          ]
+        },
+        "matching_generation_processes": [
+          {
+            "uuid": "GPU-bf8f3ffe-1da0-7e2c-a98f-ccd994c0fee1",
+            "pid": 3238466,
+            "memory_mib": "47400",
+            "executable": "python",
+            "args": {
+              "--output_dir": "/xuanwu-tank/east/zrl/exp-gridmergeattn/h200_run/videos_p50i/p50i_fisher_c8f",
+              "--runtime_json": "/xuanwu-tank/east/zrl/exp-gridmergeattn/h200_run/runtime_p50i/p50i_fisher_c8f.n50.json",
+              "--seed": "0",
+              "--config": "configs/base50i_fisher_c8f_unipc.yaml"
+            },
+            "skip_existing": true
+          }
+        ],
+        "gpu_process_count": 1,
+        "preexisting_outputs_preserved": true,
+        "preexisting_video_count": 39,
+        "current_video_count": 39,
+        "queue_owner": "scai7 3217690 gpu4 2026-09-22T22:24:29.009179-07:00",
+        "failure_count": "1",
+        "original_failure_count": "1",
+        "tmux_pane": "20-gen2:0.0"
+      }
+    ],
+    "both_generating": true
+  },
+  "source_sha256": {
+    "q80k90_kernel.py": "fd3b2fdb46ba1210c6ba06c44c1ff0db6151a21ad16445a04dab8b84f645e802",
+    "q80k90_merge.cu": "253f3b3130da3bda0c45ae6e51dfe05b511931e387ba5adf2c6be70d17bf2b70",
+    "check_selected_gpu.py": "f75cf290dc6dbcb9d24c363e382ed7415edc0a8d0002e6f26a521ba68f6e7070",
+    "q80_flashinfer_route.py": "128dfbcd12c419799c580bea63906663575b3cef18d111255ade632b86d0f5b3",
+    "benchmark_q80k90c8.py": "7d4a22ad7cb3b9bc4053bfcfca690a5902e824cd7aad44dd8fcf314afa082625",
+    "benchmark_q80k90c6.py": "59db80f0b041e001c5d3d0d9fba373a180f4ced995750f9348cb5e6e3272755d",
+    "benchmark_q80_real40_c8.py": "f9395a175905594fe757df6d65fda56de4aea8e00551902ad003acd2eae9205e",
+    "benchmark_q80_real40_c6.py": "36b174591ea73518adb14e75529a20aebb909deb8ad21516989e5b1055fee027"
+  },
+  "source_sha256_lf": {
+    "q80k90_kernel.py": "f5715b67d7998365bfaf2553e371b9c6ab18449b8a4682357e50214eec372e7a",
+    "q80k90_merge.cu": "5dd900e9e1dc2625067bbe4ac85a001cac262aec8d61d8889058f7569963203d",
+    "check_selected_gpu.py": "f75cf290dc6dbcb9d24c363e382ed7415edc0a8d0002e6f26a521ba68f6e7070",
+    "q80_flashinfer_route.py": "128dfbcd12c419799c580bea63906663575b3cef18d111255ade632b86d0f5b3",
+    "benchmark_q80k90c8.py": "20ada2ff5df3e4efa0ccafae4e3ece9a4e8927e3ea3c6bf492f8cbc20df9dea6",
+    "benchmark_q80k90c6.py": "a931329af9b7ba2fc73d9ac43d487b5bad640de037f8b8618ad0e52e496f3670",
+    "benchmark_q80_real40_c8.py": "fce9a66df3810d0e65ea6fa06241de73664d8bc4967b39fe7a799c56fdb9549f",
+    "benchmark_q80_real40_c6.py": "a6326db2756c84565bc9f053fb31ae1978ce91135767188e9c9e8c7dd161f735"
+  }
+}

@@ -1,0 +1,143 @@
+{
+  "source": "/xuanwu-tank/east/zrl/exp-gridmergeattn/third_party/VBench/vbench2_beta_i2v/vbench2_i2v_full_info.json",
+  "source_entries": 1118,
+  "unique_images_in_suite": 355,
+  "selection": "one base prompt (no camera-motion suffix) per distinct image, stratified across image_type by largest remainder, file order within type",
+  "prompt_text": "raw VBench prompt_en; NO prompt extension applied",
+  "prompt_extension_note": "Wan's official I2V recipe recommends prompt extension (utils/prompt_extend.py, Qwen2.5-VL locally or qwen-plus/qwen-vl-max via DashScope). SVG's I2V_VBench loader consumes an 'improved' prompt, but neither SVG nor VBench ships that JSON, and the extender defaults to a random seed and depends on the model version, so those exact strings cannot be reproduced. It does not matter here: every arm is scored against OUR dense run on identical inputs, so the prompt affects all arms equally and cancels in the method-vs-dense comparison. It would only matter for absolute VBench scores, which this paper does not report.",
+  "items": [
+    {
+      "index": 0,
+      "prompt_en": "an astronaut floating in space with the earth in the background",
+      "image_name": "an astronaut floating in space with the earth in the background.jpg",
+      "image_type": "single-human"
+    },
+    {
+      "index": 1,
+      "prompt_en": "A little girl, lost in thought, is quietly sitting on the bus",
+      "image_name": "A little girl, lost in thought, is quietly sitting on the bus.jpg",
+      "image_type": "single-human"
+    },
+    {
+      "index": 2,
+      "prompt_en": "a man holding a tray in front of a brick wall",
+      "image_name": "a man holding a tray in front of a brick wall.jpg",
+      "image_type": "single-human"
+    },
+    {
+      "index": 3,
+      "prompt_en": "an older man playing a saxophone on the street",
+      "image_name": "an older man playing a saxophone on the street.jpg",
+      "image_type": "single-human"
+    },
+    {
+      "index": 4,
+      "prompt_en": "a brown bear in the water with a fish in its mouth",
+      "image_name": "a brown bear in the water with a fish in its mouth.jpg",
+      "image_type": "animal"
+    },
+    {
+      "index": 5,
+      "prompt_en": "a close-up of a hippopotamus eating grass in a field",
+      "image_name": "a close-up of a hippopotamus eating grass in a field.jpg",
+      "image_type": "animal"
+    },
+    {
+      "index": 6,
+      "prompt_en": "a sea turtle swimming in the ocean under the water",
+      "image_name": "a sea turtle swimming in the ocean under the water.jpg",
+      "image_type": "animal"
+    },
+    {
+      "index": 7,
+      "prompt_en": "an aerial view of a small town on the edge of the ocean",
+      "image_name": "an aerial view of a small town on the edge of the ocean.jpg",
+      "image_type": "architecture"
+    },
+    {
+      "index": 8,
+      "prompt_en": "Colorful buildings on the seaside cliffs",
+      "image_name": "Colorful buildings on the seaside cliffs.jpg",
+      "image_type": "architecture"
+    },
+    {
+      "index": 9,
+      "prompt_en": "two people in a canoe on a lake with mountains in the background",
+      "image_name": "two people in a canoe on a lake with mountains in the background.jpg",
+      "image_type": "scenery"
+    },
+    {
+      "index": 10,
+      "prompt_en": "an aerial view of a snowy road in a forest",
+      "image_name": "an aerial view of a snowy road in a forest.jpg",
+      "image_type": "scenery"
+    },
+    {
+      "index": 11,
+      "prompt_en": "tangerines in a metal bowl on a table",
+      "image_name": "tangerines in a metal bowl on a table.jpg",
+      "image_type": "food"
+    },
+    {
+      "index": 12,
+      "prompt_en": "a person is cooking meat on a grill with flames",
+      "image_name": "a person is cooking meat on a grill with flames.jpg",
+      "image_type": "food"
+    },
+    {
+      "index": 13,
+      "prompt_en": "two people performing a sword fight in front of a forest",
+      "image_name": "two people performing a sword fight in front of a forest.jpg",
+      "image_type": "multiple-human"
+    },
+    {
+      "index": 14,
+      "prompt_en": "A group of people in a yellow raft is rowing through turbulent waters",
+      "image_name": "A group of people in a yellow raft is rowing through turbulent waters.jpg",
+      "image_type": "multiple-human"
+    },
+    {
+      "index": 15,
+      "prompt_en": "cars are driving down a street lined with tall trees",
+      "image_name": "cars are driving down a street lined with tall trees.jpg",
+      "image_type": "transportation"
+    },
+    {
+      "index": 16,
+      "prompt_en": "the cars on the street are waiting for the traffic lights",
+      "image_name": "the cars on the street are waiting for the traffic lights.jpg",
+      "image_type": "transportation"
+    },
+    {
+      "index": 17,
+      "prompt_en": "a close-up of a pink rose with water droplets on it",
+      "image_name": "a close-up of a pink rose with water droplets on it.jpg",
+      "image_type": "plant"
+    },
+    {
+      "index": 18,
+      "prompt_en": "a bar with chairs and a television on the wall",
+      "image_name": "a bar with chairs and a television on the wall.jpg",
+      "image_type": "indoor"
+    },
+    {
+      "index": 19,
+      "prompt_en": "a shadow of a hand reaching for a leaf",
+      "image_name": "a shadow of a hand reaching for a leaf.jpg",
+      "image_type": "other"
+    }
+  ],
+  "images": {
+    "dir": "/xuanwu-tank/east/zrl/datasets/vbench_i2v_20_720p",
+    "source": "HuggingFace dataset dc-ai/vbench_i2v, crop/16-9/ (355 images per aspect ratio)",
+    "aspect": "16:9, matching 1280x720; all 20 verified 1.778 and downscaled at load",
+    "why_not_vbench_script": "vbench2_beta_i2v/download_data.sh calls `gdown --id`, removed in gdown 5; gdown 6.2.0 also dropped --fuzzy, and the Drive file for crop.zip refuses anonymous download. The HF mirror is the same suite."
+  },
+  "extended_prompts": {
+    "file": "prompts/vbench_i2v_20.extended.txt",
+    "source": "HuggingFace dataset dc-ai/VBench-I2V-Prompt-Extended, VBench_i2v_extended_full_info.json",
+    "coverage": "20/20 of our base prompts matched exactly",
+    "length": "base 10.5 words mean -> extended 87.4 words mean (65-115)",
+    "status": "AVAILABLE but NOT the default. This is a published, fixed artifact, so unlike re-running Wan's seed-dependent extender it is reproducible by anyone. It is still not provably the set SVG used, since SVG never shipped theirs. The prompt cancels in the method-vs-dense comparison either way; pick one, use it for every arm including dense, and state which in the caption."
+  }
+}

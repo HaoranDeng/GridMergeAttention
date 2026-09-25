@@ -1,0 +1,60 @@
+{
+  "passed": true,
+  "gpu_used": false,
+  "cases": [
+    {
+      "capacity": 4,
+      "seed_tile": 4,
+      "coverage": true,
+      "ballot_ties": true
+    },
+    {
+      "capacity": 4,
+      "seed_tile": 8,
+      "coverage": true,
+      "ballot_ties": true
+    },
+    {
+      "capacity": 4,
+      "seed_tile": 16,
+      "coverage": true,
+      "ballot_ties": true
+    },
+    {
+      "capacity": 6,
+      "seed_tile": 8,
+      "coverage": true,
+      "ballot_ties": true
+    },
+    {
+      "capacity": 6,
+      "seed_tile": 16,
+      "coverage": true,
+      "ballot_ties": true
+    },
+    {
+      "capacity": 8,
+      "seed_tile": 8,
+      "coverage": true,
+      "ballot_ties": true
+    },
+    {
+      "capacity": 8,
+      "seed_tile": 16,
+      "coverage": true,
+      "ballot_ties": true
+    },
+    {
+      "capacity": 10,
+      "seed_tile": 16,
+      "coverage": true,
+      "ballot_ties": true
+    },
+    {
+      "capacity": 12,
+      "seed_tile": 16,
+      "coverage": true,
+      "ballot_ties": true
+    }
+  ]
+}

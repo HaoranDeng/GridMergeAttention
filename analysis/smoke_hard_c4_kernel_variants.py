@@ -1,0 +1,180 @@
+import argparse
+import json
+from pathlib import Path
+
+import torch
+
+from attention.hard_route_pytorch import hard_route_attention_pytorch
+from attention.hard_c4_wan21_1_3b_480p_triton import HARD_C4_BACKEND, hard_c4_rt_attention_triton_blocks
+
+
+def rel_l2(out, ref):
+    diff = (out.float() - ref.float()).reshape(-1)
+    denom = ref.float().reshape(-1).norm().clamp_min(1e-20)
+    return float(diff.norm().item() / denom.item())
+
+
+def run_variant(q, k, v, variant):
+    scale = q.size(-1) ** -0.5
+    backend = variant["hard_route_backend"]
+    if backend == HARD_C4_BACKEND:
+        return hard_c4_rt_attention_triton_blocks(
+            q,
+            k,
+            v,
+            scale,
+        )
+    return hard_route_attention_pytorch(
+        q,
+        k,
+        v,
+        scale,
+        query_outer_offset=0,
+    )
+
+
+def exact_variants():
+    return {
+        "hard_c4_pytorch": {
+            "hard_route_backend": "sdpa",
+        },
+        "hard_c4": {
+            "hard_route_backend": HARD_C4_BACKEND,
+        },
+    }
+
+
+def time_variant(q, k, v, variant, warmup, repeats):
+    """Return average runtime for one attention call after Triton compilation."""
+    for _ in range(warmup):
+        run_variant(q, k, v, variant)
+    torch.cuda.synchronize()
+
+    start = torch.cuda.Event(enable_timing=True)
+    end = torch.cuda.Event(enable_timing=True)
+    start.record()
+    for _ in range(repeats):
+        run_variant(q, k, v, variant)
+    end.record()
+    torch.cuda.synchronize()
+    return float(start.elapsed_time(end) / max(repeats, 1))
+
+
+def write_payload(output_json, payload):
+    output_path = Path(output_json)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(payload, indent=2) + "\n")
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Smoke-test hard C4 Triton variants on random tensors.")
+    parser.add_argument("--output_json", required=True)
+    parser.add_argument("--dtype", choices=["bf16", "fp16"], default="bf16")
+    parser.add_argument(
+        "--variants",
+        default="",
+        help="Optional comma- or whitespace-separated subset of smoke variant names.",
+    )
+    parser.add_argument("--batch", type=int, default=1)
+    parser.add_argument("--query_outer", type=int, default=2)
+    parser.add_argument("--key_outer", type=int, default=2)
+    parser.add_argument("--rows", type=int, default=30)
+    parser.add_argument("--columns", type=int, default=52)
+    parser.add_argument("--heads", type=int, default=2)
+    parser.add_argument("--dim", type=int, default=128)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--warmup", type=int, default=2)
+    parser.add_argument("--repeats", type=int, default=5)
+    return parser.parse_args()
+
+
+def parse_variant_names(text):
+    names = []
+    for name in (text or "").replace(",", " ").split():
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def main():
+    args = parse_args()
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA/ROCm GPU is required.")
+
+    torch.manual_seed(args.seed)
+    device = torch.device("cuda")
+    dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float16
+    shape_q = (args.batch, args.query_outer, args.rows, args.columns, args.heads, args.dim)
+    shape_kv = (args.batch, args.key_outer, args.rows, args.columns, args.heads, args.dim)
+    q = torch.randn(shape_q, device=device, dtype=dtype)
+    k = torch.randn(shape_kv, device=device, dtype=dtype)
+    v = torch.randn(shape_kv, device=device, dtype=dtype)
+
+    variants = exact_variants()
+    ref_name = "hard_c4_pytorch"
+    names = [ref_name]
+    selected_names = parse_variant_names(args.variants)
+    if selected_names:
+        missing = [name for name in selected_names if name not in variants]
+        if missing:
+            raise ValueError(f"unknown smoke variants: {', '.join(missing)}")
+        names = [ref_name, *[name for name in selected_names if name != ref_name]]
+
+    results = {}
+    payload = {
+        "device": torch.cuda.get_device_name(0),
+        "dtype": args.dtype,
+        "shape_q": list(shape_q),
+        "shape_kv": list(shape_kv),
+        "warmup": args.warmup,
+        "repeats": args.repeats,
+        "variant_names": names,
+        "results": results,
+        "complete": False,
+    }
+
+    torch.cuda.synchronize()
+    ref = run_variant(q, k, v, variants[ref_name])
+    torch.cuda.synchronize()
+    ref_time = time_variant(q, k, v, variants[ref_name], warmup=args.warmup, repeats=args.repeats)
+    results[ref_name] = {
+        "shape": list(ref.shape),
+        "max_abs_vs_reference": 0.0,
+        "rel_l2_vs_reference": 0.0,
+        "mean_ms": ref_time,
+    }
+    write_payload(args.output_json, payload)
+
+    for name in names:
+        if name == ref_name:
+            continue
+        torch.cuda.synchronize()
+        try:
+            out = run_variant(q, k, v, variants[name])
+            torch.cuda.synchronize()
+            diff = (out.float() - ref.float()).abs()
+            mean_ms = time_variant(
+                q,
+                k,
+                v,
+                variants[name],
+                warmup=args.warmup,
+                repeats=args.repeats,
+            )
+            results[name] = {
+                "shape": list(out.shape),
+                "max_abs_vs_reference": float(diff.max().item()),
+                "rel_l2_vs_reference": rel_l2(out, ref),
+                "mean_ms": mean_ms,
+            }
+        except Exception as exc:
+            results[name] = {"error": repr(exc)}
+        write_payload(args.output_json, payload)
+
+    payload["complete"] = True
+    write_payload(args.output_json, payload)
+    print(json.dumps(payload, indent=2))
+
+
+if __name__ == "__main__":
+    main()

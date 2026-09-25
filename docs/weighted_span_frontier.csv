@@ -1,0 +1,34 @@
+# Frontier of important methods, Wan2.1-T2V-1.3B base, 480p (30x52 grid, 21 latent frames).
+#
+# quality harness "capture-16": rel-L2 vs dense attention on a fixed real-QKV capture
+#   (16 points: steps 0/6/13/19 x layers 0/10/20/29, heads 0/6, prompt 0, 2 query frames).
+# quality harness "pipeline-2step": rel-L2 vs dense computed inline in the live pipeline,
+#   denoising steps 0-1, all 30 layers, all 12 heads, prompt 0. NOT identical geometry to
+#   capture-16; cross-family comparisons are indicative, not exact.
+# e2e_ms: attention call, A100, 21 frames, 12 heads, head_chunk=4, min-of-N CUDA events,
+#   via token_merging_attn; time_vs_keyrow uses the same-run key-row pairing. est = estimated.
+# density: fraction of keys effectively attended (GridMerge: 4 merged tokens / 52 keys).
+# Both split rows use one same-process three-way pairing (key-row 48.94 ms), so they are
+# directly comparable: the J=4-vs-J=2 e2e gap is 3.3 ms (2.6%), and J=2 stays the default
+# (J=4 trades +1.8% rel-L2 for that 2.6%). An earlier pairing measured J=2 at 130.2 ms
+# against key-row 52.55 ms (2.48x); the spread is shared-GPU run-to-run noise.
+# The superseded fused rows keep their own same-era pairings (key-row ~51-53 ms).
+# dq columns: rel-L2 change vs key-row baseline and vs best-at-matched-density
+#   (span a=0.3 PyTorch per-column, 0.06644). Negative = better.
+method,family,status,quality_harness,density,rel_l2,dq_vs_keyrow_pct,dq_vs_best_pct,e2e_ms,time_vs_keyrow_x
+dense attention (reference),reference,reference,capture-16,1.0000,0.0,-100.0,-100.0,,
+key-row C4 (fixed local seeds; shipped baseline),gridmerge,baseline,capture-16,0.0769,0.09742,0.0,+46.6,52.0,1.00
+upstream span pool15/probes8 alpha=0 (PyTorch proxy),gridmerge,reference,capture-16,0.0769,0.07704,-20.9,+16.0,,
+span alpha=0 pool30 (PyTorch; adaptivity only),gridmerge,ablation,capture-16,0.0769,0.07299,-25.1,+9.9,,
+span alpha=0.3 pool30 (PyTorch per-column; quality best at this density),gridmerge,best-quality,capture-16,0.0769,0.06644,-31.8,0.0,~5500 est,~106 est
+cheap seeds (importance-only ranking),gridmerge,rejected,capture-16,0.0769,0.09032,-7.3,+35.9,,
+tightness reassignment (1 Lloyd step in key space),gridmerge,rejected,capture-16,0.0769,0.07393,-24.1,+11.3,,
+capacity cap 20 keys/cluster,gridmerge,null,capture-16,0.0769,0.06692,-31.3,+0.7,,
+Triton fused J=8 (first kernel),gridmerge,superseded,capture-16,0.0769,0.07005,-28.1,+5.4,182.5,3.53
+Triton fused J=4 + all-heads launch,gridmerge,superseded,capture-16,0.0769,0.06789,-30.3,+2.2,168.7,3.35
+Triton split probe/GS J=2 (PRODUCTION),gridmerge,production,capture-16,0.0769,0.06670,-31.5,+0.4,128.7,2.63
+Triton split probe/GS J=4 (speed frontier),gridmerge,option,capture-16,0.0769,0.06791,-30.3,+2.2,125.4,2.56
+SVG2 / SAP top_p=0.9 (qc300 kc1000),svg,external,pipeline-2step,0.3317,0.07581,-22.2,+14.1,,
+SVG-EAR top_p=0.9 (qc300 kc1000),svg,external,pipeline-2step,0.3625,0.03512,-63.9,-47.1,,
+SVG-EAR top_p=0.5,svg,external,pipeline-1step,0.1398,0.05583,-42.7,-16.0,,
+SVG-EAR top_p=0.3 (near its min_kc_ratio density floor),svg,external,pipeline-1step,0.1230,0.05810,-40.4,-12.6,,

@@ -1,0 +1,42 @@
+{
+  "complete": true,
+  "gpu_used": false,
+  "rows": [
+    {
+      "capacity": 4,
+      "seed_tile": 4,
+      "compiled": true,
+      "seconds": 34.8599534034729
+    },
+    {
+      "capacity": 4,
+      "seed_tile": 8,
+      "compiled": true,
+      "seconds": 35.95866107940674
+    },
+    {
+      "capacity": 6,
+      "seed_tile": 8,
+      "compiled": true,
+      "seconds": 33.32004737854004
+    },
+    {
+      "capacity": 8,
+      "seed_tile": 8,
+      "compiled": true,
+      "seconds": 33.46513509750366
+    },
+    {
+      "capacity": 10,
+      "seed_tile": 16,
+      "compiled": true,
+      "seconds": 32.43758845329285
+    },
+    {
+      "capacity": 12,
+      "seed_tile": 16,
+      "compiled": true,
+      "seconds": 33.044894218444824
+    }
+  ]
+}

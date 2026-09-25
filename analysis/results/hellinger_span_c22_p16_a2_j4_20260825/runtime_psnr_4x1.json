@@ -1,0 +1,70 @@
+{
+  "config": "configs/token_merging_wan_720p_hellinger_span_c22_p16_a2_j4_fewstep.yaml",
+  "checkpoint": "/local2/denghaoran/GridMergeAttention/wan_models/Wan2.1-T2V-14B-StepDistill-CfgDistill/distill_model.pt",
+  "records": [
+    {
+      "output": "A tranquil tableau of restaurant-0.mp4",
+      "prompt_index": 0,
+      "sample_index": 0,
+      "attention_total_ms": 104438.2437133789,
+      "attention_calls": 160,
+      "mean_attention_ms": 652.7390232086182,
+      "full_attention_total_ms": 108437.31286621094,
+      "full_attention_calls": 160,
+      "mean_full_attention_ms": 677.7332054138184,
+      "inference_seconds": 123.32686084602028,
+      "export_seconds": 0.617587142623961
+    },
+    {
+      "output": "a cow-0.mp4",
+      "prompt_index": 1,
+      "sample_index": 0,
+      "attention_total_ms": 104032.80456542969,
+      "attention_calls": 160,
+      "mean_attention_ms": 650.2050285339355,
+      "full_attention_total_ms": 107557.80810546875,
+      "full_attention_calls": 160,
+      "mean_full_attention_ms": 672.2363006591797,
+      "inference_seconds": 121.34981889370829,
+      "export_seconds": 0.7593949129804969
+    },
+    {
+      "output": "a shark is swimming in the ocean, pixel art-0.mp4",
+      "prompt_index": 2,
+      "sample_index": 0,
+      "attention_total_ms": 104349.15655517578,
+      "attention_calls": 160,
+      "mean_attention_ms": 652.1822284698486,
+      "full_attention_total_ms": 107901.66296386719,
+      "full_attention_calls": 160,
+      "mean_full_attention_ms": 674.3853935241699,
+      "inference_seconds": 121.70477824751288,
+      "export_seconds": 0.6664563771337271
+    },
+    {
+      "output": "a wine glass on the right of a cup, front view-0.mp4",
+      "prompt_index": 3,
+      "sample_index": 0,
+      "attention_total_ms": 104081.87213134766,
+      "attention_calls": 160,
+      "mean_attention_ms": 650.5117008209229,
+      "full_attention_total_ms": 107642.87091064453,
+      "full_attention_calls": 160,
+      "mean_full_attention_ms": 672.7679431915283,
+      "inference_seconds": 121.44714042637497,
+      "export_seconds": 0.9674460934475064
+    }
+  ],
+  "summary": {
+    "videos": 4,
+    "mean_attention_ms": 651.4094952583313,
+    "mean_full_attention_ms": 674.2807106971741,
+    "mean_inference_seconds": 121.9571496034041,
+    "attention_calls_per_video": 160.0,
+    "steady_state_videos": 3,
+    "steady_state_mean_attention_ms": 650.9663192749024,
+    "steady_state_mean_full_attention_ms": 673.1298791249593,
+    "steady_state_mean_inference_seconds": 121.50057918919872,
+    "steady_state_attention_calls_per_video": 160.0
+  }
+}

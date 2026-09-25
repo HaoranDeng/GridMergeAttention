@@ -1,0 +1,16 @@
+{
+  "variant": "c8",
+  "scope": "Retained pre-r2 C8 slow_reference sources; the default C8 factory dispatches to r2.",
+  "files": {
+    "__init__.py": "daaffb68e079c65fc4d4c9cda0a10ed14949663a899a908e0dd13469a7dc52a1",
+    "gma_c8_native.py": "2a543d1436b9a713b951c63a390cf7fa0803c6f74bbf7ed2d5aa68310b0274f4",
+    "gma_c8_candidate_table.json": "eeffd8d22084d68732d89291f753bf6a68721213ecc372cc66253e5c7cd8b873",
+    "gma_c8_cuda_probe.cu": "2951e28d0e988b45024da8a3b34451088339ac339db49e52f543f21221235fd5",
+    "gma_c8_cuda_gs_v10.cu": "32d9d3400a566a02b3f5bd7d6eb778cb3e40dc6fbe4e3b3157986d7f53101533",
+    "gma_c8_owner_pack_v0.cu": "b16821e91a710526856092449e6f615b83ed2818a4655553f744d9164fc41f5a",
+    "gma_c8_route_pipeline.cu": "7cd72aeed49c86b1a2044dda77531ea067d61d22099d8c7370041e59588e6c0c"
+  },
+  "shared_dependencies": {
+    "attention/capacity_contract.py": "adf40ac79e5f0a1ce08744e98e2e766b6e0736709b447d6a757db2c093d0e124"
+  }
+}
