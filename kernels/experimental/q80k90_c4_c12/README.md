@@ -84,4 +84,15 @@ they do not establish a new H200 attention or full-video latency.
 Evidence: `input_layout_validation_20260925.json`. The historical H200 timing
 tables above remain unchanged. See
 [`docs/q80k90_c4_c12_kernels.md`](../../../docs/q80k90_c4_c12_kernels.md)
-for the 61.4/67.3/72.1 ms timing audit and remaining H200 validation.
+for the historical 61.4/67.3/72.1 ms timing audit and completed H200 validation.
+
+H200 follow-up completed later on2026-09-25: same GPU7, same native50
+prompt/seed,4000calls each. Full attention fell from71.193183 to68.540536ms
+(3.73%), and pipeline time from608.271085 to598.595445s (1.59%). All16 paired
+first-step checks and the final decoded output hash matched exactly;603
+monitor samples confirmed exclusivity. The repeated first-step attention
+gate was65.086850/62.988589ms and isolated packing4.170104/1.312200ms.
+One full50 run per implementation, old then new; this does not eliminate or
+causally explain the remaining gate-versus-generation gap. Full-pipeline peak
+allocated memory was unchanged. See `h200_input_layout_validation_20260925.json`
+and the linked documentation for full scope, telemetry and limitations.

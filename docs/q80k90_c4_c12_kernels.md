@@ -81,9 +81,60 @@ The unchanged merge/route receives exactly the same packed inputs. Raw
 samples, source hashes, GPU identity and the successful exclusive guard are
 in `kernels/experimental/q80k90_c4_c12/input_layout_validation_20260925.json`.
 
-Both scai6/scai7 had no exclusively idle H200 at the audit's final check. A
-paired old/new H200 replay and full native50 measurement remain pending; no
-new video generation was launched, no running experiment was changed, and
-none of the historical H200 numbers above is replaced by the L40S result.
-Record SM/memory clocks and power during that follow-up to distinguish
-layout savings from execution-context effects.
+The initial audit had no exclusively idle H200; that initial L40S result did
+not replace any historical H200 measurement. The authorized H200 follow-up
+below is now complete.
+
+### Completed H200 follow-up
+
+On 2026-09-25, the user authorized stopping one Q80K90 job and then explicitly
+cancelled its restoration. The scai7 GPU7 Q80K90C8 I2V job was stopped with all
+ten committed videos and metrics preserved; its heartbeat was paused. The
+test used that H200 (`GPU-7aa670f7-95a6-1e16-c28f-80664a449ad8`) after two clean
+preflights. All 603 monitor samples were uncontended; the test exited normally
+and released the GPU. No cancelled job was restored.
+
+The old baseline is the original v4 immediately before `eb52068`, verified
+against Git ignoring line endings. The new implementation is `eb52068`.
+Configuration and merge/selection/routing arithmetic were identical.
+
+| Scope | Old ms | Fixed ms | Reduction |
+|---|---:|---:|---:|
+| Native first-step input packing | 4.170104 | 1.312200 | 2.857904 ms |
+| Native first-step complete attention | 65.086850 | 62.988589 | 2.098261 ms |
+| Full50 mean complete attention/call | 71.193183 | 68.540536 | 2.652647 ms (3.73%) |
+| Full50 mean self-attention module/call | 97.613703 | 94.978466 | 2.635237 ms (2.70%) |
+
+Full-pipeline time through VAE decoding, excluding export, was
+608.271085 versus 598.595445 seconds: 9.675639 seconds (1.59%) less. Both runs
+performed exactly 4000 self-attention calls across all40 layers and50 steps.
+Both decoded outputs have SHA256
+`75beb9df61abdbe26c6420907e9d5c27766d850beaa604af905d6b434e54c811`.
+All16 first-step cases (layers0,5,10,15,20,25,30,35, both CFG branches) also
+matched bitwise. The first-step gate alternated old/new order for eight
+repetitions per case; its paired Dense mean was326.963960ms.
+
+The redundant copies are removed and measured attention latency improves,
+but they do not explain the entire standalone-versus-generation difference.
+The fixed full50 mean is still5.551947ms (8.81%) above its own repeated
+first-step gate. Historical GPU0's61.391903ms uses a different QKV population
+and is not a same-card control for this GPU7 run. This experiment does not
+causally identify the remaining difference.
+
+Limitations: one canonical T2V prompt000, seed0, one full50 run per method,
+old then new; no reversed-order full-video replication. SM-clock phase means
+were1666.4/1644.5MHz and power means690.18/690.01W; clocks were not fixed.
+These observations do not establish frequency as the cause of the residual.
+Peak allocated memory for the complete pipeline was essentially unchanged
+(88.369516/88.369209GiB), despite eliminating the per-call temporary copies.
+Logical full50 major-matmul cost remains56.716886016PFLOPs/video for both.
+Matched full50 SVG-EAR and original Q45K80C8 timing/quality were not measured
+in this audit; no speedup or quality ranking against them is inferred.
+
+Evidence: `kernels/experimental/q80k90_c4_c12/h200_input_layout_validation_20260925.json`.
+The reproducible driver is `kernels/experimental/q80k90_c4_c12/benchmark_native50_layout.py`;
+run it with `--source` pointing to a frozen source bundle containing old
+`reference_q80k90_kernel.py`, new `q80k90_kernel.py`, unchanged CUDA source and
+validated configuration, under the exclusive GPU guard, with `--full50`.
+Raw source snapshots, telemetry and monitor logs are archived separately
+with SHA2561470c26d686230414466c6a13878d4852179dd6c9cf067c58395b33ca146624a.
