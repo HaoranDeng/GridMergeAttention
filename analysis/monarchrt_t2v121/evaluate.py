@@ -3,6 +3,7 @@ import fcntl
 import importlib.util
 import math
 import os
+import sys
 from pathlib import Path
 import time
 import traceback
@@ -13,6 +14,8 @@ def main():
     lock=(ROOT/'quality.lock').open('w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     plan=read(ROOT/'experiment_plan.json');source=Path(plan['snapshot'])/'analysis/score_videos_diffusers.py'
     assert sha(source)==plan['source_sha256']['analysis/score_videos_diffusers.py']
+    for path,h in read(ROOT/'evaluation_support.json')['files'].items():assert sha(path)==h,path
+    sys.path.insert(0,str(ROOT/'evaluation_support'))
     import torch,lpips
     torch.set_num_threads(4);torch.set_num_interop_threads(1);assert not torch.cuda.is_available()
     spec=importlib.util.spec_from_file_location('frozen_score',source);metrics=importlib.util.module_from_spec(spec);spec.loader.exec_module(metrics)

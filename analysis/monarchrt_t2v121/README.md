@@ -48,5 +48,9 @@ on scai6 or scai7. The detached supervisor runs gate, generation, and VBench,
 with a separate CPU quality evaluator. Generation status is in video20/runtime.json;
 each launch has preflight.json, active.json, completion.json, and monitor logs.
 
-Preparation status at creation: no compatible idle H200, no GPU job launched.
-No GPU or numerical success is claimed until actual launch evidence exists.
+Initially all compatible H200 GPUs were busy. scai6 GPU4 subsequently became
+exclusively idle and its old queue process had exited. Attempt1 started on
+2026-09-25, passed all16 native FP32 checks, and entered20-video generation.
+The scorer's missing helper import was frozen separately in evaluation_support;
+the full scorer import now passes the CPU readiness check. Its initial failure
+is preserved. `source/status.py` reports actual progress in latest_status.json.

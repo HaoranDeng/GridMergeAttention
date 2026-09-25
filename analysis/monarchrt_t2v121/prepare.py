@@ -56,4 +56,5 @@ save(ROOT/'experiment_plan.json',plan)
 for target,source in [('vbench_model_cache',I2V/'vbench_model_cache'),('vbench_clip_cache',I2V/'vbench_clip_cache')]:
     assert source.is_dir();(ROOT/target).symlink_to(source.resolve(),target_is_directory=True)
 save(ROOT/'preparation_receipt.json',dict(prepared=True,inputs_verified=20,dense_verified=20,source_files=len(files),gpu_work_launched=False,time=time.time()))
+subprocess.run([sys.executable,str(Path(__file__).with_name('prepare_eval_support.py'))],check=True)
 print('Prepared T2V121: 20 matched prompts/Dense hashes, fixed seed0, frozen historical source; no GPU launched')

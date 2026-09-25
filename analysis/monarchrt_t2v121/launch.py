@@ -65,6 +65,7 @@ def main():
                 child=subprocess.Popen(command,cwd=ROOT,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
                 save(control/'active.json',dict(phase=phase,pid=child.pid,time=time.time()));started=time.monotonic()
                 while child.poll() is None:
+                    cpu.poll()  # Reap a stopped CPU worker; retain its failure record.
                     s=state(a.gpu);foreign=[]
                     for pid in s['pids']:
                         try:
