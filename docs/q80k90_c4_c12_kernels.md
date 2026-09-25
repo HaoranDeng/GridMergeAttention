@@ -1,5 +1,42 @@
 # Q80K90 exact C4/C6/C8/C10/C12
 
+## Native-context optimization follow-up, 2026-09-25
+
+The residual context/replay gap remains unresolved. See the structured
+[diagnostic evidence](../kernels/experimental/q80k90_c4_c12/context_gap_diagnostic_20260925.json),
+which records source hashes and a hash-verified archive of raw traces, results
+and exclusive-GPU monitoring. All comparisons in this follow-up use scai7 H200
+GPU7 and zero-based layers0,5,10,15,20,25,30,35 for numerical gates.
+
+On identical native QKV, the GPU trace measured65.343ms in model context versus
+63.164ms during immediate eager replay. Kernel sums were65.321/63.145ms, leaving
+only0.022/0.019ms between kernels. Packing was1.300/1.297ms; selection5.715/5.169,
+merge35.691/34.517, and route22.615/22.162ms. CUDA graphs, configure-once and
+continuous asynchronous replay did not eliminate the difference. The profiler's
+GPU annotations, rather than its incomplete recursive CPU-event kernel tree,
+were used for this breakdown. Workload-dependent SM frequency is observed;
+its causal contribution has not yet been isolated.
+
+Pure model first-step tests, with80 attention calls and no inserted replays,
+remain around68ms. Changing native tiles, head grouping, route stages, BLAS SM
+count hints, exponent reuse, seed hoisting and head-group overlap did not
+establish a speed improvement. A separate direct-input prototype eliminates
+the Q copy and reads original-layout K/V inside merge. Its paired numerical
+checks and first-step latents were bitwise equal, and it measured67.507ms
+against interleaved baselines67.817–68.561ms. This is one pass per candidate:
+repeat validation is required before claiming an improvement. It is not the
+default implementation and has no complete50-step validation yet.
+
+Fused K/V multiplication and two warp groups were slower (71.358/77.991ms).
+Three warp groups with min_blocks2 failed compilation because the register
+budget was80 while ptxas required94. sum_groups4, sum_groups8 and exact80 were
+not reached and have no results in this follow-up. A fixed-QKV preceding-GEMM
+diagnostic was prepared, but exclusive preflight rejected its launch after the
+GPU became occupied; its worker never ran. No device clock/power settings were
+changed and no candidate was promoted. These first-step diagnostics must not
+be presented as50-step video speed or compared with unmatched SVG-EAR or
+original Q45K80C8 method results.
+
 The experimentally optimized Hopper family lives in
 [`kernels/experimental/q80k90_c4_c12`](../kernels/experimental/q80k90_c4_c12).
 Use `recommended.make_q80k90(C)` with that directory on the Python module path.
