@@ -131,6 +131,38 @@ of contiguous inputs beyond the -0.77 ms C4 merge gain):
 The rel-L2 to bf16 dense is identical to v4's to four digits for every
 capacity; the new operator is faster than dense and than v4 in every case.
 
+## End-to-end video timing
+
+I2V (Wan2.1-I2V-14B-720P, the frozen I2V snapshot's unchanged generate.py with
+only the adapter's kernel factory replaced, `analysis/q80k90_even_i2v_timing.py`;
+720x1280, 81 frames, 50 FlowUniPC steps, CFG 5, prompts 000-004 of the
+sparkler_v1 default inputs, base seed 0 + index; C8, 4000 attention calls per
+video; scai7 GPU 7, 2026-09-25):
+
+| Video | Batch 1 (first build) s | Batch 2 (final C8) s | v4 C8 reference s |
+|---|---:|---:|---:|
+| 000 | 1071.1 (cold Triton cache) | 787.3 | 1010.1 (cold start) |
+| 001 | 782.7 | 781.2 | 931.8 |
+| 002 | 786.5 | 783.5 | 932.6 |
+| 003 | 786.7 | 784.6 | 929.7 |
+| 004 | 784.5 | 782.8 | 928.9 |
+| Mean | 842.3 (785.1 without 000) | **783.9** | 946.6 (930.8 without 000) |
+| Attention per call | 98.7 ms | 98.3 ms | 137-156 ms |
+
+The v4 reference is the earlier production run (scai6 GPU 4, same prompts);
+batch 1's first video paid a cold Triton cache in this account (VAE padding
+autotune); batch 2 ran warm. Non-attention time is about 290-296 s per video
+in all runs.
+
+T2V teaser (Wan2.1-T2V-14B, samples 000/015, seed 0, scai6 GPU 4, the same GPU,
+fastops and protocol as the paper's full-attention measurement; worker in the
+paper repository's `figure_sources/gca_teaser/measurements/gca_c4_even_20260925/`):
+C4 attention 218.93 s + other 335.43 s = 554.37 s per video (54.73 ms per call),
+against full attention 1343.12 + 334.33 = 1677.45 s: 3.03x end-to-end and 6.13x
+attention. The first build, which copied the processor's head-major Q/K/V
+before every call and used four C4 merge slices, measured 562.82 s (56.71 ms
+per call, 2.98x).
+
 ## A/B (interleaved on one QKV, `analysis/q80k90_even_ab.py`)
 
 Adopted: three merge tile slices per (key block, head) for C4 (20 tiles per
