@@ -83,5 +83,8 @@ if __name__ == '__main__':
     try:
         sys.exit(main())
     except Exception:
+        if '--plan' in sys.argv:
+            folder = Path(sys.argv[sys.argv.index('--plan') + 1]).parent
+            save(folder / 'guard_failure.json', dict(error=traceback.format_exc(), time=time.time()))
         traceback.print_exc()
         raise

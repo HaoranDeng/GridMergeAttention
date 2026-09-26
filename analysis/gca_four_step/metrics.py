@@ -42,6 +42,17 @@ def vbench_job(plan, job):
     sys.argv = ['evaluate.py', '--videos_path', job['videos'], '--output_path', job['output'],
                 '--mode', 'custom_input', '--dimension', job['dimension']]
     runpy.run_path(str(vb / 'evaluate.py'), run_name='__main__')
+    outputs = list(Path(job['output']).glob('*_eval_results.json'))
+    assert len(outputs) == 1
+    score, videos = read(outputs[0])[job['dimension']]
+    assert math.isfinite(float(score))
+    assert len(videos) == 20
+    assert {Path(row['video_path']).name for row in videos} == {f'{i:03d}-00.mp4' for i in range(20)}
+    assert all(math.isfinite(float(row['video_results'])) for row in videos)
+    save(Path(job['output']).parent / 'validation.json', dict(valid=True, videos=20,
+         dimension=job['dimension'], finite=True, complete_filename_set=True))
+    if torch.distributed.is_initialized():
+        torch.distributed.destroy_process_group()
 
 
 def main():
