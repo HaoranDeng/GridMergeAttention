@@ -1,0 +1,81 @@
+{
+  "valid": true,
+  "checked_at": "2026-09-26T01:53:47.820486+00:00",
+  "top_p": 0.4,
+  "steps": 3,
+  "trajectory_calls": 240,
+  "paired_qkv_states": 32,
+  "paired_calls": 128,
+  "zero_output_difference": true,
+  "foreign_events": 0,
+  "timing_scope": "First three steps of unchanged 50-step trajectory; init separately excluded. Same real QKV and restored centroids for logging/audit ablations. Core excludes native layout conversions. Not a full-video runtime or quality estimate.",
+  "modes": {
+    "original_log": {
+      "core_ms": 98.85824537277222,
+      "wall_ms": 98.93080440815538,
+      "stages": {
+        "kmeans": 17.757370054721832,
+        "semantic_total": 20.44760489463806,
+        "map": 6.337328031659126,
+        "flashinfer_plan": 4.947829008102417,
+        "flashinfer_run": 34.12347602844238,
+        "sparse_total": 52.69340229034424,
+        "inverse": 0.39939199946820736,
+        "density": 0.3490030011162162
+      }
+    },
+    "log_to_dev_null": {
+      "core_ms": 80.62170672416687,
+      "wall_ms": 80.6929804966785,
+      "stages": {
+        "kmeans": 17.548416256904602,
+        "semantic_total": 20.227909982204437,
+        "map": 6.311301007866859,
+        "flashinfer_plan": 5.000516965985298,
+        "flashinfer_run": 34.27467203140259,
+        "sparse_total": 52.92726802825928,
+        "inverse": 0.3992310017347336,
+        "density": 0.34995600022375584
+      }
+    },
+    "no_density_log": {
+      "core_ms": 79.73706459999084,
+      "wall_ms": 79.82631988124922,
+      "stages": {
+        "kmeans": 17.574781894683838,
+        "semantic_total": 20.260495960712433,
+        "map": 6.316091001033783,
+        "flashinfer_plan": 4.9268670082092285,
+        "flashinfer_run": 34.10074406862259,
+        "sparse_total": 52.65134811401367,
+        "inverse": 0.3993170019239187
+      }
+    },
+    "no_log_no_audit": {
+      "core_ms": 80.08315205574036,
+      "wall_ms": 80.17288392875344,
+      "stages": {
+        "kmeans": 17.857704043388367,
+        "semantic_total": 20.5506511926651,
+        "map": 6.372657001018524,
+        "flashinfer_plan": 4.948118969798088,
+        "flashinfer_run": 34.13798999786377,
+        "sparse_total": 52.65702211856842,
+        "inverse": 0.4000359959900379
+      }
+    }
+  },
+  "file_io_delta_ms": {
+    "mean": 18.236538648605347,
+    "median": 14.351055145263672,
+    "min": 8.472831726074219,
+    "max": 120.75445556640625,
+    "positive_pairs": 32
+  },
+  "t2v_p05_provenance": {
+    "source": "C:\\GMA\\QKC scan\\SVG_EAR_p05_video20\\source\\generate_ear.py",
+    "sha256": "6554674d0816eff7a75ac38d68743c23200dc6d5b72b5a8f6cd4f50e1540a5b2",
+    "accounting": "Density calculated after core timing end; per-call file logging disabled."
+  },
+  "conclusion": "Writing the density file inside the timed region adds measured latency on identical p=.4 QKV/centroids. This establishes timing contamination, not an intrinsic slowdown from reducing top_p. Short sampled core timings are not full50-video replacement timings."
+}

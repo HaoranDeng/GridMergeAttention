@@ -1,0 +1,103 @@
+"""Exclusive two-H200 crossover with identical per-call instrumentation."""
+import csv
+import fcntl
+import json
+import os
+from pathlib import Path
+import signal
+import socket
+import subprocess
+import time
+import traceback
+from common import ROOT,read,save,sha
+from gpu_checks import inventory,clean,reservations
+
+
+def telemetry():
+    fields='index,uuid,name,memory.used,utilization.gpu,clocks.current.sm,clocks.current.memory,temperature.gpu,power.draw,power.limit'
+    rows=csv.reader(subprocess.check_output(['nvidia-smi','-i','2,4','--query-gpu='+fields,'--format=csv,noheader,nounits'],text=True).splitlines())
+    keys=['index','uuid','model','memory_mib','utilization','sm_clock_mhz','memory_clock_mhz','temperature_c','power_w','power_limit_w']
+    result=[]
+    for row in rows:
+        d={k:v.strip() for k,v in zip(keys,row)}
+        for k in keys:
+            if k not in ('uuid','model'):d[k]=float(d[k])
+        result.append(d)
+    return result
+
+
+def main():
+    assert socket.gethostname().split('.')[0]=='scai6'
+    plan=read(ROOT/'experiment_plan.json')
+    lock=(ROOT/'campaign.lock').open('a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    assert not (ROOT/'launch.json').exists(),'Already launched; never duplicate'
+    for p,digest in plan['wrapper_source_sha256'].items():assert sha(ROOT/'source'/p)==digest,p
+    states={g['index']:g for g in inventory()}
+    for index in [2,4]:
+        assert states[index]['uuid']==plan['gpus'][str(index)]['uuid'] and clean(states[index]),states[index]
+    time.sleep(2)
+    states={g['index']:g for g in inventory()}
+    assert all(clean(states[i]) for i in [2,4])
+    save(ROOT/'preflight.json',dict(time=time.time(),gpus=[states[i] for i in [2,4]],telemetry=telemetry()))
+    save(ROOT/'launch.json',dict(pid=os.getpid(),host='scai6',gpus=plan['gpus'],time=time.time()))
+    live={};failure=None;started=time.monotonic()
+    try:
+        with (ROOT/'monitor.jsonl').open('x') as monitor:
+            for phase in ['A','B']:
+                live={}
+                for name,case in plan['cases'].items():
+                    if case['phase']!=phase:continue
+                    gpu=case['gpu'];folder=ROOT/name;folder.mkdir(exist_ok=True)
+                    # Recheck compute processes and CPU reservations before each phase.
+                    state,=[g for g in inventory() if g['uuid']==gpu['uuid']]
+                    assert clean(state),state
+                    env=dict(os.environ,CUDA_VISIBLE_DEVICES=gpu['uuid'],SVG_TOP_P=str(case['top_p']),
+                        OMP_NUM_THREADS='4',MKL_NUM_THREADS='4',PYTHONUNBUFFERED='1',PYTHONFAULTHANDLER='1',MAX_JOBS='4',
+                        PYTORCH_CUDA_ALLOC_CONF='expandable_segments:True',WAN_MODEL_ROOT=plan['protocol']['model_root'],
+                        GRIDMERGE_SDPA_BACKEND='flash_attn2',SPARSE_VIDEO_GEN_ROOT=plan['source_svg_root'],
+                        SVG_NUM_Q_CENTROIDS='300',SVG_NUM_K_CENTROIDS='1000',SVG_MIN_KC_RATIO='0.10',SVG_KMEANS_INIT='50',SVG_KMEANS_STEP='2',
+                        FLASHINFER_WORKSPACE_BASE='/xuanwu-tank/east/zrl/exp-gridmergeattn/.cache/environments/monarch-rt/flashinfer_workspace',
+                        TORCH_EXTENSIONS_DIR=str(ROOT/f'gpu{gpu["index"]}/torch_extensions'),
+                        TRITON_CACHE_DIR=str(ROOT/f'gpu{gpu["index"]}/triton_cache'),PATH='/usr/local/cuda/bin:'+os.environ['PATH'])
+                    with (folder/'worker.log').open('x') as log:
+                        child=subprocess.Popen([plan['python'],str(ROOT/'source/worker.py'),'--case',name],cwd=ROOT,
+                            env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+                    live[name]=child
+                    save(folder/'launch.json',dict(pid=child.pid,phase=phase,case=name,gpu=gpu,top_p=case['top_p'],time=time.time()))
+                save(ROOT/'stage.json',dict(phase=phase,cases={k:p.pid for k,p in live.items()},time=time.time()))
+                while True:
+                    states=inventory();foreign=[]
+                    for name,child in live.items():
+                        gpu=plan['cases'][name]['gpu'];state,=[g for g in states if g['uuid']==gpu['uuid']]
+                        for pid in state['pids']:
+                            try:
+                                if os.getsid(pid)!=child.pid:foreign.append(dict(gpu=gpu['index'],pid=pid))
+                            except ProcessLookupError:pass
+                    sample=dict(time=time.time(),phase=phase,foreign=foreign,telemetry=telemetry(),load_average=os.getloadavg())
+                    monitor.write(json.dumps(sample)+'\n');monitor.flush();save(ROOT/'latest_monitor.json',sample)
+                    assert not foreign,('Foreign GPU process',foreign)
+                    for name,child in live.items():
+                        if child.poll() is not None:
+                            assert child.returncode==0,(name,child.returncode)
+                            assert read(ROOT/name/'generation_complete.json')['videos']==5
+                    if all(p.poll() is not None for p in live.values()):break
+                    assert time.monotonic()-started<8*3600,'8-hour deadline'
+                    time.sleep(5)
+                save(ROOT/f'phase_{phase}_complete.json',dict(complete=True,phase=phase,time=time.time()))
+        save(ROOT/'stage.json',dict(phase='complete',cases=4,videos=20,unique_inputs=5,time=time.time()))
+    except BaseException:
+        failure=traceback.format_exc();save(ROOT/'failure.json',dict(error=failure,time=time.time()))
+    finally:
+        for child in live.values():
+            if child.poll() is None:
+                os.killpg(child.pid,signal.SIGTERM)
+                try:child.wait(timeout=30)
+                except subprocess.TimeoutExpired:os.killpg(child.pid,signal.SIGKILL);child.wait(timeout=10)
+        save(ROOT/'completion.json',dict(valid=failure is None,failure=failure,time=time.time(),restoration_required=False))
+    if failure:raise RuntimeError(failure)
+
+
+if __name__=='__main__':
+    def terminate(signum,frame):raise KeyboardInterrupt(f'signal {signum}')
+    signal.signal(signal.SIGTERM,terminate)
+    main()

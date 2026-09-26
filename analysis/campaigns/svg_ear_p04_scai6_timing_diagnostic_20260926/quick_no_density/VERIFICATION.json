@@ -1,0 +1,46 @@
+{
+  "valid": true,
+  "top_p": 0.4,
+  "steps_executed": 4,
+  "warmup_step_zero_based": 0,
+  "steady_steps_zero_based": [
+    1,
+    2,
+    3
+  ],
+  "steady_calls": 240,
+  "samples": 1,
+  "seed": 0,
+  "gpu": {
+    "host": "scai6",
+    "index": 2,
+    "uuid": "GPU-244e87b8-5a10-aadb-858a-f0eea028dbd1",
+    "model": "NVIDIA H200"
+  },
+  "density_logging": false,
+  "extra_iteration_audit": false,
+  "per_step": {
+    "0": {
+      "core_ms": 341.2814434051514,
+      "full_ms": 371.19578351974485
+    },
+    "1": {
+      "core_ms": 87.26511459350586,
+      "full_ms": 110.18560094833374
+    },
+    "2": {
+      "core_ms": 88.821790599823,
+      "full_ms": 111.6671049118042
+    },
+    "3": {
+      "core_ms": 89.39415330886841,
+      "full_ms": 112.4642071723938
+    }
+  },
+  "steady_core_ms": 88.49368616739909,
+  "steady_full_ms": 111.43897101084391,
+  "foreign_events": 0,
+  "scope": "Original native core/full CUDA-event scopes; first four steps of unchanged50-step schedule. Step0 initialization excluded from steady short-test mean; steps1-3 contain240 calls. No video output; not a full50-step/video runtime or quality estimate.",
+  "full50_replacement": false,
+  "source_sha256": "099e0bb07e57853c855cfd8402c4799c9dfa52560b739445fbb825e89aeec04a"
+}

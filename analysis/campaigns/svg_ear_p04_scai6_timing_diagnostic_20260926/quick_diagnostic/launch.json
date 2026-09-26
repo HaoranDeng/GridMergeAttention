@@ -1,0 +1,11 @@
+{
+  "pid": 1174566,
+  "guard": 1173707,
+  "gpu": {
+    "host": "scai6",
+    "index": 2,
+    "uuid": "GPU-244e87b8-5a10-aadb-858a-f0eea028dbd1",
+    "model": "NVIDIA H200"
+  },
+  "time": 1790387179.4986682
+}

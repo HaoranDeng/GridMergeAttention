@@ -1,0 +1,21 @@
+{
+  "valid": true,
+  "changes": [
+    {
+      "file": "C:\\GMA\\.codex_tmp\\paper-ear-p04-20260925\\figure_sources\\tradeoff_combined\\data.json",
+      "only_changed_point": "I2V/svg_ear_p04",
+      "previous": 106.2750353262048,
+      "new": 88.49368616739909
+    },
+    {
+      "file": "C:\\GMA\\QKC scan\\T2V_I2V_tradeoff_combined\\t2v_i2v_tradeoff_replacement019_data.json",
+      "only_changed_point": "I2V/svg_ear_p04",
+      "previous": 106.2750353262048,
+      "new": 88.49368616739909
+    }
+  ],
+  "caption_only": true,
+  "other_points_unchanged": true,
+  "T2V_unchanged": true,
+  "GCA_times_unchanged": true
+}

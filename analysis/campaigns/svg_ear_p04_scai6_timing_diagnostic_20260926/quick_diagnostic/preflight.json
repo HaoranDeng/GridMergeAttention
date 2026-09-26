@@ -1,0 +1,12 @@
+{
+  "time": 1790387179.4065657,
+  "gpu": {
+    "host": "scai6",
+    "index": 2,
+    "uuid": "GPU-244e87b8-5a10-aadb-858a-f0eea028dbd1",
+    "model": "NVIDIA H200",
+    "memory_mib": 0,
+    "utilization": 0,
+    "pids": []
+  }
+}

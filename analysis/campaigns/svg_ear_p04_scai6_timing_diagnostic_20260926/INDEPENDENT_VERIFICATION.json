@@ -1,0 +1,234 @@
+{
+  "valid": true,
+  "checked_at": "2026-09-26T01:49:51.200770+00:00",
+  "videos": 10,
+  "unique_inputs": 5,
+  "calls": 40000,
+  "steps_per_video": 50,
+  "warmup_index": 0,
+  "steady_indices": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "canceled_p05_excluded": true,
+  "source_and_input_match_prior_scai7": true,
+  "hash_verified_files": 59,
+  "foreign_events": 0,
+  "scai7_same_input_subset": {
+    "mean_attention_ms": 106.5927647395134,
+    "mean_full_attention_ms": 128.55871059274673,
+    "inference_seconds": 797.50474677491
+  },
+  "cases": {
+    "gpu2_p04": {
+      "gpu": {
+        "host": "scai6",
+        "index": 2,
+        "uuid": "GPU-244e87b8-5a10-aadb-858a-f0eea028dbd1",
+        "model": "NVIDIA H200"
+      },
+      "per_video": [
+        {
+          "index": 0,
+          "mean_attention_ms": 127.30462766838073,
+          "mean_full_attention_ms": 149.88645802688598,
+          "inference_seconds": 1169.9192776810378,
+          "mean_watts": 491.89871214927166,
+          "full50_pflops": 75.08202808698148,
+          "upper_full50_pflops": 75.08202808698148,
+          "density": 0.1258121033795178
+        },
+        {
+          "index": 1,
+          "mean_attention_ms": 110.24502323913575,
+          "mean_full_attention_ms": 132.62556331253052,
+          "inference_seconds": 817.4767986983061,
+          "mean_watts": 636.4146905623261,
+          "full50_pflops": 74.02430130454313,
+          "upper_full50_pflops": 74.02430130454313,
+          "density": 0.1235529799144715
+        },
+        {
+          "index": 2,
+          "mean_attention_ms": 110.31894683265686,
+          "mean_full_attention_ms": 132.63513810539246,
+          "inference_seconds": 816.958951452747,
+          "mean_watts": 635.2806211437174,
+          "full50_pflops": 74.31572746385004,
+          "upper_full50_pflops": 74.31572746385004,
+          "density": 0.12417541633732616
+        },
+        {
+          "index": 3,
+          "mean_attention_ms": 110.20144439315796,
+          "mean_full_attention_ms": 132.5493647441864,
+          "inference_seconds": 816.8680549860001,
+          "mean_watts": 634.5385264458164,
+          "full50_pflops": 73.69520088066547,
+          "upper_full50_pflops": 73.69520088066547,
+          "density": 0.12285007770732045
+        },
+        {
+          "index": 4,
+          "mean_attention_ms": 111.24422317695618,
+          "mean_full_attention_ms": 133.56004989814758,
+          "inference_seconds": 820.4146103002131,
+          "mean_watts": 634.7362507427455,
+          "full50_pflops": 75.7876200046229,
+          "upper_full50_pflops": 75.7876200046229,
+          "density": 0.1273191270120442
+        }
+      ],
+      "steady": {
+        "mean_attention_ms": 110.50240941047669,
+        "mean_full_attention_ms": 132.84252901506423,
+        "inference_seconds": 817.9296038593166,
+        "mean_watts": 635.2425222236513,
+        "full50_pflops": 74.45571241342039,
+        "upper_full50_pflops": 74.45571241342039,
+        "density": 0.12447440024279058
+      },
+      "scai7_same_input_percent": {
+        "mean_attention_ms": 3.667833065891002,
+        "mean_full_attention_ms": 3.3321883850312872,
+        "inference_seconds": 2.561095362379251
+      },
+      "busy_telemetry": {
+        "sm_clock_mhz": {
+          "mean": 1774.1725352112676,
+          "min": 1500.0,
+          "max": 1980.0
+        },
+        "memory_clock_mhz": {
+          "mean": 3201.0,
+          "min": 3201.0,
+          "max": 3201.0
+        },
+        "temperature_c": {
+          "mean": 69.8644366197183,
+          "min": 61.0,
+          "max": 76.0
+        },
+        "power_w": {
+          "mean": 639.7187676056338,
+          "min": 517.5,
+          "max": 701.22
+        },
+        "power_limit_w": {
+          "mean": 700.0,
+          "min": 700.0,
+          "max": 700.0
+        }
+      },
+      "busy_samples": 568,
+      "monitored_samples": 897,
+      "telemetry_scope": "After sample000 saved through sample004 saved, utilization>=70%; sampled telemetry, not a thermal/clock causal experiment."
+    },
+    "gpu4_p04": {
+      "gpu": {
+        "host": "scai6",
+        "index": 4,
+        "uuid": "GPU-923ad71f-2808-6bf7-701e-dc79b7aaa38f",
+        "model": "NVIDIA H200"
+      },
+      "per_video": [
+        {
+          "index": 0,
+          "mean_attention_ms": 128.51614098930358,
+          "mean_full_attention_ms": 151.05267366981505,
+          "inference_seconds": 1169.8318206630647,
+          "mean_watts": 483.51054743941876,
+          "full50_pflops": 75.07527470664016,
+          "upper_full50_pflops": 75.07527470664016,
+          "density": 0.12579767931438982
+        },
+        {
+          "index": 1,
+          "mean_attention_ms": 110.2557133960724,
+          "mean_full_attention_ms": 132.5168281288147,
+          "inference_seconds": 816.0901759471744,
+          "mean_watts": 628.8411671176939,
+          "full50_pflops": 74.02430130454313,
+          "upper_full50_pflops": 74.02430130454313,
+          "density": 0.1235529799144715
+        },
+        {
+          "index": 2,
+          "mean_attention_ms": 110.07820405960084,
+          "mean_full_attention_ms": 132.31527630996703,
+          "inference_seconds": 814.8540605865419,
+          "mean_watts": 627.9092397894863,
+          "full50_pflops": 74.31572746385004,
+          "upper_full50_pflops": 74.31572746385004,
+          "density": 0.12417541633732616
+        },
+        {
+          "index": 3,
+          "mean_attention_ms": 110.03830808448791,
+          "mean_full_attention_ms": 132.3181831302643,
+          "inference_seconds": 815.066744055599,
+          "mean_watts": 627.4811124444286,
+          "full50_pflops": 73.69520088066547,
+          "upper_full50_pflops": 73.69520088066547,
+          "density": 0.12285007770732045
+        },
+        {
+          "index": 4,
+          "mean_attention_ms": 110.81757448768616,
+          "mean_full_attention_ms": 133.0499894218445,
+          "inference_seconds": 817.4882669150829,
+          "mean_watts": 628.1268671433428,
+          "full50_pflops": 75.79356873542754,
+          "upper_full50_pflops": 75.79356873542754,
+          "density": 0.12733183248341085
+        }
+      ],
+      "steady": {
+        "mean_attention_ms": 110.29745000696182,
+        "mean_full_attention_ms": 132.55006924772263,
+        "inference_seconds": 815.8748118760996,
+        "mean_watts": 628.0895966237379,
+        "full50_pflops": 74.45719959612154,
+        "upper_full50_pflops": 74.45719959612154,
+        "density": 0.12447757661063225
+      },
+      "scai7_same_input_percent": {
+        "mean_attention_ms": 3.4755504057913944,
+        "mean_full_attention_ms": 3.1046971742116236,
+        "inference_seconds": 2.3034427287709214
+      },
+      "busy_telemetry": {
+        "sm_clock_mhz": {
+          "mean": 1784.5238095238096,
+          "min": 1455.0,
+          "max": 1980.0
+        },
+        "memory_clock_mhz": {
+          "mean": 3201.0,
+          "min": 3201.0,
+          "max": 3201.0
+        },
+        "temperature_c": {
+          "mean": 56.40564373897707,
+          "min": 48.0,
+          "max": 61.0
+        },
+        "power_w": {
+          "mean": 634.1038095238096,
+          "min": 489.66,
+          "max": 697.33
+        },
+        "power_limit_w": {
+          "mean": 700.0,
+          "min": 700.0,
+          "max": 700.0
+        }
+      },
+      "busy_samples": 567,
+      "monitored_samples": 832,
+      "telemetry_scope": "After sample000 saved through sample004 saved, utilization>=70%; sampled telemetry, not a thermal/clock causal experiment."
+    }
+  }
+}
