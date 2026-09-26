@@ -56,6 +56,8 @@ def main():
 
     import torch
     torch.set_grad_enabled(False)
+    # Hold the GPU (a CUDA context) before the kernel builds, so the card never looks idle.
+    torch.empty(1,device='cuda');torch.cuda.synchronize()
     even=module('q80k90_even_kernel',kdir/'q80k90_even_kernel.py')
     cap=a.capacity
     t0=time.time()
