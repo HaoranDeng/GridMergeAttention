@@ -14,7 +14,8 @@
 //  - the score GEMM is m64n96k16 (RS, Q gathered from the fragment-ordered
 //    [H, N, 128] copy), the merge GEMMs m64n128k16 over K = 96;
 //  - mk/mv are laid out [head][kb][group][CAP][128], so a tile is one
-//    contiguous run of GPT*CAP rows and leaves through two TMA stores;
+//    contiguous run of GPT*CAP rows, stored directly from the accumulators
+//    (MERGE_PSI_V, default for mv) or through stmatrix staging and TMA;
 //  - the ownership argmax reduces over a group's CAP rows: an in-thread min of
 //    the two halves, an in-warp exchange among the group's lane pairs, and
 //    (MERGE_PACKED with CAP 6 or 10) a shared-memory exchange between the two
@@ -65,6 +66,32 @@
 #ifndef MERGE_SPLIT_ISSUE
 #define MERGE_SPLIT_ISSUE 1
 #endif
+// MERGE_PSI_K / MERGE_PSI_V = 1: the K / V tile is stored in shared memory
+// with its columns permuted by psi(n) = swap of n[4:3] with n[2:1] (a fixed
+// involution within each 32-column block). The merge GEMM's accumulator
+// column m then holds the representative's natural column psi(m), so a
+// thread's eight values of one (row half, 32-column block) are one
+// contiguous 16-byte vector of the natural row: mk/mv leave through direct
+// global stores (64-byte lane-quad runs, full sectors), and the stmatrix
+// staging buffer, its two barriers, the async-proxy fence and the TMA store
+// disappear for that kind. With MERGE_PSI_K the score GEMM reduces over the
+// permuted columns, which is exactly compensated by gathering the A fragment
+// from the caller's natural-order Q instead of the fragment-ordered copy (the
+// copy's 4x4 word transpose is psi itself), so the copy and its layout kernel
+// are not needed. mv is bitwise identical to the staged path; the score
+// GEMM's k-slabs group different columns, so ownership can differ on exact
+// ties (numerics tier, like the fused argmax).
+// Measured (C8, interleaved on one QKV): V direct is bitwise identical and
+// -0.95 ms per call (15/20 rounds) in the benchmark state, neutral under a
+// sustained power load; K direct as well is -1.2 ms / +0.8 ms under load
+// (the raw token-major Q gather has worse DRAM locality than the copy).
+// Defaults: V direct, K staged with the fragment-ordered copy.
+#ifndef MERGE_PSI_K
+#define MERGE_PSI_K 0
+#endif
+#ifndef MERGE_PSI_V
+#define MERGE_PSI_V 1
+#endif
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAException.h>
@@ -91,6 +118,8 @@ constexpr int KB=AXIS_OUTER*40;               // key blocks, flattened frame*40 
 constexpr int TILES=(TOTAL_GROUPS+GPT-1)/GPT;
 constexpr bool STRADDLE=MERGE_PACKED && (8%LP)!=0;
 constexpr int XBUF_WORDS=STRADDLE?GPT*2*4*(KC/4):0;
+constexpr int STAGE_KINDS=(MERGE_PSI_K?0:1)+(MERGE_PSI_V?0:1); // kinds stored through the staging buffer
+constexpr int TEMP_BYTES=STAGE_KINDS?MERGE_STAGE_BUFS*64*128*2:0;
 static_assert(ROWS_STORED<=64,"tile rows");
 using namespace cute::SM90::GMMA;
 
@@ -109,6 +138,17 @@ __device__ __forceinline__ uint64_t desc_at(uint64_t base,int element_offset) {
 __device__ __forceinline__ int boff(int k,int n) {
   int offset=k*64+(n&63)+(n>>6)*(KC*64);
   return offset^(((offset>>6)&7)<<3);
+}
+__device__ __forceinline__ int psi(int n) {return (n&~30)|((n&6)<<2)|((n&24)>>2);}
+// One 16-byte vector (columns d..d+7 of key row ki) into the swizzled tile;
+// with PSI the columns land at psi(d+2j) (pairs stay adjacent).
+template<int PSI>
+__device__ __forceinline__ void store_tile_vector(bf16* tile,int ki,int d,uint4 x) {
+  if constexpr(PSI) {
+    const uint32_t w[4]={x.x,x.y,x.z,x.w};
+    #pragma unroll
+    for(int j=0;j<4;++j) *reinterpret_cast<uint32_t*>(tile+boff(ki,psi(d+2*j)))=w[j];
+  } else *reinterpret_cast<uint4*>(tile+boff(ki,d))=x;
 }
 // Lane-pair geometry (compile-time tables evaluated per thread once).
 __device__ __forceinline__ int grp_of(int p) {
@@ -235,14 +275,14 @@ __global__ __launch_bounds__(128,MERGE_MINBLOCKS) void merge_kernel(
  const bf16* __restrict__ q,const bf16* __restrict__ k,const bf16* __restrict__ v,
  const uint8_t* __restrict__ seeds,float* __restrict__ bias,int HS,float scale,
  int tile_count,const __grid_constant__ CUtensorMap map_k,const __grid_constant__ CUtensorMap map_v,long long* __restrict__ prof,
- int64_t k_ts,int64_t k_hs,int64_t v_ts,int64_t v_hs) {
+ bf16* __restrict__ mk,bf16* __restrict__ mv,int64_t q_ts,int64_t q_hs,int64_t k_ts,int64_t k_hs,int64_t v_ts,int64_t v_hs) {
   long long pacc[8]={0,0,0,0,0,0,0,0};long long pt=0;
   auto stamp=[&](int slot){ if(MERGE_PROF && threadIdx.x==0){long long now=clock64();pacc[slot]+=now-pt;pt=now;} };
   extern __shared__ __align__(1024) unsigned char raw[];
   bf16* sk=reinterpret_cast<bf16*>(raw);
   bf16* sv=sk+KC*128;
   bf16* temp=sv+KC*128;
-  uint32_t* xbuf=reinterpret_cast<uint32_t*>(temp+MERGE_STAGE_BUFS*64*128);
+  uint32_t* xbuf=reinterpret_cast<uint32_t*>(raw+KC*128*4+TEMP_BYTES);
   const int tid=threadIdx.x,lane=tid&31,warp=tid>>5,sl=lane>>2;
   const int kb=blockIdx.x,head=blockIdx.y,gh=HS+head;
   const int p=warp*8+sl,grp=grp_of(p),idx=idx_of(p);
@@ -261,8 +301,8 @@ __global__ __launch_bounds__(128,MERGE_MINBLOCKS) void merge_kernel(
         kx=*reinterpret_cast<const uint4*>(k+token*k_ts+int64_t(gh)*k_hs+d);
         vx=*reinterpret_cast<const uint4*>(v+token*v_ts+int64_t(gh)*v_hs+d);
       }
-      *reinterpret_cast<uint4*>(sk+boff(ki,d))=kx;
-      *reinterpret_cast<uint4*>(sv+boff(ki,d))=vx;
+      store_tile_vector<MERGE_PSI_K>(sk,ki,d,kx);
+      store_tile_vector<MERGE_PSI_V>(sv,ki,d,vx);
     }
   }
   __syncthreads();
@@ -293,12 +333,13 @@ __global__ __launch_bounds__(128,MERGE_MINBLOCKS) void merge_kernel(
       int sbase=((gh*45+row)*KB+kb)*CAP;
       sr0=ok?seeds[sbase+owner0]:0;sr1=ok?seeds[sbase+owner1]:0;
     }
-    // Query row gg is tokens gg*80 .. gg*80+79 of the head-major packed copy.
-    int qi0=((gh*NTOK+gg*80+sr0))*128+(lane&3)*8;
-    int qi1=((gh*NTOK+gg*80+sr1))*128+(lane&3)*8;
+    // Query row gg is tokens gg*80 .. gg*80+79 of q: the caller's Q through
+    // its token/head strides (MERGE_PSI_K) or the fragment-ordered copy.
+    const bf16* q0=q+int64_t(gh)*q_hs+int64_t(gg*80+sr0)*q_ts+(lane&3)*8;
+    const bf16* q1=q+int64_t(gh)*q_hs+int64_t(gg*80+sr1)*q_ts+(lane&3)*8;
     #pragma unroll
     for(int d=0;d<128;d+=32) {
-      uint4 a=ok?query_vector(q+qi0+d,cache_last):make_uint4(0,0,0,0),b=ok?query_vector(q+qi1+d,cache_last):make_uint4(0,0,0,0);
+      uint4 a=ok?query_vector(q0+d,cache_last):make_uint4(0,0,0,0),b=ok?query_vector(q1+d,cache_last):make_uint4(0,0,0,0);
       int i=d/4;
       qreg[i]=a.x;qreg[i+1]=b.x;qreg[i+2]=a.y;qreg[i+3]=b.y;
       qreg[i+4]=a.z;qreg[i+5]=b.z;qreg[i+6]=a.w;qreg[i+7]=b.w;
@@ -462,10 +503,30 @@ __global__ __launch_bounds__(128,MERGE_MINBLOCKS) void merge_kernel(
       asm volatile("wgmma.commit_group.sync.aligned;":::"memory");
       asm volatile("wgmma.wait_group.sync.aligned 0;":::"memory");
       stamp(3+2*kind);
+      if(kind==0?MERGE_PSI_K:MERGE_PSI_V) {
+        // Direct stores: accumulator columns 32a+8b+2q+e (b = 0..3, e = 0..1)
+        // hold natural columns 32a+8q+2b+e, one 16-byte vector per (row half,
+        // 32-column block) at natural offset 32a+8q of the representative's row.
+        bf16* dst=kind==0?mk:mv;
+        #pragma unroll
+        for(int h=0;h<2;++h) {
+          if(ok) {
+            bf16* rowp=dst+(int64_t(head*KB+kb)*(TOTAL_GROUPS*CAP)+tile*GPT*CAP+srow_of(p,h))*128+(lane&3)*8;
+            #pragma unroll
+            for(int a=0;a<4;++a) {
+              const int i=16*a+2*h;
+              *reinterpret_cast<uint4*>(rowp+32*a)=make_uint4(pack_bf162(acc[i],acc[i+1]),pack_bf162(acc[i+4],acc[i+5]),
+                                                              pack_bf162(acc[i+8],acc[i+9]),pack_bf162(acc[i+12],acc[i+13]));
+            }
+          }
+        }
+        stamp(4+2*kind);
+        continue;
+      }
       bf16* stage=temp+(MERGE_STAGE_BUFS==2?kind*64*128:0);
       // The staging buffer is free once the bulk store that last read it (the
-      // other kind's, issued by its own thread) has finished reading it.
-      const int issuer=MERGE_SPLIT_ISSUE?(kind?64:0):0,previous=MERGE_SPLIT_ISSUE?(kind?0:64):0;
+      // other staged kind's, issued by its own thread) has finished reading it.
+      const int issuer=MERGE_SPLIT_ISSUE?(kind?64:0):0,previous=(STAGE_KINDS==2 && MERGE_SPLIT_ISSUE)?(kind?0:64):issuer;
       if(tid==previous) {
         if(MERGE_STAGE_BUFS==2) asm volatile("cp.async.bulk.wait_group.read 1;":::"memory");
         else asm volatile("cp.async.bulk.wait_group.read 0;":::"memory");
@@ -501,14 +562,14 @@ __global__ __launch_bounds__(128,MERGE_MINBLOCKS) void merge_kernel(
       stamp(4+2*kind);
     }
   }
-  if(tid==0 || (MERGE_SPLIT_ISSUE && tid==64)) asm volatile("cp.async.bulk.wait_group 0;":::"memory");
+  if(STAGE_KINDS>0 && (tid==0 || (MERGE_SPLIT_ISSUE && tid==64))) asm volatile("cp.async.bulk.wait_group 0;":::"memory");
   if(MERGE_PROF && threadIdx.x==0) {
     #pragma unroll
     for(int i=0;i<8;++i) atomicAdd(reinterpret_cast<unsigned long long*>(prof+i),(unsigned long long)pacc[i]);
   }
 }
 
-constexpr int SMEM_BYTES=(KC*128*2+MERGE_STAGE_BUFS*64*128)*2+XBUF_WORDS*4;
+constexpr int SMEM_BYTES=KC*128*4+TEMP_BYTES+XBUF_WORDS*4;
 constexpr int NTOKENS=NTOK,NHEADS=AXIS_HEADS;
 static void check_input(const torch::Tensor& x,int64_t ts,int64_t hs,const char* name) {
   // Dense [1, N, H, 128] BF16 in token-major (ts = H*128, hs = 128) or head-major (ts = 128, hs = N*128) order.
@@ -520,10 +581,9 @@ static void check_input(const torch::Tensor& x,int64_t ts,int64_t hs,const char*
 
 void run_impl(torch::Tensor q,torch::Tensor k,torch::Tensor v,torch::Tensor seeds,
  torch::Tensor mk,torch::Tensor mv,torch::Tensor bias,int hs,int ah,int tiles,torch::Tensor prof,
- int64_t k_ts,int64_t k_hs,int64_t v_ts,int64_t v_hs) {
- const int64_t elements=int64_t(AXIS_HEADS)*NTOK*128;
- TORCH_CHECK(q.is_cuda() && q.scalar_type()==at::kBFloat16 && q.is_contiguous() && q.numel()==elements,"Contiguous fragment-ordered BF16 Q [H, N, 128] required");
- check_input(k,k_ts,k_hs,"k");check_input(v,v_ts,v_hs,"v");
+ int64_t q_ts,int64_t q_hs,int64_t k_ts,int64_t k_hs,int64_t v_ts,int64_t v_hs) {
+ // q: the caller's Q (MERGE_PSI_K) or the fragment-ordered copy as a head-major [1, N, H, 128] view.
+ check_input(q,q_ts,q_hs,"q");check_input(k,k_ts,k_hs,"k");check_input(v,v_ts,v_hs,"v");
  TORCH_CHECK(ah==AXIS_ACTIVE_HEADS && hs>=0 && hs+ah<=AXIS_HEADS && tiles>0,"Head/tile bounds");
  TORCH_CHECK(seeds.scalar_type()==at::kByte && seeds.is_contiguous() && seeds.numel()==int64_t(AXIS_HEADS)*45*KB*CAP,"Exact seed shape");
  TORCH_CHECK(mk.is_contiguous() && mv.is_contiguous() && mk.numel()==int64_t(ah)*KB*TOTAL_GROUPS*CAP*128 && mv.numel()==mk.numel(),"Workspace shape");
@@ -542,23 +602,24 @@ void run_impl(torch::Tensor q,torch::Tensor k,torch::Tensor v,torch::Tensor seed
  merge_kernel<AXIS_HEADS><<<grid,128,SMEM_BYTES,at::cuda::getCurrentCUDAStream()>>>(
    (const bf16*)q.data_ptr(),(const bf16*)k.data_ptr(),(const bf16*)v.data_ptr(),seeds.data_ptr<uint8_t>(),
    bias.data_ptr<float>(),hs,float(0.08838834764831845*1.4426950408889634),tiles,map_k,map_v,
-   prof.defined()?reinterpret_cast<long long*>(prof.data_ptr<int64_t>()):nullptr,k_ts,k_hs,v_ts,v_hs);
+   prof.defined()?reinterpret_cast<long long*>(prof.data_ptr<int64_t>()):nullptr,
+   (bf16*)mk.data_ptr(),(bf16*)mv.data_ptr(),q_ts,q_hs,k_ts,k_hs,v_ts,v_hs);
  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 void run(torch::Tensor q,torch::Tensor k,torch::Tensor v,torch::Tensor seeds,
- torch::Tensor mk,torch::Tensor mv,torch::Tensor bias,int hs,int ah,int tiles,int64_t k_ts,int64_t k_hs,int64_t v_ts,int64_t v_hs) {
- run_impl(q,k,v,seeds,mk,mv,bias,hs,ah,tiles,torch::Tensor(),k_ts,k_hs,v_ts,v_hs);
+ torch::Tensor mk,torch::Tensor mv,torch::Tensor bias,int hs,int ah,int tiles,int64_t q_ts,int64_t q_hs,int64_t k_ts,int64_t k_hs,int64_t v_ts,int64_t v_hs) {
+ run_impl(q,k,v,seeds,mk,mv,bias,hs,ah,tiles,torch::Tensor(),q_ts,q_hs,k_ts,k_hs,v_ts,v_hs);
 }
 void run_prof(torch::Tensor q,torch::Tensor k,torch::Tensor v,torch::Tensor seeds,
- torch::Tensor mk,torch::Tensor mv,torch::Tensor bias,int hs,int ah,int tiles,torch::Tensor prof,int64_t k_ts,int64_t k_hs,int64_t v_ts,int64_t v_hs) {
+ torch::Tensor mk,torch::Tensor mv,torch::Tensor bias,int hs,int ah,int tiles,torch::Tensor prof,int64_t q_ts,int64_t q_hs,int64_t k_ts,int64_t k_hs,int64_t v_ts,int64_t v_hs) {
  TORCH_CHECK(prof.is_cuda() && prof.scalar_type()==at::kLong && prof.numel()>=8,"prof tensor");
- run_impl(q,k,v,seeds,mk,mv,bias,hs,ah,tiles,prof,k_ts,k_hs,v_ts,v_hs);
+ run_impl(q,k,v,seeds,mk,mv,bias,hs,ah,tiles,prof,q_ts,q_hs,k_ts,k_hs,v_ts,v_hs);
 }
 std::vector<int> resources() {
  cudaFuncAttributes a{};C10_CUDA_CHECK(cudaFuncGetAttributes(&a,merge_kernel<AXIS_HEADS>));
  int active=0;
  C10_CUDA_CHECK(cudaFuncSetAttribute(merge_kernel<AXIS_HEADS>,cudaFuncAttributeMaxDynamicSharedMemorySize,SMEM_BYTES));
  C10_CUDA_CHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&active,merge_kernel<AXIS_HEADS>,128,SMEM_BYTES));
- return {a.numRegs,int(a.localSizeBytes),SMEM_BYTES,active,TILES,GPT};
+ return {a.numRegs,int(a.localSizeBytes),SMEM_BYTES,active,TILES,GPT,MERGE_PSI_K,MERGE_PSI_V};
 }
 PYBIND11_MODULE(TORCH_EXTENSION_NAME,m) {m.def("run",&run);m.def("run_prof",&run_prof);m.def("resources",&resources);}

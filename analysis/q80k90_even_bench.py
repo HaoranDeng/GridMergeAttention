@@ -33,6 +33,7 @@ ap.add_argument('--packed',type=int,default=1);ap.add_argument('--minblocks',typ
 ap.add_argument('--hc',type=int,default=8);ap.add_argument('--reps',type=int,default=30)
 ap.add_argument('--ref',action='store_true');ap.add_argument('--v4',action='store_true')
 ap.add_argument('--merge-flags',default='');ap.add_argument('--route-flags',default='');ap.add_argument('--select-flags',default='')
+ap.add_argument('--psi',type=int,default=1,help='merge_psi: 1 mv direct (default), 2 mk and mv direct, 0 staged')
 ap.add_argument('--tag',default='');ap.add_argument('--out',default='');ap.add_argument('--seed',type=int,default=0)
 ap.add_argument('--scale',type=float,default=1.0,help='std of the random Q/K/V entries')
 ap.add_argument('--stages-only',action='store_true');ap.add_argument('--full-only',action='store_true')
@@ -43,7 +44,7 @@ T,H=21,40;cap=args.cap;AH=args.hc
 mflags=tuple(args.merge_flags.split());rflags=tuple(args.route_flags.split());sflags=tuple(args.select_flags.split())
 tiles=args.tiles if args.tiles>0 else max(1,(merge_tiles(T,cap,args.packed)+3)//4)
 t0=time.time()
-mmod=native_merge(T,H,AH,cap,args.packed,args.minblocks,mflags)
+mmod=native_merge(T,H,AH,cap,args.packed,args.minblocks,mflags,args.psi>=2,args.psi>=1)
 rmod=native_route(T,H,AH,cap,rflags)
 smod=native_select(T,H,cap,sflags)
 lmod=native_layout(T,H)
@@ -59,7 +60,7 @@ if args.head_major:
     token_major=(q,k,v)
     q,k,v=(x.transpose(1,2).contiguous().transpose(1,2) for x in token_major);del token_major
 op=Q80K90Even(cap,head_chunk=AH,native_tiles=tiles,merge_packed=args.packed,merge_minblocks=args.minblocks,
-              merge_flags=mflags,route_flags=rflags,select_flags=sflags)
+              merge_flags=mflags,route_flags=rflags,select_flags=sflags,merge_psi=args.psi)
 t,h=op.prepare(q)
 res=op(q,k,v);torch.cuda.synchronize()
 finite=bool(torch.isfinite(res).all().item())
@@ -110,14 +111,15 @@ if args.v4:
 packed=torch.empty((h,N,128),device=dev,dtype=torch.bfloat16)
 out=torch.empty((1,N,H,128),device=dev,dtype=torch.bfloat16)
 (_,qs),(_,ks),(_,vs)=input_strides(q),input_strides(k),input_strides(v)
+qm,qms=op.merge_query(q,qs,t,h)
 def layout_only():lmod.forward(q,packed,*qs)
 def select_only():smod.run(q,k,op.table,op.seeds,*qs,*ks)
 def merge_only():
-    for hs in range(0,h,AH):mmod.run(op.packed_q,k,v,op.seeds,op.mk,op.mv,op.bias,hs,AH,tiles,*ks,*vs)
+    for hs in range(0,h,AH):mmod.run(qm,k,v,op.seeds,op.mk,op.mv,op.bias,hs,AH,tiles,*qms,*ks,*vs)
 def route_only():
     for hs in range(0,h,AH):rmod.run(q,op.mk,op.mv,op.bias,out,hs,AH,*qs)
 layout_only();torch.cuda.synchronize()
-print(f'[layout] packed matches operator copy={torch.equal(packed,op.packed_q)}',flush=True)
+if op.packed_q is not None:print(f'[layout] packed matches operator copy={torch.equal(packed,op.packed_q)}',flush=True)
 def full_call():return op(q,k,v)
 
 def timeit(fn,reps):

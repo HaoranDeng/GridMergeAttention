@@ -43,8 +43,9 @@ def _shape_flags(t,h,ah,cap):
     return [f'-DAXIS_OUTER={t}',f'-DAXIS_HEADS={h}',f'-DAXIS_ACTIVE_HEADS={ah}',f'-DAXIS_CAP={cap}']
 
 @functools.lru_cache(maxsize=32)
-def native_merge(t,h,ah,cap,packed=1,minblocks=3,extra=()):
-    return _native('merge',_shape_flags(t,h,ah,cap)+['-DAXIS_FAST_MATH=1',f'-DMERGE_PACKED={int(packed)}',f'-DMERGE_MINBLOCKS={int(minblocks)}']+list(extra))
+def native_merge(t,h,ah,cap,packed=1,minblocks=3,extra=(),psi_k=1,psi_v=1):
+    return _native('merge',_shape_flags(t,h,ah,cap)+['-DAXIS_FAST_MATH=1',f'-DMERGE_PACKED={int(packed)}',f'-DMERGE_MINBLOCKS={int(minblocks)}',
+                   f'-DMERGE_PSI_K={int(psi_k)}',f'-DMERGE_PSI_V={int(psi_v)}']+list(extra))
 
 @functools.lru_cache(maxsize=32)
 def native_route(t,h,ah,cap,extra=()):
@@ -116,10 +117,14 @@ class Q80K90Even:
     per warp pair. Every call returns a new token-major output tensor; the
     workspace is reusable on one stream (use one instance per concurrent
     stream). Inputs may be token-major or head-major (see input_strides)."""
-    def __init__(self,cap,head_chunk=8,native_tiles=None,merge_packed=1,merge_minblocks=3,merge_flags=(),route_flags=(),select_flags=()):
-        assert cap in (4,6,8,10)
+    def __init__(self,cap,head_chunk=8,native_tiles=None,merge_packed=1,merge_minblocks=3,merge_flags=(),route_flags=(),select_flags=(),merge_psi=1):
+        assert cap in (4,6,8,10) and merge_psi in (0,1,2)
         self.cap=cap;self.hc=int(head_chunk);self.nt=native_tiles
         self.packed=int(merge_packed);self.minblocks=int(merge_minblocks)
+        # merge_psi: 1 (default) = V tile psi-permuted, mv stored directly from the accumulators
+        # (bitwise identical to staging); 2 = K as well, Q gathered in place (numerics tier,
+        # worse DRAM locality on token-major Q); 0 = staged mk and mv through TMA.
+        self.psi_k=merge_psi>=2;self.psi_v=merge_psi>=1
         self.merge_flags=tuple(merge_flags);self.route_flags=tuple(route_flags);self.select_flags=tuple(select_flags)
         assert self.hc>0 and self.packed in (0,1,2)
         self.cache=None
@@ -135,13 +140,20 @@ class Q80K90Even:
             self.seeds=torch.empty((h,45,t*40,cap),device=q.device,dtype=torch.uint8)
             self.mk=torch.empty((ah,t*40,t*45,cap,128),device=q.device,dtype=torch.bfloat16);self.mv=torch.empty_like(self.mk)
             self.bias=torch.empty((ah,t*45,t*40,cap),device=q.device,dtype=torch.float32)
-            self.packed_q=torch.empty((h,n,128),device=q.device,dtype=torch.bfloat16)
+            self.packed_q=None if self.psi_k else torch.empty((h,n,128),device=q.device,dtype=torch.bfloat16)
             self.tiles=self.nt if self.nt is not None else max(1,(merge_tiles(t,cap,self.packed)+SLICES[cap]-1)//SLICES[cap])
             self.cache=key
         return t,h
 
     def merge_module(self,t,h,ah):
-        return native_merge(t,h,ah,self.cap,self.packed,self.minblocks,self.merge_flags)
+        return native_merge(t,h,ah,self.cap,self.packed,self.minblocks,self.merge_flags,self.psi_k,self.psi_v)
+
+    def merge_query(self,q,qs,t,h):
+        """(tensor, strides) the merge gathers its A fragments from: q itself with MERGE_PSI_K, else the
+        fragment-ordered copy (written here by the layout kernel) as a head-major view."""
+        if self.psi_k:return q,qs
+        native_layout(t,h).forward(q,self.packed_q,*qs)
+        return self.packed_q.view(1,h,t*3600,128).transpose(1,2),(128,t*3600*128)
 
     @torch.no_grad()
     def __call__(self,q,k,v,return_debug=False):
@@ -149,12 +161,12 @@ class Q80K90Even:
         assert k.shape==v.shape==q.shape and k.dtype==v.dtype==q.dtype and k.device==v.device==q.device
         (q,qs),(k,ks),(v,vs)=input_strides(q),input_strides(k),input_strides(v)
         with torch.cuda.device(q.device):
-            native_layout(t,h).forward(q,self.packed_q,*qs)
+            qm,qms=self.merge_query(q,qs,t,h)
             native_select(t,h,cap,self.select_flags).run(q,k,self.table,self.seeds,*qs,*ks)
             out=torch.empty((1,t*3600,h,128),device=q.device,dtype=q.dtype)
             for hs in range(0,h,self.hc):
                 ah=min(self.hc,h-hs)
-                self.merge_module(t,h,ah).run(self.packed_q,k,v,self.seeds,self.mk,self.mv,self.bias,hs,ah,self.tiles,*ks,*vs)
+                self.merge_module(t,h,ah).run(qm,k,v,self.seeds,self.mk,self.mv,self.bias,hs,ah,self.tiles,*qms,*ks,*vs)
                 native_route(t,h,ah,cap,self.route_flags).run(q,self.mk,self.mv,self.bias,out,hs,ah,*qs)
         return (out,self.seeds) if return_debug else out
 

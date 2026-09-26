@@ -163,6 +163,39 @@ attention. The first build, which copied the processor's head-major Q/K/V
 before every call and used four C4 merge slices, measured 562.82 s (56.71 ms
 per call, 2.98x).
 
+## Sustained load: why the video pipeline sees a higher per-call time
+
+Inside video generation the H200 sits at its 700 W power cap and the SM
+clock drops from 1980 MHz to about 1750 MHz (I2V) or 1600 MHz (the
+diffusers T2V pipeline, whose non-attention kernels draw more power). The
+merge and the selector are clock bound and slow down in proportion; the
+route is DRAM bound and does not (`analysis/q80k90_even_i2v_diag.py`, 800
+in-pipeline calls, then the same QKV re-timed in the same process):
+
+| I2V C8 call (ms) | select | merge | route | total | SM clock |
+|---|---:|---:|---:|---:|---:|
+| first call, cold GPU | 6.6 | 52.4 | 31.5 | 90.9 | 1980 MHz |
+| in the pipeline, steady | 8.4 | 59.5 | 32.2 | 100.5 | 1747 MHz mean |
+| same QKV isolated right after | 8.0 | 58.0 | 32.0 | 98.4 | 1706 MHz |
+| isolated after an L2 flush | 8.5 | 59.5 | 32.1 | 100.6 | |
+| isolated behind a power load | 9.2 | 61.1 | 32.4 | 102.8 | 1597 MHz |
+
+The adapter adds 0.01 ms (no copies, no fallback); the pipeline's only
+intrinsic cost is a cold L2 (about 2 ms). The 96-case protocol above
+measured 95.5 ms because the workspace release/allocation between cases
+lets the GPU cool. In sustained mode (`--sustained 3`: operators kept alive,
+three untimed calls before every timed one) the same protocol gives C8
+99.66 ms (v4 124.3, Q90K80 even 97.4, dense 327.4; 3.29x), which is the
+in-pipeline number. Per-call figures for video generation should be quoted
+from this mode. T2V C4 behaves the same (48.5 -> 54.9 ms at 1594-1615 MHz).
+
+Tried against this and closed: psi-permuted K/V tiles with direct
+register-to-global stores (`MERGE_PSI_K/V`; V direct is bitwise identical
+and kept as the default: -0.95 ms in the benchmark state, neutral under a
+power load; K direct as well -1.2 / +0.8 ms, numerics tier). Under the cap
+time tracks energy, and the merge's energy is its WGMMA work and the 130 GB
+of merged K/V it writes, neither of which a store-path change reduces.
+
 ## A/B (interleaved on one QKV, `analysis/q80k90_even_ab.py`)
 
 Adopted: three merge tile slices per (key block, head) for C4 (20 tiles per

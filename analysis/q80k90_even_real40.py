@@ -34,6 +34,7 @@ def main():
     p.add_argument('--root',type=Path,required=True);p.add_argument('--capacities',type=int,nargs='+',required=True)
     p.add_argument('--prompts',type=int,default=3);p.add_argument('--hc',type=int,default=8)
     p.add_argument('--with-q90',action='store_true',help='also time the Q90K80 even-capacity operator of the same capacity (analysis/q90k80_even_kernel.py)')
+    p.add_argument('--sustained',type=int,default=0,metavar='N',help='sustained-load mode: one capacity, operators kept alive across cases, N untimed back-to-back calls of an arm before its timed calls, no per-case cache release (the GPU stays at its power cap as in video generation)')
     a=p.parse_args()
     assert 'TORCH_EXTENSIONS_DIR' in os.environ,'set a private TORCH_EXTENSIONS_DIR'
     os.environ['WAN_MODEL_ROOT']=str(a.checkpoint.parent.parent);os.environ['WAN_SDPA_BACKEND']='flash'
@@ -71,7 +72,9 @@ def main():
     sources={'analysis/'+n:sha(a.kernels/'analysis'/n) for n in ('q80k90_even_kernel.py','q80k90_even_layout.cu','q80k90_even_select.cu','q80k90_even_merge.cu','q80k90_even_route.cu')}
     sources.update({'v4/'+n:sha(v4dir/n) for n in ('recommended.py','validated_h200_configs.json','q80k90_kernel.py','q80k90_merge.cu')})
     if q90:sources.update({'analysis/'+n:sha(a.kernels/'analysis'/n) for n in ('q90k80_even_kernel.py','q90k80_even_layout.cu','q90k80_even_select.cu','q90k80_even_merge.cu','q90k80_even_route.cu')})
-    result=dict(complete=False,layers=LAYERS,prompts=a.prompts,steps=4,heads=list(range(40)),shape=[1,75600,40,128],dtype='bfloat16',
+    if a.sustained:assert len(a.capacities)==1,'sustained mode keeps every operator alive: one capacity per run'
+    persistent={}
+    result=dict(complete=False,layers=LAYERS,prompts=a.prompts,steps=4,heads=list(range(40)),shape=[1,75600,40,128],dtype='bfloat16',sustained_heat_calls=a.sustained,
                 gpu=torch.cuda.get_device_name(),gpu_uuid=os.environ.get('CUDA_VISIBLE_DEVICES'),host=os.uname().nodename,head_chunk=a.hc,
                 source_sha256=sources,benchmark_sha256=sha(__file__),rows=[])
     state=dict(layer=None,prompt=None,step=None,call=0)
@@ -94,14 +97,15 @@ def main():
         if layer not in LAYERS:return dense
         assert q.shape==(1,75600,40,128)
         for cap in a.capacities:
-            new=even.Q80K90Even(cap,head_chunk=a.hc);old=rec.make_q80k90(cap)
+            if a.sustained and cap in persistent:new,old,other=persistent[cap]
+            else:new=even.Q80K90Even(cap,head_chunk=a.hc);old=rec.make_q80k90(cap);other=q90.Q90K80Even(cap,head_chunk=a.hc) if q90 else None
             o_new=new(q,k,v);o_old=old(q,k,v);torch.cuda.synchronize()
             assert torch.isfinite(o_new).all() and torch.isfinite(o_old).all()
             info=dict(rel_l2_new_vs_v4=rel(o_new,o_old),rel_l2_new_to_dense=rel(o_new,dense),rel_l2_v4_to_dense=rel(o_old,dense))
             del o_new,o_old
             arms=[('new',lambda:new(q,k,v)),('v4',lambda:old(q,k,v)),('dense',lambda:attention0(q,k,v,*args,**kw))]
             if q90:
-                other=q90.Q90K80Even(cap,head_chunk=a.hc);o=other(q,k,v);torch.cuda.synchronize()
+                o=other(q,k,v);torch.cuda.synchronize()
                 info.update(rel_l2_q90_to_dense=rel(o,dense));del o
                 arms.insert(2,('q90',lambda:other(q,k,v)))
             times={n:[] for n,_ in arms}
@@ -109,12 +113,14 @@ def main():
                 order=arms[repeat:]+arms[:repeat]
                 if repeat%2:order=order[::-1]
                 for name,fn in order:
+                    for _ in range(a.sustained):out=fn();del out
                     ms,out=measure(fn);times[name].append(ms);del out
             row=dict(capacity=cap,prompt=state['prompt'],step=state['step'],layer=layer,ms=times,mean_ms={n:statistics.mean(t) for n,t in times.items()},**info)
             result['rows'].append(row);save(a.root/'real40.json',result);print(json.dumps(row),flush=True)
-            del new,old,arms
-            if q90:del other
-            gc.collect();torch.cuda.empty_cache()
+            if a.sustained:persistent[cap]=(new,old,other)
+            else:
+                del new,old,other,arms
+                gc.collect();torch.cuda.empty_cache()
         return dense
     with torch.inference_mode(),patch.object(wm.WanSelfAttention,'forward',forward),patch.object(wm,'flash_attention',attention):
         for prompt in range(a.prompts):

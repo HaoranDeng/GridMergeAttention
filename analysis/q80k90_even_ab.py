@@ -21,7 +21,7 @@ os.environ.setdefault('TORCH_CUDA_ARCH_LIST','9.0a');os.environ.setdefault('MAX_
 os.environ.setdefault('TORCH_EXTENSIONS_DIR',str(HERE.parent/('.torch_ext_'+os.uname().nodename)))
 ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libstdc++.so.6',mode=ctypes.RTLD_GLOBAL)
 import torch
-from analysis.q80k90_even_kernel import Q80K90Even,native_merge,native_route,native_select,merge_tiles,input_strides
+from analysis.q80k90_even_kernel import Q80K90Even,native_merge,native_route,native_select,native_layout,merge_tiles,input_strides
 
 ap=argparse.ArgumentParser()
 ap.add_argument('--cap',type=int,required=True);ap.add_argument('--stage',choices=['merge','route','select','full'],required=True)
@@ -45,9 +45,17 @@ def make(flags,nt):
     if a.stage=='select':
         m=native_select(T,H,cap,fl);return m,(lambda:m.run(q,k,op.table,op.seeds,*S,*S))
     if a.stage=='merge':
-        m=native_merge(T,H,AH,cap,op.packed,op.minblocks,fl)
+        # MERGE_PSI_K/V in the flags override the operator's defaults; the Q operand follows PSI_K.
+        psi_k=next((f.endswith('=1') for f in fl if f.startswith('-DMERGE_PSI_K')),op.psi_k)
+        psi_v=next((f.endswith('=1') for f in fl if f.startswith('-DMERGE_PSI_V')),op.psi_v)
+        fl=tuple(f for f in fl if not f.startswith('-DMERGE_PSI_'))
+        m=native_merge(T,H,AH,cap,op.packed,op.minblocks,fl,psi_k,psi_v)
+        if psi_k:qm,qms=q,S
+        else:
+            packed=torch.empty((H,T*3600,128),device='cuda',dtype=torch.bfloat16);native_layout(T,H).forward(q,packed,*S)
+            qm,qms=packed.view(1,H,T*3600,128).transpose(1,2),(128,T*3600*128)
         def f():
-            for hs in range(0,H,AH):m.run(op.packed_q,k,v,op.seeds,op.mk,op.mv,op.bias,hs,AH,nt,*S,*S)
+            for hs in range(0,H,AH):m.run(qm,k,v,op.seeds,op.mk,op.mv,op.bias,hs,AH,nt,*qms,*S,*S)
         return m,f
     if a.stage=='route':
         m=native_route(T,H,AH,cap,fl)
