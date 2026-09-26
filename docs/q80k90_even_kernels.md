@@ -154,6 +154,21 @@ batch 1's first video paid a cold Triton cache in this account (VAE padding
 autotune); batch 2 ran warm. Non-attention time is about 290-296 s per video
 in all runs.
 
+All four capacities, five videos each (prompts 000-004, one process per
+capacity; `docs/q80k90_even_i2v5_20260925.json`; the v4 column is the
+production run on the same prompts, whose first video was also its cold one):
+
+| Capacity | Seconds per video (000-004) | Mean | v4 mean | Faster | Attention ms/call (v4) |
+|---|---|---:|---:|---:|---:|
+| C4 | 629.3, 603.2, 603.7, 602.0, 601.3 | **607.9** | 679.3 | 10.5 % | 53.6 (72.2) |
+| C6 | 751.6, 725.2, 724.0, 724.5, 724.9 | **730.0** | 882.4 | 17.3 % | 85.7 (121.8) |
+| C8 | 787.3, 781.2, 783.5, 784.6, 782.8 | **783.9** | 946.6 | 17.2 % | 98.3 (141.1) |
+| C10 | 960.4, 964.9, 958.5, 960.7, 960.5 | **961.0** | 1348.8 | 28.8 % | 143.1 (240.9) |
+
+The first video of every process is 25-30 s slower (cold caches) for both
+kernels. The in-video attention times match the sustained-mode benchmark
+above within 2-4 ms.
+
 T2V teaser (Wan2.1-T2V-14B, samples 000/015, seed 0, scai6 GPU 4, the same GPU,
 fastops and protocol as the paper's full-attention measurement; worker in the
 paper repository's `figure_sources/gca_teaser/measurements/gca_c4_even_20260925/`):
@@ -184,10 +199,18 @@ The adapter adds 0.01 ms (no copies, no fallback); the pipeline's only
 intrinsic cost is a cold L2 (about 2 ms). The 96-case protocol above
 measured 95.5 ms because the workspace release/allocation between cases
 lets the GPU cool. In sustained mode (`--sustained 3`: operators kept alive,
-three untimed calls before every timed one) the same protocol gives C8
-99.66 ms (v4 124.3, Q90K80 even 97.4, dense 327.4; 3.29x), which is the
-in-pipeline number. Per-call figures for video generation should be quoted
-from this mode. T2V C4 behaves the same (48.5 -> 54.9 ms at 1594-1615 MHz).
+three untimed calls before every timed one) the same protocol reproduces the
+in-pipeline numbers (`docs/q80k90_even_real40_sustained.json`, scai6 GPU 4):
+
+| Capacity | New (ms) | v4 (ms) | Q90K80 even (ms) | Dense (ms) | New vs dense | New - Q90K80 |
+|---|---:|---:|---:|---:|---:|---:|
+| C4 | **51.6** | 64.0 | 52.2 | 326.3 | 6.33x | -0.6 |
+| C6 | **82.3** | 110.8 | 79.4 | 326.8 | 3.97x | +2.9 |
+| C8 | **99.7** | 124.3 | 97.4 | 327.4 | 3.28x | +2.3 |
+| C10 | **139.0** | 231.6 | 132.7 | 326.0 | 2.35x | +6.3 |
+
+Per-call figures for video generation should be quoted from this mode. T2V
+C4 behaves the same (48.5 -> 54.9 ms at 1594-1615 MHz).
 
 Tried against this and closed: psi-permuted K/V tiles with direct
 register-to-global stores (`MERGE_PSI_K/V`; V direct is bitwise identical
