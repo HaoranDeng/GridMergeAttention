@@ -82,6 +82,7 @@ def supervise(a):
     env.update(CUDA_VISIBLE_DEVICES=preflight['uuid'], WAN_SDPA_BACKEND='flash',
                WAN_MODEL_ROOT=str(a.checkpoint.parent.parent), MAX_JOBS='2',
                TORCH_EXTENSIONS_DIR=str(root / 'torch_extensions'),
+               FLASHINFER_WORKSPACE_BASE=str(root / 'flashinfer_workspace'),
                TRITON_CACHE_DIR=str(root / 'triton_cache'), OMP_NUM_THREADS='4',
                PYTHONUNBUFFERED='1', TOKENIZERS_PARALLELISM='false')
     env['PATH'] = '/usr/local/cuda/bin:' + env.get('PATH', '')
@@ -145,6 +146,14 @@ def worker(a):
     source_hashes = {p.name: sha(p) for p in kdir.glob('q80k90_even_*') if p.is_file()}
     source_hashes['runner'] = sha(__file__)
     caps = CAPS[a.shard]
+    # FlashInfer's default home cache is shared across hosts but its cache key
+    # omits the CUDA toolkit version. Never load scai7 CUDA-13 binaries on scai6.
+    assert os.environ.get('FLASHINFER_WORKSPACE_BASE') == str(root / 'flashinfer_workspace')
+    stage('flashinfer_preflight')
+    from flashinfer.rope import get_rope_module
+    from flashinfer.norm import get_norm_module
+    get_rope_module()
+    get_norm_module()
     stage('compiling', capacities=caps)
     for cap in caps:
         even.native_layout(21, 40)
@@ -183,6 +192,7 @@ def worker(a):
                     seed=0, seed_policy='constant_zero_per_prompt', attention_calls_per_video=160,
                     all_layers=40, singleton_routes=0, source_sha256=source_hashes,
                     checkpoint=str(a.checkpoint), checkpoint_weights=weights,
+                    flashinfer_workspace=os.environ['FLASHINFER_WORKSPACE_BASE'],
                     gpu=read(root / 'preflight.json'), torch=torch.__version__)
     save(root / 'protocol.json', protocol)
     state = dict(layer=None, mode='gate', call=0, prompt=0, step=0, op=None)

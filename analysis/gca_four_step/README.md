@@ -52,7 +52,12 @@ CUDA_VISIBLE_DEVICES='' python analysis/gca_four_step/run.py quality --root /pat
 
 Use the corresponding shard 1 on a second GPU. Set the Python environment to
 the repository's validated `monarch_rt` environment with CUDA/CUTLASS support.
-The supervisor sets private extension and Triton cache directories. Never
+The supervisor sets private extension, Triton, and FlashInfer cache directories.
+FlashInfer's default home cache omits the CUDA toolkit version from its key;
+sharing it between scai7 (CUDA 13) and scai6 (CUDA 12.9) can load an incompatible
+`rope.so`. RoPE and normalization modules now load before the large model so
+that this environment issue fails early. This does not change the GCA kernel,
+prompt stream, or numerical protocol. Never
 reuse a completed/failed destination without explicit recovery and provenance.
 
 The 2026-09-26 campaign lives at
