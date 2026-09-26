@@ -1,0 +1,491 @@
+{
+  "dataset": "vbench_i2v_50_stratified_seed0_v1",
+  "source": "VBench/vbench2_beta_i2v/vbench2_i2v_full_info.json",
+  "source_sha256": "8cf4d34dc11779a336c216a1a71d482927cfa24a1bf736ab5c92425609f129f8",
+  "source_entries": 1118,
+  "population_unique_base_images": 355,
+  "selection": "One base prompt per distinct image; proportional image_type quotas by largest remainder; Python Random(seed), sorted categories and image names, random.sample within each category, then shuffle the selected order. No outcome-based selection or replacements.",
+  "sampling_seed": 0,
+  "generation_seed_policy": "seed = zero-based selected prompt index",
+  "prompt_text": "raw English prompt_en, no extension",
+  "population_counts": {
+    "abstract": 8,
+    "animal": 46,
+    "architecture": 40,
+    "food": 38,
+    "indoor": 21,
+    "multiple-human": 34,
+    "other": 10,
+    "plant": 23,
+    "scenery": 40,
+    "single-human": 64,
+    "transportation": 31
+  },
+  "selected_counts": {
+    "abstract": 1,
+    "animal": 7,
+    "architecture": 6,
+    "food": 5,
+    "indoor": 3,
+    "multiple-human": 5,
+    "other": 1,
+    "plant": 3,
+    "scenery": 6,
+    "single-human": 9,
+    "transportation": 4
+  },
+  "prompts_sha256": "522277ae0ea5366a501dc1f879e2409c0667c737a4bb5cedfb206fa76917d632",
+  "image_list_sha256": "294372bd1c2fefac3556e731a9740a0958878c72aee9869b03644bd1430f1e85",
+  "items": [
+    {
+      "index": 0,
+      "seed": 0,
+      "source_index": 336,
+      "prompt_en": "chinese pagoda in the middle of a snowy day",
+      "prompt_sha256": "0375df6ee78e7ba5fa56e691d986e619d3ba01e2802ca364eae9347d2de20596",
+      "image_name": "chinese pagoda in the middle of a snowy day.jpg",
+      "image_type": "architecture"
+    },
+    {
+      "index": 1,
+      "seed": 1,
+      "source_index": 902,
+      "prompt_en": "a lioness yawning in a field",
+      "prompt_sha256": "e1521626cb3a62dfdfcbb9d1d1a7e0ecd1d63150bf71e0ca9d39f3689fbaf71d",
+      "image_name": "a lioness yawning in a field.jpg",
+      "image_type": "animal"
+    },
+    {
+      "index": 2,
+      "seed": 2,
+      "source_index": 894,
+      "prompt_en": "a brown and white cow eating hay",
+      "prompt_sha256": "a46e83215d488895539f6d589afd2291c9d31c10ade24efa20fdc66aa3411ffe",
+      "image_name": "a brown and white cow eating hay.jpg",
+      "image_type": "animal"
+    },
+    {
+      "index": 3,
+      "seed": 3,
+      "source_index": 946,
+      "prompt_en": "a white and blue airplane flying in the sky",
+      "prompt_sha256": "05bb2b1b783ee44586ef6eae3d01cf9d4fd90f620081843a40b5a0c7f60e76e4",
+      "image_name": "a white and blue airplane flying in the sky.jpg",
+      "image_type": "transportation"
+    },
+    {
+      "index": 4,
+      "seed": 4,
+      "source_index": 993,
+      "prompt_en": "a young boy leaning on a wooden pole",
+      "prompt_sha256": "71b1a8994a47cb0f9a62609c4a94b6a1e46115d0d499c99b7e044f455fbd598c",
+      "image_name": "a young boy leaning on a wooden pole.jpg",
+      "image_type": "single-human"
+    },
+    {
+      "index": 5,
+      "seed": 5,
+      "source_index": 200,
+      "prompt_en": "a large wave crashes into a lighthouse",
+      "prompt_sha256": "afc3f5f1e8e448f2c8e3b3914ee1d7db0a1fbd1b546b174c04a935a381dd0d84",
+      "image_name": "a large wave crashes into a lighthouse.jpg",
+      "image_type": "architecture"
+    },
+    {
+      "index": 6,
+      "seed": 6,
+      "source_index": 1081,
+      "prompt_en": "pink water lilies in a pond",
+      "prompt_sha256": "d9ac7739955b98795e2f0faee35a4bd574dd2888d1b6570dcd0217eac9b2105d",
+      "image_name": "pink water lilies in a pond.jpg",
+      "image_type": "plant"
+    },
+    {
+      "index": 7,
+      "seed": 7,
+      "source_index": 1028,
+      "prompt_en": "an older woman is drinking a bottle of water",
+      "prompt_sha256": "abcb0047151c17376b436988b38827c13c1b4f772f68ff5910ddd935e645689c",
+      "image_name": "an older woman is drinking a bottle of water.jpg",
+      "image_type": "single-human"
+    },
+    {
+      "index": 8,
+      "seed": 8,
+      "source_index": 1057,
+      "prompt_en": "a busy street with cars and people on motorcycles",
+      "prompt_sha256": "0dc1e0e97cd29f986702fc35a5d79c922dba78096a54f762b9dcf8c77483fcc5",
+      "image_name": "a busy street with cars and people on motorcycles.jpg",
+      "image_type": "multiple-human"
+    },
+    {
+      "index": 9,
+      "seed": 9,
+      "source_index": 264,
+      "prompt_en": "a couple of wooden benches in the middle of a street",
+      "prompt_sha256": "c939a0fbbffbedf3ff61280c3344f4fd13beafc5dd42249b04d26d0a4602aa8a",
+      "image_name": "a couple of wooden benches in the middle of a street.jpg",
+      "image_type": "architecture"
+    },
+    {
+      "index": 10,
+      "seed": 10,
+      "source_index": 752,
+      "prompt_en": "sun rays shining through clouds over a lake",
+      "prompt_sha256": "b0d7a5bfabfbb67e7616dc571a696260de8f2c58279e2944d4120588f51ee6bf",
+      "image_name": "sun rays shining through clouds over a lake.jpg",
+      "image_type": "scenery"
+    },
+    {
+      "index": 11,
+      "seed": 11,
+      "source_index": 1087,
+      "prompt_en": "a woman stirring food in a pan on the stove",
+      "prompt_sha256": "7ce40f6f512f5054dd04ddde400378f6bc056fd7635f0004221ab02313668b0e",
+      "image_name": "a woman stirring food in a pan on the stove.jpg",
+      "image_type": "food"
+    },
+    {
+      "index": 12,
+      "seed": 12,
+      "source_index": 932,
+      "prompt_en": "an old rusty car sits in the middle of a field",
+      "prompt_sha256": "d91924807f5183ba9415fdcb03d71b9585563a57fa190b5183b8bcee837ca544",
+      "image_name": "an old rusty car sits in the middle of a field.jpg",
+      "image_type": "transportation"
+    },
+    {
+      "index": 13,
+      "seed": 13,
+      "source_index": 1070,
+      "prompt_en": "pink water lilies in a pond with leaves",
+      "prompt_sha256": "d1b597211968c1a4c26e8d80534dbd6cfc86603a4bd1b58225c1ddd2908f6fe2",
+      "image_name": "pink water lilies in a pond with leaves.jpg",
+      "image_type": "plant"
+    },
+    {
+      "index": 14,
+      "seed": 14,
+      "source_index": 874,
+      "prompt_en": "a sea turtle swimming in the ocean under the water",
+      "prompt_sha256": "db64c33396c73edc9a0e16ea006d14cb552ffc612f336a1507332e18b2bfbfcd",
+      "image_name": "a sea turtle swimming in the ocean under the water.jpg",
+      "image_type": "animal"
+    },
+    {
+      "index": 15,
+      "seed": 15,
+      "source_index": 978,
+      "prompt_en": "a woman with long black hair is posing for a picture",
+      "prompt_sha256": "d49881cf2e02766fb934d445a871a225505316328ef09243ec9f2878c9578f15",
+      "image_name": "a woman with long black hair is posing for a picture.jpg",
+      "image_type": "single-human"
+    },
+    {
+      "index": 16,
+      "seed": 16,
+      "source_index": 1056,
+      "prompt_en": "a woman walking down a sidewalk with a bag",
+      "prompt_sha256": "a74f17ee62eaf4f38921485293b20f55ae2d7df5ce098a18def66730cc70684d",
+      "image_name": "a woman walking down a sidewalk with a bag.jpg",
+      "image_type": "multiple-human"
+    },
+    {
+      "index": 17,
+      "seed": 17,
+      "source_index": 424,
+      "prompt_en": "an art gallery with paintings on the walls",
+      "prompt_sha256": "bd5341f10d91cf0ee2732107334964f3d34f4dbdacb602622265512b0c5eccf4",
+      "image_name": "an art gallery with paintings on the walls.jpg",
+      "image_type": "indoor"
+    },
+    {
+      "index": 18,
+      "seed": 18,
+      "source_index": 885,
+      "prompt_en": "a red panda eating bamboo in a zoo",
+      "prompt_sha256": "3950dcf3527cb7eef51ef8f249118ae8f9cdb8ed8ac0776526cd8275073995eb",
+      "image_name": "a red panda eating bamboo in a zoo.jpg",
+      "image_type": "animal"
+    },
+    {
+      "index": 19,
+      "seed": 19,
+      "source_index": 1030,
+      "prompt_en": "a woman wearing a hijab reading a book on the beach",
+      "prompt_sha256": "12a499d7c48849d1d8653285b897e48ef181cb29e051c91c040866148dd06bac",
+      "image_name": "a woman wearing a hijab reading a book on the beach.jpg",
+      "image_type": "single-human"
+    },
+    {
+      "index": 20,
+      "seed": 20,
+      "source_index": 184,
+      "prompt_en": "the town of hallstatt is surrounded by mountains and water",
+      "prompt_sha256": "d7c15ebd1c1eb7e4fdf351f7047b0f11f7e6f6a77c17499286ab3b2e5cbea877",
+      "image_name": "the town of hallstatt is surrounded by mountains and water.jpg",
+      "image_type": "architecture"
+    },
+    {
+      "index": 21,
+      "seed": 21,
+      "source_index": 1067,
+      "prompt_en": "two women carrying bowls on their heads",
+      "prompt_sha256": "2897ae2e1c4a9f3f6de1057a55ab4bc14ec753f6ad5fcc3edcb2aeaa108a8c82",
+      "image_name": "two women carrying bowls on their heads.jpg",
+      "image_type": "multiple-human"
+    },
+    {
+      "index": 22,
+      "seed": 22,
+      "source_index": 955,
+      "prompt_en": "a snowman wearing a santa hat and scarf",
+      "prompt_sha256": "6699aa799c4880a8224659896cfef467a326e14a16ada544ad67c56b7b815d21",
+      "image_name": "a snowman wearing a santa hat and scarf.jpg",
+      "image_type": "other"
+    },
+    {
+      "index": 23,
+      "seed": 23,
+      "source_index": 1044,
+      "prompt_en": "a group of motorcyclists racing on a dirt track",
+      "prompt_sha256": "812ba6b54a353b9e8bac000a8ac9984b0ce338c9879c8b0b0114c7e896860388",
+      "image_name": "a group of motorcyclists racing on a dirt track.jpg",
+      "image_type": "multiple-human"
+    },
+    {
+      "index": 24,
+      "seed": 24,
+      "source_index": 1039,
+      "prompt_en": "an indian police officer talking to an old woman",
+      "prompt_sha256": "9e86b44547b610cb51942218ce2bd766da9485b6d5bc26401323a5eafe8cca35",
+      "image_name": "an indian police officer talking to an old woman.jpg",
+      "image_type": "multiple-human"
+    },
+    {
+      "index": 25,
+      "seed": 25,
+      "source_index": 1098,
+      "prompt_en": "a pan filled with fried food",
+      "prompt_sha256": "c7348b3e7666233d3482329dadb7209e82654253be7fac858e1316790794c4ac",
+      "image_name": "a pan filled with fried food.jpg",
+      "image_type": "food"
+    },
+    {
+      "index": 26,
+      "seed": 26,
+      "source_index": 944,
+      "prompt_en": "a group of buses parked at a bus station",
+      "prompt_sha256": "3ed17062bf2a58cdbd62cbd3cec48df68bd5fa550f867286f7eb159be283124b",
+      "image_name": "a group of buses parked at a bus station.jpg",
+      "image_type": "transportation"
+    },
+    {
+      "index": 27,
+      "seed": 27,
+      "source_index": 899,
+      "prompt_en": "a large flock of birds flying in the sky",
+      "prompt_sha256": "feb08b0ac480250cab068458c91a06eb5b44529a0a069bfcbd56accf2fc67dd6",
+      "image_name": "a large flock of birds flying in the sky.jpg",
+      "image_type": "animal"
+    },
+    {
+      "index": 28,
+      "seed": 28,
+      "source_index": 994,
+      "prompt_en": "a man in a hat sitting in front of a brick oven",
+      "prompt_sha256": "cc233ed7b16d8e6460420a64f78674b45c57f1a9afce606ef9789cff0e79dbba",
+      "image_name": "a man in a hat sitting in front of a brick oven.jpg",
+      "image_type": "single-human"
+    },
+    {
+      "index": 29,
+      "seed": 29,
+      "source_index": 1099,
+      "prompt_en": "Chopsticks are slowly picking up the buns from the plastic container",
+      "prompt_sha256": "8a62ac1a38d525d44cf142cf8e9504c92e13a6094715095c6903f9c6786ad57a",
+      "image_name": "Chopsticks are slowly picking up the buns from the plastic container.jpg",
+      "image_type": "food"
+    },
+    {
+      "index": 30,
+      "seed": 30,
+      "source_index": 600,
+      "prompt_en": "fireworks in the night sky over a city",
+      "prompt_sha256": "26976ac319c81a8926716c297465646638486f98a067e7fddd8c883d98bcdb8f",
+      "image_name": "fireworks in the night sky over a city.jpg",
+      "image_type": "scenery"
+    },
+    {
+      "index": 31,
+      "seed": 31,
+      "source_index": 931,
+      "prompt_en": "an airplane is flying through the sky at sunset",
+      "prompt_sha256": "61df130b30618817469214db45dc146da931f3497a9a2798800012a0bbd7cb3d",
+      "image_name": "an airplane is flying through the sky at sunset.jpg",
+      "image_type": "transportation"
+    },
+    {
+      "index": 32,
+      "seed": 32,
+      "source_index": 584,
+      "prompt_en": "an aerial view of a group of islands in the middle of a lake",
+      "prompt_sha256": "69c590142174603ece2bff36fad837546d69cc48323da051c05b0713ef4a70d5",
+      "image_name": "an aerial view of a group of islands in the middle of a lake.jpg",
+      "image_type": "scenery"
+    },
+    {
+      "index": 33,
+      "seed": 33,
+      "source_index": 893,
+      "prompt_en": "a snake sitting on the ground next to a bowl",
+      "prompt_sha256": "4ff13721fc9882f13b683238bbd9e3cc7aa1eefef2e5095c776e11ac4f3b23f0",
+      "image_name": "a snake sitting on the ground next to a bowl.jpg",
+      "image_type": "animal"
+    },
+    {
+      "index": 34,
+      "seed": 34,
+      "source_index": 1079,
+      "prompt_en": "a field of orange flowers near the ocean'",
+      "prompt_sha256": "e9fa1305e4fa9172d0be8591353d2123b591676f47cb505d318593d513f7c36f",
+      "image_name": "a field of orange flowers near the ocean'.jpg",
+      "image_type": "plant"
+    },
+    {
+      "index": 35,
+      "seed": 35,
+      "source_index": 800,
+      "prompt_en": "an aerial view of a body of water and a beach",
+      "prompt_sha256": "0c96b6848c88e805f5f1724fa45341f7ad3a71d0aa8af55efb981df6589a6704",
+      "image_name": "an aerial view of a body of water and a beach.jpg",
+      "image_type": "scenery"
+    },
+    {
+      "index": 36,
+      "seed": 36,
+      "source_index": 120,
+      "prompt_en": "a view of a snowy mountain side with many buildings",
+      "prompt_sha256": "ebaaa17245d09277610504ae49fe6c68b8fe5e283e42851dc578fd6372c5179d",
+      "image_name": "a view of a snowy mountain side with many buildings.jpg",
+      "image_type": "architecture"
+    },
+    {
+      "index": 37,
+      "seed": 37,
+      "source_index": 980,
+      "prompt_en": "a little girl wearing a purple helmet riding a blue bike",
+      "prompt_sha256": "e3589eab6c2afca1315841c4bbd94eda95b7c126a63cd8e4957ba4c094b3e866",
+      "image_name": "a little girl wearing a purple helmet riding a blue bike.jpg",
+      "image_type": "single-human"
+    },
+    {
+      "index": 38,
+      "seed": 38,
+      "source_index": 1110,
+      "prompt_en": "a person holding a taco in their hand",
+      "prompt_sha256": "a5b3c4c2c90f2b40a4c4ab45e623c926ed92d863f3c3d00883afb03bbc47989c",
+      "image_name": "a person holding a taco in their hand.jpg",
+      "image_type": "food"
+    },
+    {
+      "index": 39,
+      "seed": 39,
+      "source_index": 608,
+      "prompt_en": "a large wave crashes into a lighthouse on a stormy day",
+      "prompt_sha256": "7ff84abc5f924747a7500475a4099e44c95486a158d82b2c6784c66246c89616",
+      "image_name": "a large wave crashes into a lighthouse on a stormy day.jpg",
+      "image_type": "scenery"
+    },
+    {
+      "index": 40,
+      "seed": 40,
+      "source_index": 360,
+      "prompt_en": "the dome of the rock in jerusalem",
+      "prompt_sha256": "91bd898a038b5dd4f725a36a416cf94f148e7ad0ad456f4af5f1ed692d907445",
+      "image_name": "the dome of the rock in jerusalem.jpg",
+      "image_type": "architecture"
+    },
+    {
+      "index": 41,
+      "seed": 41,
+      "source_index": 909,
+      "prompt_en": "a squirrel sitting on the ground eating a piece of bread",
+      "prompt_sha256": "341b9661b67c5e66f177ce01a99ea908e93dffc904ce6ae2366e403802ac3e45",
+      "image_name": "a squirrel sitting on the ground eating a piece of bread.jpg",
+      "image_type": "animal"
+    },
+    {
+      "index": 42,
+      "seed": 42,
+      "source_index": 400,
+      "prompt_en": "a living room filled with furniture next to a stone wall",
+      "prompt_sha256": "f15b0a16592e036451f862c862a6e9be14ca9db54c1b8f9b873a438dd16128b8",
+      "image_name": "a living room filled with furniture next to a stone wall.jpg",
+      "image_type": "indoor"
+    },
+    {
+      "index": 43,
+      "seed": 43,
+      "source_index": 1100,
+      "prompt_en": "a basket of french fries in a fryer",
+      "prompt_sha256": "cb5ae41dd24eb73a15c6167b16c4170840b3fc7cf621bd08789c45a8dfad7a49",
+      "image_name": "a basket of french fries in a fryer.jpg",
+      "image_type": "food"
+    },
+    {
+      "index": 44,
+      "seed": 44,
+      "source_index": 512,
+      "prompt_en": "a modern living room with wood floors and a tv",
+      "prompt_sha256": "00133aa790feaf456ca3546c53d632d9bd8254fe8908db8c2d63832f8fffeeb5",
+      "image_name": "a modern living room with wood floors and a tv.jpg",
+      "image_type": "indoor"
+    },
+    {
+      "index": 45,
+      "seed": 45,
+      "source_index": 696,
+      "prompt_en": "a lake surrounded by mountains and flowers",
+      "prompt_sha256": "05939f559621265cd735f93070e5d5e64eb9498d0327842647b17ae4dcc76d2d",
+      "image_name": "a lake surrounded by mountains and flowers.jpg",
+      "image_type": "scenery"
+    },
+    {
+      "index": 46,
+      "seed": 46,
+      "source_index": 989,
+      "prompt_en": "an old man standing in the middle of a field holding a bunch of plants",
+      "prompt_sha256": "f09602047ccaadd2cf36851adc9ff1a97aaafce960e6fb78a44c13cd98949c34",
+      "image_name": "an old man standing in the middle of a field holding a bunch of plants.jpg",
+      "image_type": "single-human"
+    },
+    {
+      "index": 47,
+      "seed": 47,
+      "source_index": 56,
+      "prompt_en": "a view of a star trail in the night sky",
+      "prompt_sha256": "f003054102b9be2665843ccdfc5f44267fb1b7c40a44b5ec40bd5e6efcb9d0b8",
+      "image_name": "a view of a star trail in the night sky.jpg",
+      "image_type": "abstract"
+    },
+    {
+      "index": 48,
+      "seed": 48,
+      "source_index": 1027,
+      "prompt_en": "a woman in a colorful shirt is cooking food",
+      "prompt_sha256": "675793ebc32955f77dbf2b2043e08fabfc4f07a6a4b52c99e062b78d50d86b47",
+      "image_name": "a woman in a colorful shirt is cooking food.jpg",
+      "image_type": "single-human"
+    },
+    {
+      "index": 49,
+      "seed": 49,
+      "source_index": 973,
+      "prompt_en": "A little girl, lost in thought, is quietly sitting on the bus",
+      "prompt_sha256": "228795ab14aab4d774702da5abc4b7b914a0ed9dfca9bb2d726ea7820673671e",
+      "image_name": "A little girl, lost in thought, is quietly sitting on the bus.jpg",
+      "image_type": "single-human"
+    }
+  ]
+}
