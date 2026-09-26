@@ -1,7 +1,12 @@
-# VBench I2V50: Dense and GMA-C4 on one H200
+# VBench I2V50: Dense and GMA-C4
 
 The user requested a newly sampled set of 50 VBench I2V prompts on 2026-09-26,
-then specified Dense followed by GMA-C4, using only one GPU.
+then specified Dense followed by GMA-C4, initially using only one GPU.
+Later on 2026-09-26, the user explicitly requested one additional GPU.
+The current execution uses two H200 GPUs: the existing Dense job continues on
+GPU2, while a separately supervised C4 job runs on GPU4. Frozen inputs and
+model code are unchanged. `parallel_plan.json` records this authorization and
+supersedes the execution/GPU assignment in the preserved original plan.
 
 ## Frozen inputs
 
@@ -31,17 +36,22 @@ under `C:/GMA/prompts/i2v/`. The campaign's `inputs/` contains identical files.
 
 ## Execution
 
-One exclusively idle H200: scai6 GPU2,
-UUID `GPU-244e87b8-5a10-aadb-858a-f0eea028dbd1`.
+Dense uses scai6 GPU2, UUID
+`GPU-244e87b8-5a10-aadb-858a-f0eea028dbd1`.
+C4 uses the additional exclusively idle scai6 GPU4, UUID
+`GPU-923ad71f-2808-6bf7-701e-dc79b7aaa38f`.
+The original Dense process is neither stopped nor restarted.
 
-1. Generate all 50 Dense videos.
-2. Validate C4 on the same GPU with native QKV from the first new input:
+1. Continue generating all 50 Dense videos on GPU2.
+2. Concurrently validate C4 on GPU4 with native QKV from the first new input:
    zero-based layers 0, 5, 10, 15, 20, 25, 30, 35, both CFG branches.
-   Preserve the existing numerical and dense-speed engineering gate.
-3. Generate all 50 GMA-C4 videos using Q80K90, exact capacity 4, all 40
+   Preserve the existing numerical and dense-speed engineering gate, measuring
+   C4 and SDPA on the same GPU4.
+3. After the gate passes, generate all 50 GMA-C4 videos on GPU4 using Q80K90, exact capacity 4, all 40
    layers and all attention calls. Per-video audits require 4,000 C4 calls,
    100 calls per layer, and zero dense self-attention calls.
-4. Evaluate completed C4 videos against their matching Dense references on
+4. The original supervisor owns CPU evaluation, starting after Dense50 finishes.
+   Evaluate completed C4 videos against their matching Dense references on
    CPU only: PSNR, SSIM and AlexNet LPIPS over all 81 frames at native output
    resolution. VBench scores remain pending.
 
@@ -51,9 +61,13 @@ identical negative prompt and BF16. Configurations differ only in attention.
 The source snapshot and all input identities are hashed and rechecked before
 model loading. No training or calibration is performed.
 
-The supervisor checks for foreign GPU processes every ten seconds. If one
-appears, it marks timings invalid and stops only its own work. It never
-borrows a second GPU or interferes with another user's process. A fresh run
+Each supervisor checks its assigned GPU for foreign processes every ten seconds.
+If one appears, it marks the relevant timings invalid and stops only its own work.
+C4 failure does not interrupt the independently supervised Dense process.
+The original supervisor delegates its later gate/C4 stages to the new owner,
+preventing duplicate C4 generation. Six CPU checks cover delegation, partial
+gate state, source-plan identity, failure propagation and GPU assignment.
+The task uses at most two GPUs and does not interfere with another user's process. A fresh run
 is required; automatic unverified resume is deliberately disabled.
 
 Remote root:
@@ -61,8 +75,11 @@ Remote root:
 
 Local result root: `C:/GMA/experiments/vbench_i2v50_seed0_20260926`.
 `stage.json`, `monitor.jsonl`, per-method `videos/runtime.json`, purity records,
-and `C4/quality_cpu/quality.json` record progress and results. GPU workers run
-sequentially; the evaluator has `CUDA_VISIBLE_DEVICES=''`.
+and `C4/quality_cpu/quality.json` record progress and results. `parallel/`
+contains the additional GPU's preflight, gate/C4 logs, monitor and status.
+GPU workers run concurrently; the evaluator has `CUDA_VISIBLE_DEVICES=''`.
+Keep Dense video timings from GPU2 separate from C4 timings on GPU4. The C4
+native gate provides a same-GPU SDPA speed comparison on GPU4.
 
 Report the 50-step FLOPs scope explicitly. Historical SVG-EAR and original
 Q45K80C8 results use different inputs and must not be reported as matched
@@ -76,5 +93,6 @@ python source/sample_inputs.py --metadata /path/to/vbench2_i2v_full_info.json --
 
 `prepare_remote.py` prepares the frozen native runtime and pinned images on
 the shared experiment filesystem. `launch.py` launches the single-GPU
-supervisor after clean-GPU and identity checks. Inspect an existing dispatch
+supervisor after clean-GPU and identity checks. `launch_parallel.py` performs
+the authorized expansion while preserving the active Dense process. Inspect an existing dispatch
 instead of launching it again.

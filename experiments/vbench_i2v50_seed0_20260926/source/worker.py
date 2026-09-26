@@ -205,8 +205,46 @@ def generate(plan, mode):
 
 
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('mode',choices=['Dense','gate','C4','quality']);a=ap.parse_args()
-    plan=read(ROOT/'experiment_plan.json');verify(plan)
+    ap=argparse.ArgumentParser();ap.add_argument('mode',choices=['Dense','gate','C4','quality'])
+    ap.add_argument('--parallel',action='store_true',help='Use the explicitly authorized C4 GPU assignment')
+    a=ap.parse_args()
+    plan=read(ROOT/'experiment_plan.json')
+    assignment_path=ROOT/'parallel_plan.json'
+    if a.parallel or (assignment_path.exists() and a.mode in ('gate','C4')):
+        assignment=read(assignment_path)
+        assert assignment['original_plan_sha256']==sha(ROOT/'experiment_plan.json')
+        assert assignment['methods']==['gate','C4'] and assignment['max_gpus']==2
+        if not a.parallel:
+            # The already-running Dense supervisor later reaches these stages.
+            # Await their new owner without loading a model or duplicating C4.
+            assert os.environ['CUDA_VISIBLE_DEVICES']==plan['gpu']['uuid']
+            marker=ROOT/'native_gate.json' if a.mode=='gate' else ROOT/'C4/generation_complete.json'
+            started=time.monotonic()
+            while not marker.exists():
+                failure=ROOT/'parallel/failure.json'
+                if failure.exists():
+                    raise RuntimeError(f'Parallel C4 failed: {read(failure)}')
+                assert time.monotonic()-started<120*3600,'Parallel stage wait exceeded 120 hours'
+                time.sleep(10)
+            result=read(marker)
+            # native_gate.json exists while the gate is still in progress.
+            while not result.get('complete'):
+                failure=ROOT/'parallel/failure.json'
+                if failure.exists():
+                    raise RuntimeError(f'Parallel C4 failed: {read(failure)}')
+                assert time.monotonic()-started<120*3600,'Parallel stage wait exceeded 120 hours'
+                time.sleep(10);result=read(marker)
+            if a.mode=='gate':
+                assert result['passed'] and result['gpu']==assignment['gpu']
+            else:
+                assert result['videos']==50
+                records=read(ROOT/'C4/videos/purity_records.json')
+                assert len(records)==50 and all(r['gpu']==assignment['gpu'] for r in records)
+            print(json.dumps(dict(event='parallel_stage_already_owned',stage=a.mode,gpu=assignment['gpu'])),flush=True)
+            return
+        assert a.mode in ('gate','C4'), 'Dense and CPU evaluation retain their original owner'
+        plan=dict(plan,gpu=assignment['gpu'])
+    verify(plan)
     sys.path.insert(0,plan['snapshot']);os.chdir(plan['snapshot'])
     quality(plan) if a.mode=='quality' else generate(plan,a.mode)
 

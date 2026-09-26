@@ -1,0 +1,35 @@
+{
+  "created_at": 1790462419.332064,
+  "authorization": "User requested one additional GPU on 2026-09-26",
+  "max_gpus": 2,
+  "methods": [
+    "gate",
+    "C4"
+  ],
+  "gpu": {
+    "host": "scai6",
+    "index": 4,
+    "uuid": "GPU-923ad71f-2808-6bf7-701e-dc79b7aaa38f",
+    "model": "NVIDIA H200"
+  },
+  "dense_gpu": {
+    "host": "scai6",
+    "index": 2,
+    "uuid": "GPU-244e87b8-5a10-aadb-858a-f0eea028dbd1",
+    "model": "NVIDIA H200"
+  },
+  "dense_pid": 202900,
+  "original_plan_sha256": "1203b1acb0865299b8cf1f5cbd77c672a2ce0fd0d3c948064ad413a4b193775a",
+  "source_sha256": {
+    "parallel_supervisor.py": "263ca2fb5d301711705f84fde0ce3dac27fbc99beedefe0b361c811f35291329",
+    "sample_inputs.py": "aeb43886da1da8e5c07d78bf2013adbf831c6cc4ae6f8efb011b158415a382df",
+    "test_parallel.py": "f9d77957f0487a7bfd91a09dd7448717896213006929139fcb47b1dc77f58846",
+    "prepare_remote.py": "340d926423f5c9eb568e057ec37a3c6c0e73a78ab7d115646269579d87534f81",
+    "launch.py": "681df1e7a303c61df23061c534c3ca459307743d6b4ebe22d8fc896e31e7bbfc",
+    "worker.py": "ac829f3957ac6fa4f7027d706d9c4cf61bb1a8f6ec98aadad7d611832a57131a",
+    "supervisor.py": "d5f04561be0a8cddc715c1366ed2dcf7908738aff10466be84cab4c7d7ca2610",
+    "launch_parallel.py": "d5cc8c7537733b8416ba43c8533a7f06e9deb4ce6ea97627245b88bf5134d066"
+  },
+  "quality_owner": "Original Dense supervisor, CPU only after Dense50 completes",
+  "timing_note": "C4 native gate measures C4 and SDPA on GPU4. Dense video timings are from GPU2; keep GPU identities separate."
+}
