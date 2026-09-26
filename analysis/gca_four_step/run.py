@@ -13,6 +13,7 @@ import math
 import os
 from pathlib import Path
 import signal
+import shutil
 import statistics
 import subprocess
 import sys
@@ -51,6 +52,18 @@ def module(name, path):
     result = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(result)
     return result
+
+
+def plan_for(a):
+    path = a.root / f'worker{a.shard}' / 'worker_plan.json'
+    if path.exists():
+        plan = read(path)
+        assert plan['worker'] == a.shard
+        assert set(plan['capacities']) <= {4, 6, 8, 10}
+        assert len(plan['indices']) == len(set(plan['indices']))
+        assert all(i in range(20) for i in plan['indices'])
+        return plan
+    return dict(worker=a.shard, capacities=CAPS[a.shard], indices=list(range(20)), include_dense=True)
 
 
 def snapshot(gpu):
@@ -145,7 +158,47 @@ def worker(a):
     v4 = module('campaign_v4', v4dir / 'recommended.py')
     source_hashes = {p.name: sha(p) for p in kdir.glob('q80k90_even_*') if p.is_file()}
     source_hashes['runner'] = sha(__file__)
-    caps = CAPS[a.shard]
+    plan = plan_for(a)
+    caps = plan['capacities']
+    reused_gate = None
+    if plan.get('reuse_gate'):
+        reused_gate = read(plan['reuse_gate'])
+        assert sha(plan['reuse_gate']) == plan['reuse_gate_sha256']
+        assert reused_gate['passed'] and reused_gate['layers'] == LAYERS
+        assert reused_gate['prompts'] == 3 and reused_gate['steps'] == 4
+        for name, digest in source_hashes.items():
+            if name != 'runner':
+                assert reused_gate['source_sha256'][name] == digest
+        assert all(str(cap) in reused_gate['summary'] for cap in caps)
+    # Optional same-host, same-Torch prebuilt cache, verified by the native
+    # source+compiler-flags digest in the module name. Copy before loading.
+    if plan.get('native_cache'):
+        assert torch.__version__ == plan['native_cache_torch']
+        assert os.uname().nodename.split('.')[0] == plan['native_cache_host']
+        original_native = even._native
+        loaded_modules = {}
+        module_objects = {}
+        def cached_native(stem, flags):
+            flags = ['-O3', '--expt-relaxed-constexpr', '-lineinfo'] + flags
+            digest = hashlib.sha256((kdir / f'q80k90_even_{stem}.cu').read_bytes() + ' '.join(flags).encode()).hexdigest()[:16]
+            name = f'q80even_{stem}_{digest}'
+            if name in module_objects:
+                return module_objects[name]
+            cached = Path(plan['native_cache']) / name / (name + '.so')
+            if not cached.exists():
+                return original_native(stem, flags[3:])
+            private = root / 'prebuilt' / (name + '.so')
+            private.parent.mkdir(exist_ok=True)
+            # A repeated call can use different Python argument spellings but
+            # the same native module. Never truncate a mapped shared library.
+            temporary = private.with_suffix('.so.tmp')
+            shutil.copy2(cached, temporary)
+            temporary.replace(private)
+            loaded_modules[name] = dict(source=str(cached), sha256=sha(private))
+            save(root / 'prebuilt_modules.json', loaded_modules)
+            module_objects[name] = module(name, private)
+            return module_objects[name]
+        even._native = cached_native
     # FlashInfer's default home cache is shared across hosts but its cache key
     # omits the CUDA toolkit version. Never load scai7 CUDA-13 binaries on scai6.
     assert os.environ.get('FLASHINFER_WORKSPACE_BASE') == str(root / 'flashinfer_workspace')
@@ -160,9 +213,36 @@ def worker(a):
         even.native_select(21, 40, cap)
         even.native_merge(21, 40, 8, cap)
         even.native_route(21, 40, 8, cap)
-        old = v4.make_q80k90(cap)
-        old.native(21, 40, min(old.hc, 40))
-        del old
+        if reused_gate is None:
+            old = v4.make_q80k90(cap)
+            old.native(21, 40, min(old.hc, 40))
+            del old
+    if reused_gate is not None:
+        stage('same_gpu_speed_gate')
+        torch.manual_seed(0)
+        q, k, v = (torch.randn(1, 75600, 40, 128, device='cuda', dtype=torch.bfloat16) for _ in range(3))
+        new_card = {}
+        for cap in caps:
+            op = even.Q80K90Even(cap)
+            functions = {'gca': lambda: op(q, k, v),
+                         'dense': lambda: wm.flash_attention(q, k, v)}
+            for fn in functions.values():
+                output = fn()
+                assert torch.isfinite(output).all()
+                del output
+            times = {name: [] for name in functions}
+            for repeat in range(5):
+                for name in (('gca', 'dense') if repeat % 2 == 0 else ('dense', 'gca')):
+                    start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+                    start.record(); output = functions[name](); end.record(); end.synchronize()
+                    times[name].append(start.elapsed_time(end)); del output
+            assert statistics.mean(times['gca']) < statistics.mean(times['dense'])
+            new_card[str(cap)] = times
+            del functions, op
+        del q, k, v
+        torch.cuda.empty_cache()
+        save(root / 'same_gpu_speed_gate.json', dict(passed=True, scope='synthetic full-shape same-GPU launch gate',
+             numerical_gate_reused=plan['reuse_gate'], source_sha256=source_hashes, times=new_card))
     prompts_path = REPO / 'prompts/MovieGenVideoBench_extended.txt'
     prompts = load_nonempty_prompts(prompts_path)
     validate_canonical_prompt_contract(prompts_path, prompts)
@@ -192,6 +272,7 @@ def worker(a):
                     seed=0, seed_policy='constant_zero_per_prompt', attention_calls_per_video=160,
                     all_layers=40, singleton_routes=0, source_sha256=source_hashes,
                     checkpoint=str(a.checkpoint), checkpoint_weights=weights,
+                    assignment=plan,
                     flashinfer_workspace=os.environ['FLASHINFER_WORKSPACE_BASE'],
                     gpu=read(root / 'preflight.json'), torch=torch.__version__)
     save(root / 'protocol.json', protocol)
@@ -245,7 +326,7 @@ def worker(a):
             stage('numerical_gate', prompt=state['prompt'], step=state['step'], cases=len(gate_rows))
         return dense
     with torch.inference_mode(), patch.object(wm.WanSelfAttention, 'forward', forward), patch.object(wm, 'flash_attention', attention):
-        for p in range(3):
+        for p in ([] if reused_gate is not None else range(3)):
             state.update(prompt=p, call=0)
             set_seed(p)  # Frozen numerical-screen stream; generation below uses constant zero.
             noise = torch.randn(list(conf.image_or_video_shape), device='cuda', dtype=torch.bfloat16)
@@ -263,6 +344,9 @@ def worker(a):
             del noise, current, predicted, conditional
         gate_summary = {}
         for cap in caps:
+            if reused_gate is not None:
+                gate_summary[str(cap)] = reused_gate['summary'][str(cap)]
+                continue
             rows = [r for r in gate_rows if r['capacity'] == cap]
             assert len(rows) == 96
             avg = {k: statistics.mean(r[k] for r in rows) for k in ('new_ms', 'dense_ms', 'rel_l2_vs_v4', 'rel_l2_vs_dense')}
@@ -271,12 +355,13 @@ def worker(a):
         save(root / 'gate.json', dict(passed=True, layers=LAYERS, prompts=3, steps=4,
              numerical_seed_policy='prompt_index', relative_l2_limit=0.01,
              tolerance_reason='engineering gate; prior maximum approximately 0.0018, not a user-mandated tolerance',
-             rows=gate_rows, summary=gate_summary, source_sha256=source_hashes))
+             rows=gate_rows, summary=gate_summary, source_sha256=source_hashes,
+             reused_from=plan.get('reuse_gate'), reused_gate_sha256=plan.get('reuse_gate_sha256')))
         gc.collect()
         torch.cuda.empty_cache()
         pipeline.vae.to('cuda')
-        dense_indices = list(range(a.shard * 10, (a.shard + 1) * 10))
-        for cap in [0] + caps:
+        dense_indices = list(range(a.shard * 10, (a.shard + 1) * 10)) if plan['include_dense'] else []
+        for cap in ([0] if plan['include_dense'] else []) + caps:
             state['mode'] = 'dense' if cap == 0 else 'gca'
             state['op'] = None if cap == 0 else even.Q80K90Even(cap)
             method = 'Dense' if cap == 0 else f'C{cap}'
@@ -286,7 +371,7 @@ def worker(a):
             runtime_path = destination / f'runtime_worker{a.shard}.json'
             assert not runtime_path.exists(), 'A fresh output is required; do not silently resume'
             records = []
-            indices = dense_indices if cap == 0 else list(range(20))
+            indices = dense_indices if cap == 0 else plan['indices']
             for index in indices:
                 stage('generating', method=method, index=index, completed=len(records), total=len(indices))
                 state['call'] = 0
@@ -322,7 +407,7 @@ def worker(a):
             state['op'] = None
             gc.collect()
             torch.cuda.empty_cache()
-    stage('generation_complete', gca_videos=40, dense_videos=10)
+    stage('generation_complete', gca_videos=len(caps) * len(plan['indices']), dense_videos=len(dense_indices))
 
 
 def quality(a):
@@ -337,23 +422,35 @@ def quality(a):
     torch.set_num_interop_threads(1)
     model = lpips.LPIPS(net='alex').to('cpu').eval()
     caps = CAPS[a.shard]
-    results = {cap: [] for cap in caps}
+    results = {}
+    for cap in caps:
+        saved = a.root / f'C{cap}/quality.json'
+        payload = read(saved) if saved.exists() else {}
+        if payload:
+            assert payload['evaluator_sha256'] == EVALUATOR_SHA
+        results[cap] = payload.get('records', [])
     deadline = time.monotonic() + 12 * 3600
     root = a.root / f'worker{a.shard}'
     while sum(map(len, results.values())) < 40:
         progress = False
         assert time.monotonic() < deadline, 'Quality wait exceeded 12 hours'
-        for worker_index in (0, 1):
+        for worker_index in (0, 1, 2, 3):
             marker = a.root / f'worker{worker_index}/completion.json'
             if marker.exists():
                 assert read(marker)['valid'], f'Generation failed: {marker}'
         for cap in caps:
             destination, reference = a.root / f'C{cap}', a.root / 'Dense'
-            runtime = destination / f'runtime_worker{a.shard}.json'
-            if not runtime.exists():
+            runtime_paths = list(destination.glob('runtime_worker*.json'))
+            if not runtime_paths:
                 continue
+            records = {}
+            for runtime in runtime_paths:
+                for record in read(runtime)['records']:
+                    index = record['index']
+                    assert index not in records, f'Duplicate generation ownership for C{cap}/{index}'
+                    records[index] = record
             done = {r['index'] for r in results[cap]}
-            for record in read(runtime)['records']:
+            for record in sorted(records.values(), key=lambda row: row['index']):
                 index = record['index']
                 if index in done:
                     continue
@@ -393,7 +490,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument('mode', choices=['supervise', 'worker', 'quality'])
     p.add_argument('--root', type=Path, required=True)
-    p.add_argument('--shard', type=int, choices=[0, 1], required=True)
+    p.add_argument('--shard', type=int, choices=[0, 1, 2, 3], required=True)
     p.add_argument('--gpu', default='0')
     p.add_argument('--checkpoint', type=Path, default=Path.home() / 'wan_models/Wan2.1-T2V-14B-StepDistill-CfgDistill/distill_model.pt')
     a = p.parse_args()

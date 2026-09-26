@@ -40,7 +40,9 @@ is `31e042f401e7c5aa64175a94b9cff87938114ab068daa944ce487efda9b07513`.
 ## Dispatch and outputs
 
 Two workers use separate exclusive H200s. Worker 0 runs C4 then C10; worker 1
-runs C6 then C8. A worker starts only after three clean GPU snapshots and
+runs C6 then C8 by default. Extra workers 2 and 3 can read explicit
+`workerN/worker_plan.json` assignments containing capacities, distinct indices,
+and `include_dense: false`. A worker starts only after three clean GPU snapshots and
 continues monitoring compute-process ownership. Foreign GPU use terminates
 only this worker's process group, preserving the foreign job and marking the
 campaign invalid. Launches never wait for a busy GPU to become idle.
@@ -67,3 +69,30 @@ Each worker writes `gate.json`, `protocol.json`, `stage.json`, GPU monitoring,
 and completion/failure markers. Each capacity writes per-video runtime and
 quality JSON alongside its videos. Dense has a runtime file per worker.
 No paper files or historical results are modified.
+
+## Additional idle H200s, 2026-09-26
+
+After the user authorized extra idle GPUs, C6/C8 were divided without changing
+prompts, seeds, kernel sources or evaluation settings:
+
+- Worker 0, scai7 GPU0: C4 and C10, both complete; GPU released.
+- Worker 1, scai6 GPU2: Dense 010--019 and C6 000--009, complete; GPU released.
+- Worker 2, scai7 GPU3: C6 010--019.
+- Worker 3, scai7 GPU7: C8 000--019.
+
+`handoff.py` stops an owned legacy worker only after its assigned runtime rows
+are persisted. Its completion marker explicitly covers the reduced assignment,
+not the original full workload. Original protocol and handoff records remain.
+The CPU evaluators resume existing metrics, combine every per-worker runtime
+file for their capacities, and reject duplicate video ownership.
+
+Extra workers reuse worker 1's completed 96-case numerical gate per capacity,
+checking the gate-file hash, every native source hash, and the fixed protocol.
+They additionally run a fresh full-shape synthetic same-GPU speed/finite gate.
+Those synthetic timings are launch diagnostics, not video runtime estimates.
+Optional prebuilt native modules require the same host and PyTorch version;
+source-plus-compiler-flags digests identify modules and binary hashes are saved.
+Each worker copies them privately and retains module objects without rewriting
+mapped libraries. A failed initial module-reload attempt produced no videos;
+its metadata is preserved under `attempt1_failed_module_reload`. The recovery
+runner is frozen as `run_parallel_v2.py` in this campaign's source directory.
