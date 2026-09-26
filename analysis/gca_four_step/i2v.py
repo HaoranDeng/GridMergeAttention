@@ -87,14 +87,30 @@ def main():
     assert torch.__version__ == '2.8.0+cu128'
     torch.empty(1, device='cuda')
     cap = plan['capacity']
+    if not plan['dense_indices'] and all((root / f'C{cap}/claims/{i:03d}').exists() for i in range(20)):
+        stage('no_unclaimed_videos', capacity=cap)
+        return
+    reused_gate = None
+    if plan.get('reuse_gate'):
+        path = Path(plan['reuse_gate'])
+        assert path.is_relative_to(root)
+        assert sha(path) == plan['reuse_gate_sha256']
+        reused_gate = read(path)
+        assert reused_gate['passed'] and reused_gate['task'] == 'I2V'
+        assert reused_gate['capacity'] == cap and reused_gate['layers'] == LAYERS
+        assert reused_gate['prompts'] == 3 and reused_gate['steps'] == 4
+        assert len(reused_gate['rows']) == 96
+        assert reused_gate['kernel_sha256'] == spec['kernel_sha256']
     stage('compiling', capacity=cap)
     even = cached_even(Path(spec['kernel_dir']), work, Path(plan['native_cache']))
     even.native_layout(21, 40)
     even.native_select(21, 40, cap)
     even.native_merge(21, 40, 8, cap)
     even.native_route(21, 40, 8, cap)
-    old = module('frozen_v4', snap / 'kernels/experimental/q80k90_c4_c12/recommended.py').make_q80k90(cap)
-    old.native(21, 40, min(old.hc, 40))
+    old = None
+    if reused_gate is None:
+        old = module('frozen_v4', snap / 'kernels/experimental/q80k90_c4_c12/recommended.py').make_q80k90(cap)
+        old.native(21, 40, min(old.hc, 40))
     op = even.Q80K90Even(cap)
     config = OmegaConf.load(root / 'dense.yaml')
     assert list(config.denoising_step_list) == [1000, 750, 500, 250]
@@ -164,17 +180,35 @@ def main():
         assert state['calls'] == (0 if mode == 'dense' else 160)
         assert tuple(video.shape) == (1, 81, 3, 720, 1280) and torch.isfinite(video).all()
         return video, elapsed, timings
-    stage('numerical_gate', capacity=cap)
-    for index in range(3):
-        video, _, _ = generate(index, 'gate')
-        del video
-        save(work / 'gate_progress.json', dict(prompts=index + 1, cases=len(gate), time=time.time()))
-    assert len(gate) == 96
-    means = {k: statistics.mean(r[k] for r in gate) for k in ('new_ms', 'dense_ms', 'rel_l2_vs_v4', 'rel_l2_vs_dense')}
-    assert means['new_ms'] < means['dense_ms'], means
+    if reused_gate is None:
+        stage('numerical_gate', capacity=cap)
+        for index in range(3):
+            video, _, _ = generate(index, 'gate')
+            del video
+            save(work / 'gate_progress.json', dict(prompts=index + 1, cases=len(gate), time=time.time()))
+        assert len(gate) == 96
+        means = {k: statistics.mean(r[k] for r in gate) for k in ('new_ms', 'dense_ms', 'rel_l2_vs_v4', 'rel_l2_vs_dense')}
+        assert means['new_ms'] < means['dense_ms'], means
+    else:
+        stage('same_gpu_speed_gate', capacity=cap)
+        torch.manual_seed(0)
+        q,k,v = (torch.randn(1,75600,40,128,device='cuda',dtype=torch.bfloat16) for _ in range(3))
+        functions = {'gca': lambda: op(q,k,v), 'dense': lambda: wm.flash_attention(q,k,v)}
+        samples = {name:[] for name in functions}
+        for name,fn in functions.items():
+            value=fn();assert torch.isfinite(value).all();del value
+        for repeat in range(5):
+            for name in (['gca','dense'] if repeat%2==0 else ['dense','gca']):
+                value,elapsed=timed(functions[name]);samples[name].append(elapsed);del value
+        assert statistics.mean(samples['gca']) < statistics.mean(samples['dense'])
+        save(work/'same_gpu_speed_gate.json',dict(passed=True,times=samples,
+             scope='synthetic full-shape same-GPU launch diagnostic'))
+        del functions,q,k,v
+        means = reused_gate['summary']
     save(work / 'gate.json', dict(passed=True, task='I2V', prompts=3, steps=4, layers=LAYERS,
          capacity=cap, rows=gate, summary=means, kernel_sha256=spec['kernel_sha256'],
-         tolerance_scope='engineering gate, not a user-mandated universal threshold', relative_l2_limit=.01))
+         tolerance_scope='engineering gate, not a user-mandated universal threshold', relative_l2_limit=.01,
+         reused_from=plan.get('reuse_gate'), reused_gate_sha256=sha(plan['reuse_gate']) if reused_gate else None))
     del old
     gc.collect(); torch.cuda.empty_cache()
     for method, indices in [('Dense', plan['dense_indices']), (f'C{cap}', list(range(20)))]:

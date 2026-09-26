@@ -40,6 +40,12 @@ Six H200 plans cover C4 (scai7 GPU0), C6 (scai6 GPU2 plus scai7 GPU3), C8
 start I2V only after their own successful T2V completion and a new clean-GPU
 preflight. Four workers divide the fresh Dense references into five inputs each.
 Multiple workers of the same capacity claim distinct remaining indices.
+After C6/C8 workers finish, four follow-up plans reuse those now-idle GPUs to
+claim remaining C4/C10 indices. These plans reuse the successful numerical
+gate from the same frozen campaign, verify its capacity/protocol/kernel hashes,
+and run a new same-GPU full-shape speed/finite check. Gate reuse is explicit in
+each worker's results. A worker exits immediately if all its indices are already
+claimed; completed videos and in-flight claims are preserved.
 
 `fleet.py` launches a frozen per-GPU plan, records the actual UUID/model and
 process group, and stops only its own processes if a foreign process appears.
