@@ -73,16 +73,55 @@ def main():
         assert sha(path) == digest, path
     sys.path.insert(0, str(root / 'source/vendor'))
     import torch
+    import imageio_ffmpeg
+    assert Path(imageio_ffmpeg.get_ffmpeg_exe()).is_file()
     torch.set_num_threads(4)
     torch.set_num_interop_threads(1)
     torch.set_grad_enabled(False)
     torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
     anchor = torch.ones(1, device='cuda')
     assert float(anchor.sum()) == 1
     spec = read(root / 'experiment_plan.json')
     sys.path.insert(0, spec['snapshot'])
     evaluator = module('frozen_i2v_quality', Path(spec['snapshot']) / 'analysis/score_videos_diffusers.py')
     model = None
+    # Verify the legacy-GPU environment against one already-frozen full-video
+    # CPU result before publishing I2V values. One check per model/environment.
+    name = (torch.cuda.get_device_name() + '_' + torch.__version__).replace(' ', '_').replace('/', '_')
+    calibration = queue / 'calibration' / name
+    calibration.parent.mkdir(exist_ok=True)
+    try:
+        calibration.mkdir()
+        owner = True
+    except FileExistsError:
+        owner = False
+    proof = calibration / 'result.json'
+    if owner:
+        try:
+            import lpips
+            model = lpips.LPIPS(net='alex').to('cuda').eval()
+            t2v = root.parent / 'gca_q80k90_4step_20260926'
+            expected = read(t2v / 'C4/quality/000.json')
+            paths = [t2v / 'Dense/000-00.mp4', t2v / 'C4/000-00.mp4']
+            hashes = [sha(p) for p in paths]
+            assert hashes == [expected['input_sha256']['reference'], expected['input_sha256']['method']]
+            measured = evaluator.score_pair(*paths, model, torch.device('cuda'))
+            delta = {k: abs(measured[k] - expected[k]) for k in ['psnr','ssim','lpips']}
+            passed = measured['frames'] == 81 and delta['psnr'] < 1e-6 and delta['ssim'] < 1e-7 and delta['lpips'] < 2e-4
+            save(proof, dict(passed=passed, delta_vs_frozen_cpu=delta, frames=81,
+                            gpu=plan['gpu'], device=torch.cuda.get_device_name(), torch=torch.__version__,
+                            input_sha256=hashes, scope='full-video environment compatibility check',
+                            tolerance='engineering comparison, not user-specified tolerance'))
+        except Exception:
+            save(proof, dict(passed=False, error=traceback.format_exc()))
+            raise
+    else:
+        until = time.monotonic() + 600
+        while not proof.exists():
+            assert time.monotonic() < until, 'Metric environment check timed out'
+            time.sleep(2)
+    assert read(proof)['passed'], read(proof)
     deadline = time.monotonic() + 6 * 3600
     completed = 0
     def stage(name, **fields):
@@ -124,6 +163,7 @@ def main():
                     assert hashes == [sha(p) for p in paths]
                     row.update(index=index, device=torch.cuda.get_device_name(), gpu=plan['gpu'],
                                torch=torch.__version__, evaluation_seconds=time.perf_counter()-started,
+                               cudnn_tf32=False, environment_validation=str(proof),
                                input_sha256=dict(reference=hashes[0], method=hashes[1]),
                                evaluator_sha256=sha(Path(spec['snapshot']) / 'analysis/score_videos_diffusers.py'),
                                frame_subsampling=False, image_resizing=False)

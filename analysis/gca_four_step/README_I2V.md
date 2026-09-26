@@ -58,7 +58,11 @@ explicit. Do not combine generation runtimes across different GPU models.
 PSNR/SSIM/LPIPS use the frozen I2V evaluator, all81 decoded frames, original
 resolution, and AlexNet LPIPS. The unchanged LPIPS package is copied into a
 campaign-local vendor directory because the VBench environment lacks it;
-package source and weight hashes are recorded. GPU metric execution is labelled
+package source and weight hashes are recorded. The matching `imageio_ffmpeg`
+decoder is also copied and hashed locally. Each GPU model/environment checks
+one full video against a frozen CPU result before publishing new I2V metrics;
+the check is numerical validation, not fitting or calibration of GCA.
+GPU metric execution is labelled
 separately from the existing T2V CPU evaluator. Input and output hashes are
 checked before and after each evaluation. No frames are sent to a language
 model. Existing T2V quality rows are preserved.
