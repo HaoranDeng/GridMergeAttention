@@ -93,7 +93,27 @@ def quality(plan):
         print(json.dumps(dict(event='quality',**row)),flush=True)
 
 
-def generate(plan, mode):
+def validate_resume(plan, out):
+    """Resume only a verified contiguous prefix with one record per saved video."""
+    assert read(out/'prompt_manifest.json')==dict(protocol=plan['protocol'],inputs=plan['input_manifest'])
+    records=read(out/'runtime.json')['records']
+    purity=read(out/'purity_records.json')
+    count=len(records)
+    assert 0<count<50 and len(purity)==count
+    assert [r['prompt_index'] for r in records]==list(range(count))
+    names=[f'{i:03d}-00.mp4' for i in range(count)]
+    assert sorted(p.name for p in out.glob('*.mp4'))==names
+    assert [r['video'] for r in purity]==names
+    for i,(record,proof) in enumerate(zip(records,purity)):
+        assert record['output']==names[i] and record['sample_index']==0
+        assert record['attention_calls']==record['full_attention_calls']==4000
+        assert proof['attention_calls']==4000 and proof['layer_calls']==[100]*40
+        assert proof['dense_self_attention_calls']==0 and proof['gpu']==plan['gpu']
+        assert sha(out/names[i])==proof['video_sha256'],names[i]
+    return purity
+
+
+def generate(plan, mode, resume=False):
     import torch
     torch.set_num_threads(4)
     torch.set_grad_enabled(False)
@@ -105,11 +125,15 @@ def generate(plan, mode):
     gate_mode = mode == 'gate'
     out = ROOT/'native_gate_probe' if gate_mode else ROOT/mode/'videos'
     out.mkdir(parents=True, exist_ok=True)
-    assert not list(out.glob('*.mp4')), 'Fresh generation only; inspect before any resume'
-    save(out/'prompt_manifest.json',dict(protocol=plan['protocol'],inputs=plan['input_manifest']))
+    if resume:
+        assert mode=='C4'
+        purity=validate_resume(plan,out)
+    else:
+        assert not list(out.glob('*.mp4')), 'Fresh generation only; inspect before any resume'
+        save(out/'prompt_manifest.json',dict(protocol=plan['protocol'],inputs=plan['input_manifest']))
+        purity=[]
     count = 0
     layers = [0]*40
-    purity = []
     gate = dict(complete=False,passed=False,layers=[0,5,10,15,20,25,30,35],capacities=[4],rows=[],gpu=plan['gpu'],
                 tolerance_note='Retain the existing engineering gate <0.02 vs previous implementation; not a user-defined universal tolerance.',
                 scope='First I2V denoising step, both CFG branches; diagnostic, no saved videos')
@@ -185,6 +209,8 @@ def generate(plan, mode):
               '--prompt_path',plan['prompt_path'],'--image_list',plan['image_list'],'--image_dir',plan['image_dir'],
               '--output_dir',str(out),'--runtime_json',str(out/'runtime.json'),'--num_videos','1' if gate_mode else '50',
               '--num_samples','1','--seed','0']
+    if resume:
+        sys.argv.append('--skip_existing')
     if gate_mode:
         try:
             gen.main()
@@ -207,8 +233,14 @@ def generate(plan, mode):
 def main():
     ap=argparse.ArgumentParser();ap.add_argument('mode',choices=['Dense','gate','C4','quality'])
     ap.add_argument('--parallel',action='store_true',help='Use the explicitly authorized C4 GPU assignment')
+    ap.add_argument('--resume',action='store_true',help='Continue a separately audited C4 prefix')
     a=ap.parse_args()
     plan=read(ROOT/'experiment_plan.json')
+    if a.resume:
+        assert a.parallel and a.mode=='C4'
+        recovery=read(ROOT/'resume_plan.json')
+        assert recovery['original_plan_sha256']==sha(ROOT/'experiment_plan.json')
+        assert recovery['native_gate_sha256']==sha(ROOT/'native_gate.json')
     assignment_path=ROOT/'parallel_plan.json'
     if a.parallel or (assignment_path.exists() and a.mode in ('gate','C4')):
         assignment=read(assignment_path)
@@ -246,7 +278,7 @@ def main():
         plan=dict(plan,gpu=assignment['gpu'])
     verify(plan)
     sys.path.insert(0,plan['snapshot']);os.chdir(plan['snapshot'])
-    quality(plan) if a.mode=='quality' else generate(plan,a.mode)
+    quality(plan) if a.mode=='quality' else generate(plan,a.mode,resume=a.resume)
 
 
 if __name__=='__main__':

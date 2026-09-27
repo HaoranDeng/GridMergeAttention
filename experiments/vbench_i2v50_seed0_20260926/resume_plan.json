@@ -1,0 +1,77 @@
+{
+  "created_at": 1790477125.100506,
+  "reason": "Foreign process ended; same GPU is exclusively idle again",
+  "archive": "/local2/denghaoran/GridMergeAttention/experiments/vbench_i2v50_seed0_20260926/parallel_interrupted_20260927T024525Z",
+  "gpu": {
+    "host": "scai6",
+    "index": 4,
+    "uuid": "GPU-923ad71f-2808-6bf7-701e-dc79b7aaa38f",
+    "model": "NVIDIA H200"
+  },
+  "dense_pid_unchanged": 202900,
+  "verified_existing_videos": 4,
+  "next_index": 4,
+  "preserved_video_hashes": {
+    "000-00.mp4": "300818e8b18ea5932aa23d779f5f53b3c78a6fe618bf708812b407da56fba0b4",
+    "001-00.mp4": "a150b9ece3364508543205b7355113d8098519f8fc6f112eeab6cf5d49ae1542",
+    "002-00.mp4": "0ba1b98601ba730c301a1061290940d20d376043d2ec191cabec44515a6fd4e1",
+    "003-00.mp4": "073901ab40e8b41913d96fd742ad2dfa471787c1bd169a8f4b7af33a5e69c5fb"
+  },
+  "original_plan_sha256": "1203b1acb0865299b8cf1f5cbd77c672a2ce0fd0d3c948064ad413a4b193775a",
+  "native_gate_sha256": "7318ecf89657ff24da08ddee35ee426797bd2eab0e9ad625b333351d0b61fc3a",
+  "last_clean_before_contention": {
+    "time": 1790466188.626575,
+    "stage": "C4",
+    "foreign_pids": [],
+    "uuid": "GPU-923ad71f-2808-6bf7-701e-dc79b7aaa38f",
+    "model": "NVIDIA H200",
+    "memory_mib": 72633,
+    "utilization": 100,
+    "pids": [
+      822055
+    ]
+  },
+  "first_foreign_check": {
+    "time": 1790466198.948035,
+    "stage": "C4",
+    "foreign_pids": [
+      912791
+    ],
+    "uuid": "GPU-923ad71f-2808-6bf7-701e-dc79b7aaa38f",
+    "model": "NVIDIA H200",
+    "memory_mib": 74721,
+    "utilization": 100,
+    "pids": [
+      822055,
+      912791
+    ]
+  },
+  "fresh_preflight": [
+    {
+      "uuid": "GPU-923ad71f-2808-6bf7-701e-dc79b7aaa38f",
+      "model": "NVIDIA H200",
+      "memory_mib": 0,
+      "utilization": 0,
+      "pids": []
+    },
+    {
+      "uuid": "GPU-923ad71f-2808-6bf7-701e-dc79b7aaa38f",
+      "model": "NVIDIA H200",
+      "memory_mib": 0,
+      "utilization": 0,
+      "pids": []
+    }
+  ],
+  "source_sha256": {
+    "parallel_supervisor.py": "f9aa441842e4e8ab9ed767640af34155be12299d991304934162549e1e0cfea2",
+    "sample_inputs.py": "aeb43886da1da8e5c07d78bf2013adbf831c6cc4ae6f8efb011b158415a382df",
+    "test_parallel.py": "d3869cba4e81f23a1b5fb77094f5c8b0536b2b87e3a25c03db9dab9b0abb901d",
+    "prepare_remote.py": "340d926423f5c9eb568e057ec37a3c6c0e73a78ab7d115646269579d87534f81",
+    "launch.py": "681df1e7a303c61df23061c534c3ca459307743d6b4ebe22d8fc896e31e7bbfc",
+    "worker.py": "d645868693a97469a418644f9f5a01d9bd2edb4b18ca5c2457ca2f4b8bd3cdcc",
+    "resume_parallel.py": "1862d50d5c701d5110a10482211f39711278c068034f42d637fb0f61be6c659d",
+    "supervisor.py": "d5f04561be0a8cddc715c1366ed2dcf7908738aff10466be84cab4c7d7ca2610",
+    "launch_parallel.py": "d5cc8c7537733b8416ba43c8533a7f06e9deb4ce6ea97627245b88bf5134d066"
+  },
+  "timing_scope": "Completed prefix was saved before the last clean check. Interrupted unsaved work has no runtime result."
+}

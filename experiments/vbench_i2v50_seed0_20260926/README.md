@@ -67,8 +67,13 @@ C4 failure does not interrupt the independently supervised Dense process.
 The original supervisor delegates its later gate/C4 stages to the new owner,
 preventing duplicate C4 generation. Six CPU checks cover delegation, partial
 gate state, source-plan identity, failure propagation and GPU assignment.
-The task uses at most two GPUs and does not interfere with another user's process. A fresh run
-is required; automatic unverified resume is deliberately disabled.
+The task uses at most two GPUs and does not interfere with another user's process.
+Unverified resume is disabled. Audited recovery can use `resume_parallel.py`
+only after the original workers have exited, the assigned GPU is clean, the
+same-GPU native gate is valid, and every retained video matches its input
+manifest, output hash, runtime row and full-layer call audit. Generation then
+skips this verified contiguous prefix while retaining the original indices
+and seeds.
 
 Remote root:
 `/local2/denghaoran/GridMergeAttention/experiments/vbench_i2v50_seed0_20260926`.
@@ -96,3 +101,18 @@ the shared experiment filesystem. `launch.py` launches the single-GPU
 supervisor after clean-GPU and identity checks. `launch_parallel.py` performs
 the authorized expansion while preserving the active Dense process. Inspect an existing dispatch
 instead of launching it again.
+
+## Interrupted C4 and audited recovery
+
+The first GPU4 attempt stopped when another compute process appeared. It saved
+four videos, indices 000-003. The interrupted attempt's logs, GPU monitor,
+failure and timing-invalid markers are preserved under the path recorded in
+`resume_plan.json`. Every retained video was saved before the last clean GPU
+check preceding the foreign process. Unsaved interrupted work has no reported
+runtime result.
+
+After GPU4 became exclusively idle again, the run resumed on that same GPU
+from index 004, seed 4, with the same frozen inputs, kernels and configuration.
+Dense's original process was preserved. The validated native gate was reused
+on the same GPU after confirming the frozen code hashes. Eleven CPU checks
+cover ownership, non-duplication and rejection of invalid resume identities.

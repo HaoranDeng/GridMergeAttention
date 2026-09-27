@@ -67,5 +67,45 @@ class OwnershipTests(unittest.TestCase):
         self.assertEqual(generate.call_args.args[0]['gpu'],self.old_gpu)
 
 
+class ResumeTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)
+        self.plan=dict(protocol={'steps':50},input_manifest=[{'index':i,'seed':i} for i in range(50)],gpu={'uuid':'c4-gpu'})
+        worker.save(self.root/'prompt_manifest.json',dict(protocol=self.plan['protocol'],inputs=self.plan['input_manifest']))
+        records=[];proof=[]
+        for i in range(2):
+            name=f'{i:03d}-00.mp4';(self.root/name).write_bytes(f'fixture-{i}'.encode())
+            records.append(dict(output=name,prompt_index=i,sample_index=0,attention_calls=4000,full_attention_calls=4000))
+            proof.append(dict(video=name,video_sha256=worker.sha(self.root/name),gpu=self.plan['gpu'],
+                              attention_calls=4000,layer_calls=[100]*40,dense_self_attention_calls=0))
+        worker.save(self.root/'runtime.json',{'records':records});worker.save(self.root/'purity_records.json',proof)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_verified_prefix_is_preserved(self):
+        before={p.name:p.read_bytes() for p in self.root.iterdir()}
+        self.assertEqual(len(worker.validate_resume(self.plan,self.root)),2)
+        self.assertEqual(before,{p.name:p.read_bytes() for p in self.root.iterdir()})
+
+    def test_changed_output_is_rejected(self):
+        (self.root/'001-00.mp4').write_bytes(b'changed')
+        with self.assertRaises(AssertionError):worker.validate_resume(self.plan,self.root)
+
+    def test_changed_seed_is_rejected(self):
+        manifest=worker.read(self.root/'prompt_manifest.json');manifest['inputs'][0]['seed']=99
+        worker.save(self.root/'prompt_manifest.json',manifest)
+        with self.assertRaises(AssertionError):worker.validate_resume(self.plan,self.root)
+
+    def test_unrecorded_video_is_rejected(self):
+        (self.root/'002-00.mp4').write_bytes(b'no audited record')
+        with self.assertRaises(AssertionError):worker.validate_resume(self.plan,self.root)
+
+    def test_incomplete_attention_calls_are_rejected(self):
+        data=worker.read(self.root/'runtime.json');data['records'][1]['attention_calls']=3999
+        worker.save(self.root/'runtime.json',data)
+        with self.assertRaises(AssertionError):worker.validate_resume(self.plan,self.root)
+
+
 if __name__=='__main__':
     unittest.main()

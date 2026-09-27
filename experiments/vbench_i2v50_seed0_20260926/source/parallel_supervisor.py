@@ -1,4 +1,5 @@
 """Run C4 on one additional H200 while the original Dense job continues."""
+import argparse
 import fcntl
 import json
 import os
@@ -14,6 +15,7 @@ CONTROL=ROOT/'parallel'
 
 
 def main():
+    ap=argparse.ArgumentParser();ap.add_argument('--resume',action='store_true');a=ap.parse_args()
     CONTROL.mkdir(exist_ok=True)
     lock=(CONTROL/'campaign.lock').open('w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     assert not (CONTROL/'launch.json').exists(),'Existing parallel launch'
@@ -22,6 +24,11 @@ def main():
     assert socket.gethostname().split('.')[0]==gpu['host']
     assert gpu['uuid']!=plan['gpu']['uuid'] and assignment['max_gpus']==2
     verify(plan)
+    if a.resume:
+        recovery=read(ROOT/'resume_plan.json');gate=read(ROOT/'native_gate.json')
+        assert recovery['original_plan_sha256']==sha(ROOT/'experiment_plan.json')
+        assert recovery['native_gate_sha256']==sha(ROOT/'native_gate.json')
+        assert gate['complete'] and gate['passed'] and gate['gpu']==gpu
     first=state(gpu);clean(first,gpu);time.sleep(2);second=state(gpu);clean(second,gpu)
     save(CONTROL/'preflight.json',dict(time=time.time(),checks=[first,second]))
     env=dict(os.environ,CUDA_VISIBLE_DEVICES=gpu['uuid'],OMP_NUM_THREADS='4',MKL_NUM_THREADS='4',
@@ -31,16 +38,19 @@ def main():
              FLASHINFER_WORKSPACE_BASE='/xuanwu-tank/east/zrl/exp-gridmergeattn/.cache/environments/monarch-rt/flashinfer_workspace',
              TORCH_EXTENSIONS_DIR=str(CONTROL/'torch_extensions'),TRITON_CACHE_DIR=str(CONTROL/'triton_cache'),
              PATH='/usr/local/cuda/bin:'+os.environ['PATH'])
-    save(CONTROL/'launch.json',dict(supervisor=os.getpid(),time=time.time(),gpu=gpu,order=['gate','C4']))
+    order=['C4'] if a.resume else ['gate','C4']
+    save(CONTROL/'launch.json',dict(supervisor=os.getpid(),time=time.time(),gpu=gpu,order=order,resume=a.resume))
     child=None
     def interrupted(signum,frame):
         raise KeyboardInterrupt(f'signal {signum}')
     signal.signal(signal.SIGTERM,interrupted)
     try:
-        for stage in ('gate','C4'):
+        for stage in order:
             clean(state(gpu),gpu)
             with (CONTROL/f'{stage}.log').open('w') as log,(CONTROL/'monitor.jsonl').open('a') as monitor:
-                child=subprocess.Popen([plan['python'],str(ROOT/'source/worker.py'),stage,'--parallel'],cwd=ROOT,env=env,
+                command=[plan['python'],str(ROOT/'source/worker.py'),stage,'--parallel']
+                if a.resume:command.append('--resume')
+                child=subprocess.Popen(command,cwd=ROOT,env=env,
                                        stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
                 save(CONTROL/'stage.json',dict(stage=stage,pid=child.pid,gpu=gpu,time=time.time()))
                 started=time.monotonic()
